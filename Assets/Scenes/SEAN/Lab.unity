@@ -184,6 +184,11 @@ PrefabInstance:
       propertyPath: m_Name
       value: Graph
       objectReference: {fileID: 0}
+    - target: {fileID: 8496710640393379280, guid: 1a6e7fdaa593e9d0f8af099028c1ffec,
+        type: 3}
+      propertyPath: m_IsActive
+      value: 0
+      objectReference: {fileID: 0}
     - target: {fileID: 8496710640393379282, guid: 1a6e7fdaa593e9d0f8af099028c1ffec,
         type: 3}
       propertyPath: m_RootOrder
@@ -254,7 +259,7 @@ GameObject:
     type: 3}
   m_PrefabInstance: {fileID: 51502599}
   m_PrefabAsset: {fileID: 0}
---- !u!208 &51502602
+--- !u!208 &51502604
 NavMeshObstacle:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -281,6 +286,21 @@ PrefabInstance:
         type: 3}
       propertyPath: m_Name
       value: Random
+      objectReference: {fileID: 0}
+    - target: {fileID: 5445703329829454168, guid: a4473890e6bff4d398c2d582451abdc5,
+        type: 3}
+      propertyPath: m_IsActive
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 5445703329829454170, guid: a4473890e6bff4d398c2d582451abdc5,
+        type: 3}
+      propertyPath: m_Enabled
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 5445703329829454170, guid: a4473890e6bff4d398c2d582451abdc5,
+        type: 3}
+      propertyPath: numberOfAgents
+      value: 6
       objectReference: {fileID: 0}
     - target: {fileID: 5445703329829454171, guid: a4473890e6bff4d398c2d582451abdc5,
         type: 3}
@@ -352,6 +372,16 @@ PrefabInstance:
   m_Modification:
     m_TransformParent: {fileID: 2116833531}
     m_Modifications:
+    - target: {fileID: 4015605920816032987, guid: 078b8440b4af04072b9968c97db03335,
+        type: 3}
+      propertyPath: m_LocalPosition.x
+      value: -18.251
+      objectReference: {fileID: 0}
+    - target: {fileID: 4015605920816032987, guid: 078b8440b4af04072b9968c97db03335,
+        type: 3}
+      propertyPath: m_LocalPosition.z
+      value: 3.515
+      objectReference: {fileID: 0}
     - target: {fileID: 5919015213110396306, guid: 078b8440b4af04072b9968c97db03335,
         type: 3}
       propertyPath: m_IsActive
@@ -1261,6 +1291,26 @@ PrefabInstance:
   m_Modification:
     m_TransformParent: {fileID: 0}
     m_Modifications:
+    - target: {fileID: 1312503935111706884, guid: 0303bdb201b5e44c5ad3c7bf43ff670e,
+        type: 3}
+      propertyPath: m_IsActive
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 1701143010541714987, guid: 0303bdb201b5e44c5ad3c7bf43ff670e,
+        type: 3}
+      propertyPath: m_IsActive
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 3090301730977536239, guid: 0303bdb201b5e44c5ad3c7bf43ff670e,
+        type: 3}
+      propertyPath: m_IsActive
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 3632510003748475981, guid: 0303bdb201b5e44c5ad3c7bf43ff670e,
+        type: 3}
+      propertyPath: m_IsActive
+      value: 0
+      objectReference: {fileID: 0}
     - target: {fileID: 7761232371977494623, guid: 0303bdb201b5e44c5ad3c7bf43ff670e,
         type: 3}
       propertyPath: m_Materials.Array.data[0]
@@ -1359,6 +1409,26 @@ PrefabInstance:
     - target: {fileID: 7761232372837294283, guid: 0303bdb201b5e44c5ad3c7bf43ff670e,
         type: 3}
       propertyPath: m_LocalEulerAnglesHint.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 7761232372837294284, guid: 0303bdb201b5e44c5ad3c7bf43ff670e,
+        type: 3}
+      propertyPath: numSFAgents
+      value: 3
+      objectReference: {fileID: 0}
+    - target: {fileID: 7761232372837294284, guid: 0303bdb201b5e44c5ad3c7bf43ff670e,
+        type: 3}
+      propertyPath: numORCAAgents
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 7761232372837294284, guid: 0303bdb201b5e44c5ad3c7bf43ff670e,
+        type: 3}
+      propertyPath: numPwDSFAgents
+      value: 2
+      objectReference: {fileID: 0}
+    - target: {fileID: 7761232372837294284, guid: 0303bdb201b5e44c5ad3c7bf43ff670e,
+        type: 3}
+      propertyPath: AgentController
       value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 8744519765961922179, guid: 0303bdb201b5e44c5ad3c7bf43ff670e,

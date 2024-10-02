@@ -11,7 +11,7 @@ namespace SEAN.Scenario.Agents
 {
     public class RandomABNavAgentManager : BaseAgentManager
     {
-        public int numberOfAgents = 65;
+        // public int numberOfAgents = 10;
         public float WAYPOINT_DIST = 1.5f;
 
         public List<IVI.INavigable> agents;
@@ -52,7 +52,14 @@ namespace SEAN.Scenario.Agents
                 }
             }
             Clear();
-            for (int i = 0; i < numberOfAgents; i++)
+
+            int numPWDSFAgents = SEAN.instance.numPwDSFAgents;
+            int numORCAAgents = SEAN.instance.numORCAAgents;
+            int numSFAgents = SEAN.instance.numSFAgents;
+            int totalAgents = numPWDSFAgents + numORCAAgents + numSFAgents;
+
+
+            for (int i = 0; i < totalAgents; i++)
             {
                 SpawnAgent("Agent_" + i, Util.Navmesh.RandomPose());
             }

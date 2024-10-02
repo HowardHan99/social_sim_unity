@@ -13,8 +13,14 @@ namespace SEAN.Editor
 
         SerializedProperty AgentControllerProperty;
         SerializedProperty ControlledAgentProperty;
+        SerializedProperty PwDControlledAgentProperty;
         SerializedProperty TopDownViewOnlyProperty;
         SerializedProperty TaskCompletionDistanceProperty;
+
+
+        SerializedProperty numSFAgentsProperty;
+        SerializedProperty numORCAAgentsProperty;
+        SerializedProperty numPWDSFAgentsProperty;
 
         void OnEnable()
         {
@@ -23,7 +29,13 @@ namespace SEAN.Editor
 
             AgentControllerProperty = serializedObject.FindProperty("AgentController");
             ControlledAgentProperty = serializedObject.FindProperty("ControlledAgent");
-            TopDownViewOnlyProperty = serializedObject.FindProperty("TopDownViewOnly");
+            TopDownViewOnlyProperty = serializedObject.FindProperty("TopDownViewOnly");   
+
+            //specify the num of agent
+            
+            numSFAgentsProperty = serializedObject.FindProperty("numSFAgents");
+            numORCAAgentsProperty = serializedObject.FindProperty("numORCAAgents");
+            numPWDSFAgentsProperty = serializedObject.FindProperty("numPwDSFAgents");
         }
 
         public override void OnInspectorGUI()
@@ -70,6 +82,18 @@ namespace SEAN.Editor
 
             serializedObject.Update();
             EditorGUILayout.PropertyField(AgentControllerProperty);
+            // Add the number of model into gui
+            EditorGUI.indentLevel++;
+            EditorGUILayout.BeginVertical("box");
+            EditorGUILayout.LabelField("Number of Each Low-Level Control", EditorStyles.boldLabel);
+
+            EditorGUILayout.PropertyField(numSFAgentsProperty, new GUIContent("SF Agents"));
+            EditorGUILayout.PropertyField(numORCAAgentsProperty, new GUIContent("ORCA Agents"));
+            EditorGUILayout.PropertyField(numPWDSFAgentsProperty, new GUIContent("PwDSF Agents"));
+
+            EditorGUILayout.EndVertical();
+            EditorGUI.indentLevel--;
+
             EditorGUILayout.PropertyField(ControlledAgentProperty);
             EditorGUILayout.PropertyField(TopDownViewOnlyProperty);
             serializedObject.ApplyModifiedProperties();

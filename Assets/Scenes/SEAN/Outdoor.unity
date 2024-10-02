@@ -777,12 +777,22 @@ PrefabInstance:
     - target: {fileID: 1312503935111706884, guid: 0303bdb201b5e44c5ad3c7bf43ff670e,
         type: 3}
       propertyPath: m_IsActive
-      value: 1
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 1701143010541714987, guid: 0303bdb201b5e44c5ad3c7bf43ff670e,
+        type: 3}
+      propertyPath: m_IsActive
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 1760104350345635349, guid: 0303bdb201b5e44c5ad3c7bf43ff670e,
         type: 3}
       propertyPath: m_IsActive
       value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 3090301730977536239, guid: 0303bdb201b5e44c5ad3c7bf43ff670e,
+        type: 3}
+      propertyPath: m_IsActive
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 5565331773775651746, guid: 0303bdb201b5e44c5ad3c7bf43ff670e,
         type: 3}
@@ -14386,7 +14396,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 909b0d22969af40c5a01eca51f4353ae, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  numberOfAgents: 65
+  numberOfAgents: 1
   WAYPOINT_DIST: 1.5
   agents: []
   groups: []
@@ -52342,7 +52352,7 @@ MonoBehaviour:
   createGroupNode: 0
   createConnection: {fileID: 0}
   radius: 2.76
-  spawnCount: 15
+  spawnCount: 1
   render: {fileID: 843088256066177253}
 --- !u!23 &843088256066177253
 MeshRenderer:
@@ -52744,7 +52754,7 @@ MonoBehaviour:
   createGroupNode: 0
   createConnection: {fileID: 0}
   radius: 2.76
-  spawnCount: 15
+  spawnCount: 1
   render: {fileID: 8077145572784931682}
 --- !u!4 &8077145572784931684
 Transform:

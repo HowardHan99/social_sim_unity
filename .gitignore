@@ -84,3 +84,12 @@ Documentation/obj
 
 # recordings
 Recordings/*
+/Assets/Scenes
+*.meta
+/Assets/Environments
+/Assets/IVI/Controllers
+*.controller
+/Assets/Resources
+/Assets/Robots
+*.meta
+Assets/Scripts/Cameras/CameraFollow.cs

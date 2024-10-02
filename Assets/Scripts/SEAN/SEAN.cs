@@ -27,6 +27,12 @@ namespace SEAN
         public Scenario.Agents.LowLevelControl AgentController;
         public Scenario.Agents.ControlledAgent ControlledAgent;
 
+        // New fields to specify the number of agents using each model
+        public int numSFAgents = 0;
+        public int numORCAAgents = 0;
+        public int numPwDSFAgents = 0;
+    
+
         public bool TopDownViewOnly = false;
         public bool PlayerControl = false;
         public bool EvaluationMode = false;
@@ -42,6 +48,7 @@ namespace SEAN
         private Control.ControlSubscriber _controller = null;
         private Metrics.Metrics _metrics = null;
         public Metrics.Metrics metrics { get { return _metrics; } }
+
 
         #region arguments
         public int RosConnectionPort = 10000;

@@ -22,4 +22,9 @@
     public const float LATERAL_DAMPENING = 5;
     public const float ROBOT_REPULSION_DAMPENING_MIN = 0.5f;
     public const float ROBOT_REPULSION_DAMPENING_MAX = 1.0f;
+
+    // public const float DESIRED_SPEED = 1.5f; // Mean desired speed
+    public const float DESIRED_SPEED_STD_DEV = 0.2f; // Standard deviation
+    public const float MIN_DESIRED_SPEED = 0.2f; // Minimum speed
+    public const float MAX_DESIRED_SPEED = 1.6f; // Maximum speed
 }

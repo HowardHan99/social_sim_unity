@@ -44,7 +44,10 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   animationController: {fileID: 9100000, guid: d3b7ebf8605e64140b49960db196f694, type: 2}
+  pwdAnimationController: {fileID: 9100000, guid: b014d50f52ca713429fdbc23927fd1d0,
+    type: 2}
   avatars:
+  - {fileID: 6004020823855633571, guid: f9f89412d43f4f34d8dae9bdd5aa10d8, type: 3}
   - {fileID: 7598931690601634740, guid: 096264169a903ea1ab0d43dda0b1080f, type: 3}
   - {fileID: 1973057334926565540, guid: b6517e622ee8f787592a4f25b896d56a, type: 3}
   - {fileID: 8820557986436698818, guid: ddb58f342d6154424a4a86f871df1832, type: 3}
@@ -66,7 +69,6 @@ MonoBehaviour:
   - {fileID: 1618935265001332696, guid: 72eafa562f6e8ee1787edba4e43f9bdf, type: 3}
   - {fileID: 5102232563050643684, guid: 90707e5433865cdf38297c3fc30058c0, type: 3}
   - {fileID: 5328327939186303173, guid: 476326cd89f539d11aa0f69c2a4f7e3d, type: 3}
-  - {fileID: 3258775371016899428, guid: f4d898c62bdf73530bd5f0e4e19b3a1a, type: 3}
   - {fileID: 6899121717694066458, guid: 51592242d63979c7a82d6fcd97e7870e, type: 3}
   - {fileID: 5296003649263992714, guid: 5fbf262fda7e5efd782d508a1591e076, type: 3}
   - {fileID: 3876841641818436369, guid: eec82c2db7e70009abd202b2f7672963, type: 3}
@@ -82,6 +84,5 @@ MonoBehaviour:
   - {fileID: 4021825357370008157, guid: 4aa5394355ef886cbb84dbd65e5c9824, type: 3}
   - {fileID: 5740475629495303944, guid: f723404bf5e79afdc9e64e322f5571cf, type: 3}
   - {fileID: 5502001187223423140, guid: 326181d652a8632a7a59d32a45a7fb38, type: 3}
-  - {fileID: 4535516779831726438, guid: 8d984c9104b977beb85ded9b4d3edc19, type: 3}
   controller: 0
   isPlayer: 0
