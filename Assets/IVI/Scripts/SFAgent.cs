@@ -14,7 +14,7 @@ namespace IVI
 
         //NEIGHBORS
         private HashSet<GameObject> neighbors = new HashSet<GameObject>();
-        private HashSet<GameObject> obstacles = new HashSet<GameObject>();
+        private HashSet<GameObject> fixed_obstacles = new HashSet<GameObject>();
 
         // Neighbor Computed Values
         Dictionary<int, Vector3> closestPoints;
@@ -24,6 +24,8 @@ namespace IVI
 
         //ROBOT REPULSION
         private float robotRepulsion;
+
+        public float desiredSpeed;
 
         protected override void Start()
         {
@@ -47,6 +49,13 @@ namespace IVI
             perceptionSphere.radius = PERCEPTION_RADIUS;
 
             robotRepulsion = Random.value * (Parameters.ROBOT_REPULSION_DAMPENING_MAX - Parameters.ROBOT_REPULSION_DAMPENING_MIN) + Parameters.ROBOT_REPULSION_DAMPENING_MIN;
+
+            float meanSpeed = Parameters.DESIRED_SPEED; // Or any preferred mean value
+            float stdDevSpeed = 0.2f; // Adjust the standard deviation as needed
+
+            desiredSpeed = SampleGaussian(meanSpeed, stdDevSpeed);
+            desiredSpeed = Mathf.Clamp(desiredSpeed, Parameters.MIN_DESIRED_SPEED, Parameters.MAX_DESIRED_SPEED);
+
         }
 
         protected override Vector3 UpdateVelocity()
@@ -73,9 +82,9 @@ namespace IVI
             {
                 neighbors.Add(other.gameObject);
             }
-            else if (other.gameObject.GetComponent<BoxCollider>() != null &&/* other.gameObject.GetComponent<Renderer>() != null &&*/ !obstacles.Contains(other.gameObject))
+            else if (other.gameObject.GetComponent<BoxCollider>() != null &&/* other.gameObject.GetComponent<Renderer>() != null &&*/ !fixed_obstacles.Contains(other.gameObject))
             {
-                obstacles.Add(other.gameObject);
+                fixed_obstacles.Add(other.gameObject);
             }
         }
 
@@ -90,9 +99,9 @@ namespace IVI
             {
                 neighbors.Remove(other.gameObject);
             }
-            if (obstacles.Contains(other.gameObject))
+            if (fixed_obstacles.Contains(other.gameObject))
             {
-                obstacles.Remove(other.gameObject);
+                fixed_obstacles.Remove(other.gameObject);
             }
         }
 
@@ -104,7 +113,7 @@ namespace IVI
             //print("AgentForce: '" + totalForce.force + "'");
             totalForce.force += CalculateGoalForce();
             //print("AgentForce + GoalForce: '" + totalForce.force + "'");
-            totalForce.force += CalculateWallForce();
+            totalForce.force += oldCalculateWallForce();
             //print("AgentForce + GoalForce + WallForce: '" + totalForce.force + "'");
 
             #region Limit Backward/Lateral Motion
@@ -137,11 +146,21 @@ namespace IVI
             return totalForce;
         }
 
+        private float SampleGaussian(float mean, float stdDev)
+        {
+            float u1 = UnityEngine.Random.value; // Uniform(0,1] random doubles
+            float u2 = UnityEngine.Random.value;
+            float randStdNormal = Mathf.Sqrt(-2.0f * Mathf.Log(u1)) *
+                                  Mathf.Sin(2.0f * Mathf.PI * u2); // Random normal(0,1)
+            float randNormal = mean + stdDev * randStdNormal; // Random normal(mean,stdDev^2)
+            return randNormal;
+        }
+
         private Vector3 CalculateGoalForce()
         {
             var temp = nearestGoalPoint - transform.position;
             temp.y = 0;
-            var desiredVel = temp.normalized * Parameters.DESIRED_SPEED;
+            var desiredVel = temp.normalized * desiredSpeed;
             return MASS * (desiredVel - velocity) / Parameters.T;
         }
 
@@ -207,10 +226,11 @@ namespace IVI
             return agentForce;
         }
 
-        private Vector3 CalculateWallForce()
+
+        private Vector3 oldCalculateWallForce()
         {
             closestPoints = new Dictionary<int, Vector3>();
-            foreach (var obstacle in obstacles)
+            foreach (var obstacle in fixed_obstacles)
             {
                 var obsBounds = obstacle.GetComponent<BoxCollider>().bounds;
                 var agentBounds = GetComponentInChildren<Renderer>().bounds;
@@ -238,7 +258,7 @@ namespace IVI
             var wallForce = Vector3.zero;
             foreach (var closestPoint in closestPoints.Values)
             {
-                //Debug.DrawLine(transform.position + Vector3.up, new Vector3() { x = closestPoint.x, y = transform.position.y, z = closestPoint.z } + Vector3.up, Color.green);
+                Debug.DrawLine(transform.position + Vector3.up, new Vector3() { x = closestPoint.x, y = transform.position.y, z = closestPoint.z } + Vector3.up, Color.green);
 
                 var wallNorm = transform.position - closestPoint;
                 wallNorm.y = 0;
@@ -251,6 +271,79 @@ namespace IVI
             }
 
             return wallForce;
+        }
+
+        private Vector3 CalculateWallForce()
+        {
+            closestPoints = new Dictionary<int, Vector3>();
+            Dictionary<int, float> closestPointMultipliers = new Dictionary<int, float>();
+
+            foreach (var obstacle in fixed_obstacles)
+            {
+                var obsBounds = obstacle.GetComponent<BoxCollider>().bounds;
+                var agentBounds = GetComponentInChildren<Renderer>().bounds;
+                var boundVolume = (obsBounds.max.x - obsBounds.min.x) * (obsBounds.max.y - obsBounds.min.y) * (obsBounds.max.z - obsBounds.min.z);
+                var invalid = obsBounds.max.y < agentBounds.min.y + 0.1f || obsBounds.min.y > agentBounds.max.y;
+                if (invalid)
+                {
+                    continue;
+                }
+
+                Vector3 closestPoint = obstacle.GetComponent<BoxCollider>().ClosestPoint(transform.position);
+                int bin = (int)((Vector3.SignedAngle(transform.forward, closestPoint - transform.position, Vector3.up) + 180) / (360 / OBSTACLE_ANGLE_BINS)) % OBSTACLE_ANGLE_BINS;
+
+                float multiplier = GetObstacleMultiplier(obstacle);
+
+                if (closestPoints.ContainsKey(bin))
+                {
+                    if ((closestPoints[bin] - transform.position).sqrMagnitude > (closestPoint - transform.position).sqrMagnitude)
+                        closestPoints[bin] = closestPoint;
+                    closestPointMultipliers[bin] = multiplier;
+                }
+                else
+                {
+                    closestPoints[bin] = closestPoint;
+                    closestPointMultipliers[bin] = multiplier;
+
+                }
+            }
+
+            var wallForce = Vector3.zero;
+            foreach (var bin in closestPoints.Keys)
+            {
+                //Debug.DrawLine(transform.position + Vector3.up, new Vector3() { x = closestPoint.x, y = transform.position.y, z = closestPoint.z } + Vector3.up, Color.green);
+
+                Vector3 closestPoint = closestPoints[bin];
+                float multiplier = closestPointMultipliers[bin];
+
+                var wallNorm = transform.position - closestPoint;
+                wallNorm.y = 0;
+                var overlap = RADIUS - wallNorm.magnitude;
+
+                // wallForce += multiplier * Parameters.WALL_A * Mathf.Exp(overlap / Parameters.WALL_B) * wallNorm.normalized;
+
+                wallForce += Parameters.WALL_A * Mathf.Exp(overlap / Parameters.WALL_B) * wallNorm;
+
+                //var tangent = new Vector3(-wallNorm.z, 0, wallNorm.x);
+                //wallForce += Parameters.WALL_KAPPA * (overlap > 0f ? overlap : 0) * Vector3.Dot(GetVelocity(), tangent) * tangent;
+            }
+
+            return wallForce;
+        }
+
+        private static float GetObstacleMultiplier(GameObject obstacle)
+        {
+            //default multiplier set to none
+            float multiplier = 0;
+
+            // Check if the obstacle has the CustomObstacle component
+            customObstacle customObstacle = obstacle.GetComponent<customObstacle>();
+            if (customObstacle != null)
+            {
+                multiplier = customObstacle.disabledMultiplier;
+            }
+
+            return multiplier;
         }
 
         #endregion
