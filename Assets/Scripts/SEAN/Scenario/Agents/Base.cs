@@ -24,6 +24,8 @@ namespace SEAN.Scenario.Agents
         protected Rigidbody rb;
         protected CapsuleCollider collisionCapsule;
 
+        public static Dictionary<GameObject, Base> GO2Agent = new Dictionary<GameObject, Base>();
+
         //ANIMATION
         public Vector3 velocity { get; protected set; }
         private float animationScale = 1.0f;

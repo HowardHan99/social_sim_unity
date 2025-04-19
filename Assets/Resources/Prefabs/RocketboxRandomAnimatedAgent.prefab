@@ -44,6 +44,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   animationController: {fileID: 9100000, guid: d3b7ebf8605e64140b49960db196f694, type: 2}
+  pwdAnimationController: {fileID: 9100000, guid: b014d50f52ca713429fdbc23927fd1d0,
+    type: 2}
   avatars:
   - {fileID: 7598931690601634740, guid: 096264169a903ea1ab0d43dda0b1080f, type: 3}
   - {fileID: 1973057334926565540, guid: b6517e622ee8f787592a4f25b896d56a, type: 3}
@@ -83,5 +85,7 @@ MonoBehaviour:
   - {fileID: 5740475629495303944, guid: f723404bf5e79afdc9e64e322f5571cf, type: 3}
   - {fileID: 5502001187223423140, guid: 326181d652a8632a7a59d32a45a7fb38, type: 3}
   - {fileID: 4535516779831726438, guid: 8d984c9104b977beb85ded9b4d3edc19, type: 3}
+  pwdAvatarPrefab: {fileID: 6004020823855633571, guid: f9f89412d43f4f34d8dae9bdd5aa10d8,
+    type: 3}
   controller: 0
   isPlayer: 0

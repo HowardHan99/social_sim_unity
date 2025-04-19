@@ -47,7 +47,8 @@ public class RGBCameraPublisher : BaseCameraPublisher
             if (SystemInfo.supportsAsyncGPUReadback && EnableOffscreenRendering)
             {
                 UnityEngine.Rendering.AsyncGPUReadbackRequest request = UnityEngine.Rendering.AsyncGPUReadback.Request(texturePixels, 0);
-                while (!request.done)
+                //Added a check for request.hasError to prevent the loop from continuing if there is an error, delete it if the proogram has issues.
+                while (!request.done && !request.hasError)
                 {
                     yield return new WaitForEndOfFrame();
                 }

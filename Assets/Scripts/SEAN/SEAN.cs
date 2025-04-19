@@ -27,6 +27,9 @@ namespace SEAN
         public Scenario.Agents.LowLevelControl AgentController;
         public Scenario.Agents.ControlledAgent ControlledAgent;
 
+        // New field to specify the number of PWD agents
+        public int numPwDSFAgents = 0;
+
         public bool TopDownViewOnly = false;
         public bool PlayerControl = false;
         public bool EvaluationMode = false;

@@ -15,6 +15,7 @@ namespace SEAN.Editor
         SerializedProperty ControlledAgentProperty;
         SerializedProperty TopDownViewOnlyProperty;
         SerializedProperty TaskCompletionDistanceProperty;
+        SerializedProperty NumPwDSFAgentsProperty;
 
         void OnEnable()
         {
@@ -24,6 +25,7 @@ namespace SEAN.Editor
             AgentControllerProperty = serializedObject.FindProperty("AgentController");
             ControlledAgentProperty = serializedObject.FindProperty("ControlledAgent");
             TopDownViewOnlyProperty = serializedObject.FindProperty("TopDownViewOnly");
+            NumPwDSFAgentsProperty = serializedObject.FindProperty("numPwDSFAgents");
         }
 
         public override void OnInspectorGUI()
@@ -72,6 +74,7 @@ namespace SEAN.Editor
             EditorGUILayout.PropertyField(AgentControllerProperty);
             EditorGUILayout.PropertyField(ControlledAgentProperty);
             EditorGUILayout.PropertyField(TopDownViewOnlyProperty);
+            EditorGUILayout.PropertyField(NumPwDSFAgentsProperty, new GUIContent("Number of PWD SF Agents"));
             serializedObject.ApplyModifiedProperties();
 
 

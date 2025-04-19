@@ -1,11 +1,11 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 using UnityEngine.AI;
 
 namespace IVI
 {
-    public class SFAgent : SEAN.Scenario.Agents.Base
+    public class SFPWDAgent : SEAN.Scenario.Agents.Base
     {
 
         private const int OBSTACLE_ANGLE_BINS = 6;
@@ -25,6 +25,11 @@ namespace IVI
 
         //ROBOT REPULSION
         private float robotRepulsion;
+
+        // PWD PERSONAL RADIUS
+        public float pwdPersonalRadius = 2*RADIUS;
+
+
 
         protected override void Start()
         {
@@ -155,62 +160,33 @@ namespace IVI
                 if (GO2Agent.ContainsKey(n))
                 {
                     MonoBehaviour neighbor = GO2Agent[n];
+                    //Debug.DrawLine(transform.position, neighbor.gameObject.transform.position, Color.red);
+
                     Vector3 dir = Vector3.zero;
                     float overlap = 0;
-                    float dampenFactor = 1f; // Initialize dampenFactor
-                    float neighborRadius = RADIUS; // Default neighbor radius
+                    float dampenFactor = 0;
 
-                    // Check if the neighbor is a PWD agent
-                    SFPWDAgent pwdNeighbor = null;
                     if (neighbor != null)
-                    {
-                        pwdNeighbor = neighbor as SFPWDAgent;
-                    }
-
-                    if (neighbor != null) // It's another agent
                     {
                         dir = transform.position - neighbor.transform.position;
                         dir.y = 0;
-
-                        if (pwdNeighbor != null)
-                        {
-                            // Neighbor is PWD Agent: Use its specific larger radius
-                            // Ensure SFPWDAgent has a public float pwdPersonalRadius;
-                            neighborRadius = pwdNeighbor.pwdPersonalRadius; 
-                        }
-                        else
-                        {
-                            // Neighbor is a standard agent (or unknown type deriving from Base)
-                            // We could potentially check other specific agent types here if needed
-                            neighborRadius = RADIUS; // Assuming other agents use the standard RADIUS
-                        }
-                        
-                        // Calculate overlap using this agent's RADIUS and the determined neighborRadius
-                        overlap = (RADIUS + neighborRadius) - dir.magnitude;
+                        overlap = 2 * pwdPersonalRadius - dir.magnitude;
                         dir = dir.normalized;
-                        // dampenFactor = 1f; // Already initialized
+                        dampenFactor = 1f;
                     }
-                    else // It's the robot
+                    else
                     {
                         SEAN.Scenario.Robot robot = n.GetComponent<SEAN.Scenario.Robot>();
-                        if (robot != null) // Check component exists
-                        {
-                            dir = transform.position - robot.transform.position;
-                            dir.y = 0;
-                            overlap = (RADIUS + ROBOT_RADIUS) - dir.magnitude;
-                            dir = dir.normalized;
-                            neighbor = robot; // Keep reference for later use
-                            var robotRB = robot.GetComponentInChildren<Rigidbody>();
-                            dampenFactor = robotRB.velocity.magnitude > 0.1f ? robotRepulsion : 1f;
-                        } else {
-                            // Invalid entry in GO2Agent if neighbor is null and not Robot
-                            continue;
-                        }
+                        dir = transform.position - robot.transform.position;
+                        dir.y = 0;
+                        overlap = (pwdPersonalRadius + ROBOT_RADIUS) - dir.magnitude;
+                        dir = dir.normalized;
+                        neighbor = robot;
+                        var robotRB = robot.GetComponentInChildren<Rigidbody>();
+                        dampenFactor = robotRB.velocity.magnitude > 0.1f ? robotRepulsion : 1f;
                     }
-
-                    // --- Keep the rest of the force calculation logic --- 
                     Vector3 goalDir = (nearestGoalPoint - transform.position).normalized;
-                    var neighborAvatar = neighbor.GetComponent<SEAN.Scenario.Agents.Base>(); // Can be null for Robot
+                    var neighborAvatar = neighbor.GetComponent<SEAN.Scenario.Agents.Base>();
                     var neighborDir = (neighborAvatar == null ? neighbor.transform.forward : neighborAvatar.velocity) - velocity;
 
                     overlap += 0.5f;
@@ -293,7 +269,7 @@ namespace IVI
             // Display the explosion radius when selected
             
             // Draw lines to neighbors
-            foreach (GameObject n in neighbors) 
+            foreach (GameObject n in neighbors)
             {
                 if (GO2Agent.ContainsKey(n))
                 {

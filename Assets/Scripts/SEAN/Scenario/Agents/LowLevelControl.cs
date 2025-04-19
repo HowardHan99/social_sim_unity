@@ -3,6 +3,7 @@
     public enum LowLevelControl
     {
         SF,
-        ORCA
+        ORCA,
+        PWDSF,
     }
 }
