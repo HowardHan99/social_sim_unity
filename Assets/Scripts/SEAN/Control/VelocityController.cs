@@ -20,11 +20,76 @@ namespace SEAN.Control
         public float P = 1, I = 1, D = 1;
         private float integral, lastError;
 
+        // Manual control variables
+        private bool manualControlActive = false;
+        public float manualLinearSpeed = 2.0f;
+        public float manualAngularSpeed = 2.0f;
+
         protected void Start()
         {
             base.Start();
             rb = sean.robot.base_link.GetComponent<Rigidbody>();
             // ROSConnection.instance.Subscribe<RosMessageTypes.Geometry.MTwist>(Topic, CmdVelMessage);
+        }
+
+        private void Update()
+        {
+            // Toggle manual control with left shift
+            if (UnityEngine.Input.GetKeyDown(KeyCode.LeftShift))
+            {
+                manualControlActive = !manualControlActive;
+                if (manualControlActive)
+                {
+                    Debug.Log("Manual control activated");
+                }
+                else
+                {
+                    Debug.Log("ROS control activated");
+                }
+            }
+
+            // Process manual control input
+            if (manualControlActive)
+            {
+                HandleManualInput();
+            }
+        }
+
+        private void HandleManualInput()
+        {
+            // WASD control
+            targetLinVelocity = 0;
+            targetAngVelocity = 0;
+
+            // Forward/Backward
+            if (UnityEngine.Input.GetKey(KeyCode.W))
+            {
+                targetLinVelocity = manualLinearSpeed;
+            }
+            else if (UnityEngine.Input.GetKey(KeyCode.S))
+            {
+                targetLinVelocity = -manualLinearSpeed;
+            }
+
+            // Turning
+            if (UnityEngine.Input.GetKey(KeyCode.A))
+            {
+                targetAngVelocity = manualAngularSpeed;
+            }
+            else if (UnityEngine.Input.GetKey(KeyCode.D))
+            {
+                targetAngVelocity = -manualAngularSpeed;
+            }
+
+            // Stop with H key
+            if (UnityEngine.Input.GetKey(KeyCode.H))
+            {
+                targetLinVelocity = 0;
+                targetAngVelocity = 0;
+            }
+
+            // Update timestamp to prevent timeout in FixedUpdate
+            lastMessageTS = Time.time;
         }
 
         private void FixedUpdate()
@@ -42,7 +107,8 @@ namespace SEAN.Control
             //    rb.AddRelativeTorque(Pid(targetAngVelocity, rb.transform.forward * rb.angularVelocity, Time.deltaTime));
             //}
 
-            if (Time.time - lastMessageTS > maxTimeDeltaSec)
+            // Only check for ROS message timeout if not in manual control
+            if (!manualControlActive && Time.time - lastMessageTS > maxTimeDeltaSec)
             {
                 targetAngVelocity = targetLinVelocity = 0;
             }
@@ -72,9 +138,14 @@ namespace SEAN.Control
             // print("in callback message");
             if (msg == null) { return; }
             if (rb == null) { return; }
-            targetLinVelocity = (float)msg.linear.x;
-            targetAngVelocity = (float)msg.angular.z;
-            lastMessageTS = Time.time;
+            
+            // Only update velocity from ROS when manual control is not active
+            if (!manualControlActive)
+            {
+                targetLinVelocity = (float)msg.linear.x;
+                targetAngVelocity = (float)msg.angular.z;
+                lastMessageTS = Time.time;
+            }
         }
 
         private float Pid(float setpoint, float actual, float timeFrame)
