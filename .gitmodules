@@ -1,3 +1,6 @@
 [submodule "Assets/ExternalAssets/Microsoft-Rocketbox"]
 	path = Assets/ExternalAssets/Microsoft-Rocketbox
 	url = https://github.com/yale-img/Microsoft-Rocketbox.git
+[submodule "Assets/Rerun"]
+	path = Assets/Rerun
+	url = https://github.com/HowardHan99/RerunPublicRobot
