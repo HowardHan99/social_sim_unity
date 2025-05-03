@@ -86,31 +86,31 @@ public class FreeCamera : MonoBehaviour
         transform.position += moveDelta * moveSpeed * Time.deltaTime;
 
 
-        if (looking)
-        {
-            float newRotationX = transform.localEulerAngles.y + Input.GetAxis("Mouse X") * freeLookSensitivity;
-            float newRotationY = transform.localEulerAngles.x - Input.GetAxis("Mouse Y") * freeLookSensitivity;
-            transform.localEulerAngles = new Vector3(newRotationY, newRotationX, 0f);
-        }
+        // if (looking)
+        // {
+        //     float newRotationX = transform.localEulerAngles.y + Input.GetAxis("Mouse X") * freeLookSensitivity;
+        //     float newRotationY = transform.localEulerAngles.x - Input.GetAxis("Mouse Y") * freeLookSensitivity;
+        //     transform.localEulerAngles = new Vector3(newRotationY, newRotationX, 0f);
+        // }
 
-        float axis = Input.GetAxis("Mouse ScrollWheel");
-        if (axis > 0)
-        {
-            GetComponent<Camera>().fieldOfView--;
-        }
-        else if (axis < 0)
-        {
-            GetComponent<Camera>().fieldOfView++;
-        }
+        // float axis = Input.GetAxis("Mouse ScrollWheel");
+        // if (axis > 0)
+        // {
+        //     GetComponent<Camera>().fieldOfView--;
+        // }
+        // else if (axis < 0)
+        // {
+        //     GetComponent<Camera>().fieldOfView++;
+        // }
 
-        if (Input.GetKeyDown(KeyCode.Mouse1))
-        {
-            StartLooking();
-        }
-        else if (Input.GetKeyUp(KeyCode.Mouse1))
-        {
-            StopLooking();
-        }
+        // if (Input.GetKeyDown(KeyCode.Mouse1))
+        // {
+        //     StartLooking();
+        // }
+        // else if (Input.GetKeyUp(KeyCode.Mouse1))
+        // {
+        //     StopLooking();
+        // }
 
 
         velocity = (transform.position - lastPosition) / Time.deltaTime;

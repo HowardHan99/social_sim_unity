@@ -86,3 +86,5 @@ Documentation/obj
 Recordings/*
 Assets/Scripts/VLMscripts/OpenAIAPIkey.txt
 Assets/Scripts/VLMscripts/OpenAIAPIkey.txt.meta
+Assets/openaiapikey.txt
+Assets/openaiapikey.txt.meta

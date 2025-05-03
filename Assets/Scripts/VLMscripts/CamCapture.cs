@@ -6,10 +6,10 @@ using UnityEngine.UI;
 
 public class CamCapture : MonoBehaviour
 {
-    public Camera cam;
+    public Camera cam; // The reference camera to sync with
     public Button captureButton;
-    public FreeCamera freeCamera; // Reference to movement data
 
+    private Camera localCam; // The camera attached to this GameObject
     private int imageIndex = 0; // Counter for naming images
 
     private string savedFilePath;
@@ -20,9 +20,17 @@ public class CamCapture : MonoBehaviour
 
     void Start()
     {
+        // Check if reference camera is assigned in the Inspector
         if (cam == null)
         {
-            cam = GetComponent<Camera>();
+            Debug.LogError("Reference Camera not assigned to CamCapture. Please assign a camera in the Inspector.");
+        }
+
+        // Get the local camera component
+        localCam = GetComponent<Camera>();
+        if (localCam == null)
+        {
+            Debug.LogError("No Camera component found on this GameObject.");
         }
         
         // Load API key from file
@@ -45,13 +53,46 @@ public class CamCapture : MonoBehaviour
         }
     }
 
+    void Update()
+    {
+        // Sync the local camera with the reference camera (except display settings)
+        if (cam != null && localCam != null)
+        {
+            SyncCameras();
+        }
+    }
+
+    void SyncCameras()
+    {
+        // Sync properties from reference camera to local camera (excluding display settings)
+        localCam.nearClipPlane = cam.nearClipPlane;
+        localCam.farClipPlane = cam.farClipPlane;
+        localCam.fieldOfView = cam.fieldOfView;
+        localCam.cullingMask = cam.cullingMask;
+        localCam.clearFlags = cam.clearFlags;
+        localCam.backgroundColor = cam.backgroundColor;
+        localCam.depth = cam.depth;
+        localCam.renderingPath = cam.renderingPath;
+        localCam.useOcclusionCulling = cam.useOcclusionCulling;
+        localCam.allowHDR = cam.allowHDR;
+        localCam.allowMSAA = cam.allowMSAA;
+        localCam.allowDynamicResolution = cam.allowDynamicResolution;
+        
+        // Sync transform parameters
+        localCam.transform.position = cam.transform.position;
+        localCam.transform.rotation = cam.transform.rotation;
+        
+        // Don't sync the target texture or other display-specific settings
+    }
+
     public void CaptureAndProcessImage()
     {
+        // Use the reference camera for capturing
         Texture2D image = CaptureImage();
         string filePath = SaveImage(image);
         Debug.Log("Image captured and saved at: " + filePath);
 
-        StartCoroutine(UploadImageToOpenAI(filePath)); // Upload image after capturing
+        // StartCoroutine(UploadImageToOpenAI(filePath)); // Upload image after capturing - Temporarily Disabled
     }
 
     public void CaptureAndSaveImage()
@@ -65,7 +106,7 @@ public class CamCapture : MonoBehaviour
     {
         if (!string.IsNullOrEmpty(savedFilePath) && !string.IsNullOrEmpty(customPrompt))
         {
-            StartCoroutine(UploadImageToOpenAI(savedFilePath));
+            // StartCoroutine(UploadImageToOpenAI(savedFilePath)); // Temporarily Disabled
         }
         else
         {
@@ -160,15 +201,11 @@ public class CamCapture : MonoBehaviour
     {
         Debug.Log("Sending image file to OpenAI...");
 
-        string movementStatus = freeCamera.GetMovementStatus();
-        Debug.Log(movementStatus);
+        // Removed movement status reference
         customPrompt = uiManager.GetPrompt();
-        //string jsonData = "{\"model\": \"gpt-4o-mini\", \"messages\": [{\"role\": \"user\", \"content\": \"The robot is moving. " + movementStatus + ". Based on this sidewalk scene, generate a simple and intuitive safety signal for pedestrians with limited mobility.\"}], \"type\": \"file\", \"file\": \"file:" + fileId + "\"}";
-
-
-        // Create the request body with file_id from the upload response
-        //string jsonData = "{\"model\": \"gpt-4o-mini\", \"messages\": [{\"role\": \"user\", \"content\": \"The robot is moving" + movementStatus + "Based on this sidewalk scene captured from the delievery robot perspective, play the robots' role and generate a simple and intuitive safety reminding message as the robot signaling for pedestrians with limited mobility to prevent any accident based on the scenario.\", \"type\": \"file\", \"file\": \"file:" + fileId + "\"}]}";
-        string jsonData = "{\"model\": \"gpt-4o-mini\", \"messages\": [{\"role\": \"user\", \"content\": \"" + customPrompt + " Movement Status: " + movementStatus + "\", \"type\": \"file\", \"file\": \"file:" + fileId + "\"}]}";
+        
+        // Modified JSON data to remove movement status
+        string jsonData = "{\"model\": \"gpt-4o-mini\", \"messages\": [{\"role\": \"user\", \"content\": \"" + customPrompt + "\", \"type\": \"file\", \"file\": \"file:" + fileId + "\"}]}";
 
         using (UnityWebRequest request = new UnityWebRequest("https://api.openai.com/v1/chat/completions", "POST"))
         {
@@ -187,7 +224,7 @@ public class CamCapture : MonoBehaviour
                 Debug.Log("OpenAI Response: " + request.downloadHandler.text);
 
                 // Save the response to a log file
-                SaveResponseToLog(response, imageName, movementStatus);
+                SaveResponseToLog(response, imageName);
             }
             else
             {
@@ -196,8 +233,8 @@ public class CamCapture : MonoBehaviour
         }
     }
 
-    // Save responses to a log file
-    void SaveResponseToLog(string response, string imageName, string movementStatus)
+    // Save responses to a log file - removed movement status parameter
+    void SaveResponseToLog(string response, string imageName)
     {
         string logFilePath = Application.persistentDataPath + "/ResponseLog.txt";
 
@@ -206,7 +243,7 @@ public class CamCapture : MonoBehaviour
         {
             writer.WriteLine("Timestamp: " + System.DateTime.Now);
             writer.WriteLine("Image Name: " + imageName);
-            writer.WriteLine("Movement Status: " + movementStatus);
+            // Removed movement status logging
             writer.WriteLine("User Prompt: " + customPrompt);
             writer.WriteLine("Response: " + response);
             writer.WriteLine("----------");
