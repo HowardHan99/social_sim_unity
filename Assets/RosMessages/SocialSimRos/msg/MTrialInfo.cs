@@ -116,55 +116,24 @@ namespace RosMessageTypes.SocialSimRos
         public override List<byte[]> SerializationStatements()
         {
             var listOfSerializations = new List<byte[]>();
-            
-            // Null check for header (returning silently)
-            if (header == null) return listOfSerializations; 
             listOfSerializations.AddRange(header.SerializationStatements());
-            
-            // Null check for trial_start (returning silently)
-            if (trial_start == null) return listOfSerializations;
             listOfSerializations.AddRange(trial_start.SerializationStatements());
-            
             listOfSerializations.Add(BitConverter.GetBytes(this.timeout_time));
             listOfSerializations.Add(SerializeString(this.trial_name));
             listOfSerializations.Add(BitConverter.GetBytes(this.trial_number));
             listOfSerializations.Add(BitConverter.GetBytes(this.num_actors));
-            
-            // Null check for robot_start (returning silently)
-            if (robot_start == null) return listOfSerializations;
             listOfSerializations.AddRange(robot_start.SerializationStatements());
-            
-            // Null check for robot_goal (returning silently)
-            if (robot_goal == null) return listOfSerializations;
             listOfSerializations.AddRange(robot_goal.SerializationStatements());
-            
             listOfSerializations.Add(BitConverter.GetBytes(this.dist_to_target));
             listOfSerializations.Add(BitConverter.GetBytes(this.min_dist_to_target));
 
-            // Null check for robot_poses array (returning silently)
-            if (robot_poses == null) return listOfSerializations;
-            
             listOfSerializations.Add(BitConverter.GetBytes(robot_poses.Length));
-            for (var i = 0; i < robot_poses.Length; i++)
-            {
-                // Skip null poses instead of erroring
-                if (robot_poses[i] == null) continue; 
-                
-                listOfSerializations.Add(robot_poses[i].Serialize());
-            }
+            foreach (var entry in robot_poses)
+                listOfSerializations.Add(entry.Serialize());
 
-            // Null check for robot_poses_ts array (returning silently)
-            if (robot_poses_ts == null) return listOfSerializations;
-            
             listOfSerializations.Add(BitConverter.GetBytes(robot_poses_ts.Length));
-            for (var i = 0; i < robot_poses_ts.Length; i++)
-            {
-                 // Skip null timestamps instead of erroring (or return if preferred)
-                if (robot_poses_ts[i] == null) continue; // Or: return listOfSerializations;
-                
-                listOfSerializations.Add(robot_poses_ts[i].Serialize());
-            }
-            
+            foreach (var entry in robot_poses_ts)
+                listOfSerializations.Add(entry.Serialize());
             listOfSerializations.Add(BitConverter.GetBytes(this.min_dist_to_ped));
             listOfSerializations.Add(BitConverter.GetBytes(this.robot_on_person_intimate_dist_violations));
             listOfSerializations.Add(BitConverter.GetBytes(this.person_on_robot_intimate_dist_violations));
