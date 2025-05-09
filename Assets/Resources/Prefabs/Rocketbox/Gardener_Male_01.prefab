@@ -97,6 +97,9 @@ GameObject:
   - component: {fileID: 321008530779984458}
   - component: {fileID: 7623127214005636117}
   - component: {fileID: 840758177099182427}
+  - component: {fileID: 8341388621819934526}
+  - component: {fileID: -149533791383646431}
+  - component: {fileID: -6282826128350808289}
   m_Layer: 0
   m_Name: Gardener_Male_01
   m_TagString: Untagged
@@ -121,7 +124,7 @@ Transform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!95 &321008530779984458
 Animator:
-  serializedVersion: 3
+  serializedVersion: 5
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
@@ -134,10 +137,12 @@ Animator:
   m_UpdateMode: 0
   m_ApplyRootMotion: 1
   m_LinearVelocityBlending: 0
+  m_StabilizeFeet: 0
   m_WarningMessage: 
   m_HasTransformHierarchy: 0
   m_AllowConstantClipSamplingOptimization: 1
-  m_KeepAnimatorControllerStateOnDisable: 0
+  m_KeepAnimatorStateOnDisable: 0
+  m_WriteDefaultValuesOnDisable: 0
 --- !u!54 &7623127214005636117
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -168,3 +173,65 @@ CapsuleCollider:
   m_Height: 1.75
   m_Direction: 1
   m_Center: {x: 0, y: 0.87, z: 0}
+--- !u!114 &8341388621819934526
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6476053079275819658}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 536437719, guid: 2198c5915bc2d4348bd36bcb1b631201, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  noManagingObject: 0
+  replayIdentity:
+    id: 20587
+  replayObject:
+    reference: {fileID: -149533791383646431}
+  observedAnimator: {fileID: 321008530779984458}
+  recordFlags: 238
+--- !u!114 &-149533791383646431
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6476053079275819658}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 411743824, guid: 2198c5915bc2d4348bd36bcb1b631201, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  isObservedComponentsExpanded: 0
+  replayIdentity:
+    id: 63351
+  prefabIdentity:
+    id: 47243
+  observedComponents:
+  - {fileID: 8341388621819934526}
+  - {fileID: -6282826128350808289}
+  runtimeComponents: []
+  isPrefab: 1
+  prefabType: 1
+--- !u!114 &-6282826128350808289
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6476053079275819658}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: -864523685, guid: 2198c5915bc2d4348bd36bcb1b631201, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  noManagingObject: 0
+  replayIdentity:
+    id: 32509
+  replayObject:
+    reference: {fileID: -149533791383646431}
+  positionFlags: 263
+  rotationFlags: 263
+  scaleFlags: 0

@@ -1802,6 +1802,9 @@ GameObject:
   - component: {fileID: 6090832110011958511}
   - component: {fileID: -1806581478205057862}
   - component: {fileID: -2510071120832978663}
+  - component: {fileID: -5477524094443794759}
+  - component: {fileID: -8129617901759436116}
+  - component: {fileID: 3974159023153492028}
   m_Layer: 0
   m_Name: Wheelchair_male_01
   m_TagString: Untagged
@@ -1883,6 +1886,68 @@ CapsuleCollider:
   m_Height: 1.8706249
   m_Direction: 1
   m_Center: {x: -0.04, y: 0.43531245, z: 0}
+--- !u!114 &-5477524094443794759
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6004020823855633571}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 411743824, guid: 2198c5915bc2d4348bd36bcb1b631201, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  isObservedComponentsExpanded: 0
+  replayIdentity:
+    id: 26542
+  prefabIdentity:
+    id: 24035
+  observedComponents:
+  - {fileID: -8129617901759436116}
+  - {fileID: 3974159023153492028}
+  runtimeComponents: []
+  isPrefab: 1
+  prefabType: 1
+--- !u!114 &-8129617901759436116
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6004020823855633571}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: -864523685, guid: 2198c5915bc2d4348bd36bcb1b631201, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  noManagingObject: 0
+  replayIdentity:
+    id: 22680
+  replayObject:
+    reference: {fileID: -5477524094443794759}
+  positionFlags: 263
+  rotationFlags: 263
+  scaleFlags: 0
+--- !u!114 &3974159023153492028
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6004020823855633571}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 536437719, guid: 2198c5915bc2d4348bd36bcb1b631201, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  noManagingObject: 0
+  replayIdentity:
+    id: 59865
+  replayObject:
+    reference: {fileID: -5477524094443794759}
+  observedAnimator: {fileID: 6090832110011958511}
+  recordFlags: 238
 --- !u!1 &6061559745281181226
 GameObject:
   m_ObjectHideFlags: 0

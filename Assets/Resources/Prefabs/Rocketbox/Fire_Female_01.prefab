@@ -100,6 +100,9 @@ GameObject:
   - component: {fileID: 2735160672763933223}
   - component: {fileID: 2537156450826227536}
   - component: {fileID: 967756837738640382}
+  - component: {fileID: 6337428112945325387}
+  - component: {fileID: 5260595798398772655}
+  - component: {fileID: -4159578803572863310}
   m_Layer: 0
   m_Name: Fire_Female_01
   m_TagString: Untagged
@@ -124,7 +127,7 @@ Transform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!95 &2735160672763933223
 Animator:
-  serializedVersion: 3
+  serializedVersion: 5
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
@@ -137,10 +140,12 @@ Animator:
   m_UpdateMode: 0
   m_ApplyRootMotion: 1
   m_LinearVelocityBlending: 0
+  m_StabilizeFeet: 0
   m_WarningMessage: 
   m_HasTransformHierarchy: 0
   m_AllowConstantClipSamplingOptimization: 1
-  m_KeepAnimatorControllerStateOnDisable: 0
+  m_KeepAnimatorStateOnDisable: 0
+  m_WriteDefaultValuesOnDisable: 0
 --- !u!54 &2537156450826227536
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -171,3 +176,65 @@ CapsuleCollider:
   m_Height: 1.6
   m_Direction: 1
   m_Center: {x: 0, y: 0.82, z: 0}
+--- !u!114 &6337428112945325387
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8673583632494621415}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 536437719, guid: 2198c5915bc2d4348bd36bcb1b631201, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  noManagingObject: 0
+  replayIdentity:
+    id: 64507
+  replayObject:
+    reference: {fileID: 5260595798398772655}
+  observedAnimator: {fileID: 2735160672763933223}
+  recordFlags: 238
+--- !u!114 &5260595798398772655
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8673583632494621415}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 411743824, guid: 2198c5915bc2d4348bd36bcb1b631201, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  isObservedComponentsExpanded: 0
+  replayIdentity:
+    id: 59248
+  prefabIdentity:
+    id: 9387
+  observedComponents:
+  - {fileID: 6337428112945325387}
+  - {fileID: -4159578803572863310}
+  runtimeComponents: []
+  isPrefab: 1
+  prefabType: 1
+--- !u!114 &-4159578803572863310
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8673583632494621415}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: -864523685, guid: 2198c5915bc2d4348bd36bcb1b631201, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  noManagingObject: 0
+  replayIdentity:
+    id: 3419
+  replayObject:
+    reference: {fileID: 5260595798398772655}
+  positionFlags: 263
+  rotationFlags: 263
+  scaleFlags: 0
