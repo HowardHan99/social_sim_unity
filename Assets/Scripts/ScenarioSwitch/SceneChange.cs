@@ -1,66 +1,49 @@
-using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
 public class SceneChange : MonoBehaviour
 {
-    [SerializeField] private string outdoorSceneName = "Outdoor";
-    [SerializeField] private string warehouseSceneName = "Warehouse";
-    
-    // Flag to track which scene is currently active
-    private static string currentSceneName;
-    
+    [SerializeField] private List<string> sceneNames = new List<string>();
+    private static int currentSceneIndex = 0;
+
     void Awake()
     {
-        // Make this script persist between scenes
         DontDestroyOnLoad(this.gameObject);
-        
-        // Initialize current scene
-        currentSceneName = SceneManager.GetActiveScene().name;
-        
-        // Ensure we start in the Outdoor scene
-        if (currentSceneName != outdoorSceneName)
+
+        if (sceneNames.Count > 0)
         {
-            SceneManager.LoadScene(outdoorSceneName);
-            currentSceneName = outdoorSceneName;
+            string activeScene = SceneManager.GetActiveScene().name;
+
+            // If we're not already in the first scene, load it
+            if (activeScene != sceneNames[0])
+            {
+                currentSceneIndex = 0;
+                SceneManager.LoadScene(sceneNames[currentSceneIndex]);
+            }
+            else
+            {
+                currentSceneIndex = 0;
+            }
         }
     }
 
-    // Function to switch to the Warehouse scene
-    public void GoToWarehouse()
+    public void GoToNextScene()
     {
-        if (currentSceneName != warehouseSceneName)
-        {
-            Debug.Log("Switching to Warehouse scene");
-            SceneManager.LoadScene(warehouseSceneName);
-            currentSceneName = warehouseSceneName;
-        }
+        if (sceneNames.Count < 1) return;
+
+        // Advance the index and wrap around if necessary
+        currentSceneIndex = (currentSceneIndex + 1) % sceneNames.Count;
+        SceneManager.LoadScene(sceneNames[currentSceneIndex]);
     }
-    
-    // Function to switch to the Outdoor scene
-    public void GoToOutdoor()
-    {
-        if (currentSceneName != outdoorSceneName)
-        {
-            Debug.Log("Switching to Outdoor scene");
-            SceneManager.LoadScene(outdoorSceneName);
-            currentSceneName = outdoorSceneName;
-        }
-    }
-    
-    // Update is called once per frame
+
     void Update()
     {
-        // Press W to switch to Warehouse scene
-        if (Input.GetKeyDown(KeyCode.W))
+        // Hold Ctrl and press N to go to the next scene
+        if ((Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl))
+            && Input.GetKeyDown(KeyCode.N))
         {
-            GoToWarehouse();
-        }
-        // Press O to switch to Outdoor scene (if you're in Warehouse)
-        else if (Input.GetKeyDown(KeyCode.O))
-        {
-            GoToOutdoor();
+            GoToNextScene();
         }
     }
 }
