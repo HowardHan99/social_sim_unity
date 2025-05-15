@@ -15,6 +15,7 @@ GameObject:
   - component: {fileID: -900525788662363145}
   - component: {fileID: -453596738490852546}
   - component: {fileID: -4355566418251873377}
+  - component: {fileID: -8926317782578716641}
   m_Layer: 0
   m_Name: Male_Adult_09
   m_TagString: Untagged
@@ -150,6 +151,25 @@ MonoBehaviour:
   positionFlags: 263
   rotationFlags: 263
   scaleFlags: 0
+--- !u!114 &-8926317782578716641
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3779024592299472068}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1c19610482eb06543aa9acbc1aa7d22e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  objectId: 
+  replayObject: {fileID: 0}
+  trackTransform: 1
+  trackRigidbody: 1
+  trackAnimator: 1
+  customProperties: []
+  debugMode: 1
 --- !u!1 &4569802018215380341
 GameObject:
   m_ObjectHideFlags: 0

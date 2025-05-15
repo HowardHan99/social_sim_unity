@@ -15,6 +15,7 @@ GameObject:
   - component: {fileID: 6505684542378927182}
   - component: {fileID: -5688022115305344771}
   - component: {fileID: 6696656036863205508}
+  - component: {fileID: 8706125273105037063}
   m_Layer: 0
   m_Name: Police_Male_07
   m_TagString: Untagged
@@ -150,6 +151,25 @@ MonoBehaviour:
   positionFlags: 263
   rotationFlags: 263
   scaleFlags: 0
+--- !u!114 &8706125273105037063
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1530376263467618343}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1c19610482eb06543aa9acbc1aa7d22e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  objectId: 
+  replayObject: {fileID: 0}
+  trackTransform: 1
+  trackRigidbody: 1
+  trackAnimator: 1
+  customProperties: []
+  debugMode: 1
 --- !u!1 &5626015293639316660
 GameObject:
   m_ObjectHideFlags: 0

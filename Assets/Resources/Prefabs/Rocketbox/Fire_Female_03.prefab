@@ -103,6 +103,7 @@ GameObject:
   - component: {fileID: -66360704106946188}
   - component: {fileID: 2579278536369839462}
   - component: {fileID: -515954651700714854}
+  - component: {fileID: 5665770260629414736}
   m_Layer: 0
   m_Name: Fire_Female_03
   m_TagString: Untagged
@@ -238,3 +239,22 @@ MonoBehaviour:
   positionFlags: 263
   rotationFlags: 263
   scaleFlags: 0
+--- !u!114 &5665770260629414736
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3400220236823428977}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1c19610482eb06543aa9acbc1aa7d22e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  objectId: 
+  replayObject: {fileID: 0}
+  trackTransform: 1
+  trackRigidbody: 1
+  trackAnimator: 1
+  customProperties: []
+  debugMode: 1

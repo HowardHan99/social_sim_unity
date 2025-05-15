@@ -100,6 +100,7 @@ GameObject:
   - component: {fileID: 3623758245829833626}
   - component: {fileID: -7620004880189243935}
   - component: {fileID: -7495081773203953984}
+  - component: {fileID: 7706276029902767909}
   m_Layer: 0
   m_Name: Female_Adult_05
   m_TagString: Untagged
@@ -235,3 +236,22 @@ MonoBehaviour:
   positionFlags: 263
   rotationFlags: 263
   scaleFlags: 0
+--- !u!114 &7706276029902767909
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1438840472330646082}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1c19610482eb06543aa9acbc1aa7d22e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  objectId: 
+  replayObject: {fileID: 0}
+  trackTransform: 1
+  trackRigidbody: 1
+  trackAnimator: 1
+  customProperties: []
+  debugMode: 1

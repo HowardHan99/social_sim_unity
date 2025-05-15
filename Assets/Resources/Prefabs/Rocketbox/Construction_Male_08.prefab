@@ -15,6 +15,7 @@ GameObject:
   - component: {fileID: 6683334787783898012}
   - component: {fileID: -4332548279300334811}
   - component: {fileID: 690772480138065876}
+  - component: {fileID: -1343288633734937102}
   m_Layer: 0
   m_Name: Construction_Male_08
   m_TagString: Untagged
@@ -150,6 +151,25 @@ MonoBehaviour:
     reference: {fileID: -4332548279300334811}
   observedAnimator: {fileID: 5929744834812825278}
   recordFlags: 238
+--- !u!114 &-1343288633734937102
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1144288115825069694}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1c19610482eb06543aa9acbc1aa7d22e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  objectId: 
+  replayObject: {fileID: 0}
+  trackTransform: 1
+  trackRigidbody: 1
+  trackAnimator: 1
+  customProperties: []
+  debugMode: 1
 --- !u!1 &1343275093808046022
 GameObject:
   m_ObjectHideFlags: 0

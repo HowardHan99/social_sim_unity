@@ -15,6 +15,7 @@ GameObject:
   - component: {fileID: -4523422303417869750}
   - component: {fileID: 8003624891354198037}
   - component: {fileID: 317640386947494547}
+  - component: {fileID: -2532903842221472373}
   m_Layer: 0
   m_Name: Medical_Female_03
   m_TagString: Untagged
@@ -150,6 +151,25 @@ MonoBehaviour:
   positionFlags: 263
   rotationFlags: 263
   scaleFlags: 0
+--- !u!114 &-2532903842221472373
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1334980515190407263}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1c19610482eb06543aa9acbc1aa7d22e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  objectId: 
+  replayObject: {fileID: 0}
+  trackTransform: 1
+  trackRigidbody: 1
+  trackAnimator: 1
+  customProperties: []
+  debugMode: 1
 --- !u!1 &4189231801844313447
 GameObject:
   m_ObjectHideFlags: 0

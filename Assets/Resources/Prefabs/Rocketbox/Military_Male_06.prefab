@@ -15,6 +15,7 @@ GameObject:
   - component: {fileID: -8376664921107935392}
   - component: {fileID: 7075043491930531112}
   - component: {fileID: -3878394292068737797}
+  - component: {fileID: -2838481024068542855}
   m_Layer: 0
   m_Name: Military_Male_06
   m_TagString: Untagged
@@ -150,6 +151,25 @@ MonoBehaviour:
   positionFlags: 263
   rotationFlags: 263
   scaleFlags: 0
+--- !u!114 &-2838481024068542855
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2156574922868373355}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1c19610482eb06543aa9acbc1aa7d22e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  objectId: 
+  replayObject: {fileID: 0}
+  trackTransform: 1
+  trackRigidbody: 1
+  trackAnimator: 1
+  customProperties: []
+  debugMode: 1
 --- !u!1 &4723201505087078849
 GameObject:
   m_ObjectHideFlags: 0

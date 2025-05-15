@@ -1805,6 +1805,7 @@ GameObject:
   - component: {fileID: -5477524094443794759}
   - component: {fileID: -8129617901759436116}
   - component: {fileID: 3974159023153492028}
+  - component: {fileID: 6374679031287003174}
   m_Layer: 0
   m_Name: Wheelchair_male_01
   m_TagString: Untagged
@@ -1898,7 +1899,7 @@ MonoBehaviour:
   m_Script: {fileID: 411743824, guid: 2198c5915bc2d4348bd36bcb1b631201, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  isObservedComponentsExpanded: 0
+  isObservedComponentsExpanded: 1
   replayIdentity:
     id: 26542
   prefabIdentity:
@@ -1948,6 +1949,25 @@ MonoBehaviour:
     reference: {fileID: -5477524094443794759}
   observedAnimator: {fileID: 6090832110011958511}
   recordFlags: 238
+--- !u!114 &6374679031287003174
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6004020823855633571}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1c19610482eb06543aa9acbc1aa7d22e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  objectId: 
+  replayObject: {fileID: -5477524094443794759}
+  trackTransform: 1
+  trackRigidbody: 1
+  trackAnimator: 1
+  customProperties: []
+  debugMode: 1
 --- !u!1 &6061559745281181226
 GameObject:
   m_ObjectHideFlags: 0
