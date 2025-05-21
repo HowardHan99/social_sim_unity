@@ -52962,7 +52962,7 @@ MonoBehaviour:
   createGroupNode: 0
   createConnection: {fileID: 0}
   radius: 2.76
-  spawnCount: 0
+  spawnCount: 2
   render: {fileID: 843088256066177253}
 --- !u!23 &843088256066177253
 MeshRenderer:
@@ -53364,7 +53364,7 @@ MonoBehaviour:
   createGroupNode: 0
   createConnection: {fileID: 0}
   radius: 2.76
-  spawnCount: 0
+  spawnCount: 2
   render: {fileID: 8077145572784931682}
 --- !u!4 &8077145572784931684
 Transform:

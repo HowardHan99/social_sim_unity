@@ -2443,7 +2443,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 3a544a4313dfc22408b3cb83aa606d08, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  target: {fileID: 0}
+  target: {fileID: 8518203048896102329}
   offset: {x: 0, y: 0, z: 0}
   followPosition: 1
   followRotation: 0
@@ -2588,7 +2588,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   isObservedComponentsExpanded: 0
   replayIdentity:
-    id: 48230
+    id: 51537
   prefabIdentity:
     id: 24035
   observedComponents:
@@ -2613,7 +2613,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   noManagingObject: 0
   replayIdentity:
-    id: 65108
+    id: 20521
   replayObject:
     reference: {fileID: 426270120587482905}
   positionFlags: 263
@@ -2633,7 +2633,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   noManagingObject: 0
   replayIdentity:
-    id: 12292
+    id: 6932
   replayObject:
     reference: {fileID: 426270120587482905}
   observedAnimator: {fileID: 7104284622883413327}
@@ -2865,7 +2865,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &5657225499444417046
 Transform:
   m_ObjectHideFlags: 0
