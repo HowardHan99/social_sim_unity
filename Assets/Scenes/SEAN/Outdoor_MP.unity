@@ -6480,6 +6480,36 @@ Transform:
   m_Father: {fileID: 118285116}
   m_RootOrder: 1
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &423140384
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 423140385}
+  m_Layer: 0
+  m_Name: Transform
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &423140385
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 423140384}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 12}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_RootOrder: 3
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &432132988
 GameObject:
   m_ObjectHideFlags: 0
@@ -19772,12 +19802,15 @@ MonoBehaviour:
     type: 3}
   prefabGuest: {fileID: 6667555921135727368, guid: e0c8a1dbfb67aa7419c0bc6b19e52dd8,
     type: 3}
-  prefabPlayer: {fileID: 8518203048896102333, guid: 24d6d9929b2c5e141aca9f2ec8c613d1,
+  prefabLocalPlayer: {fileID: 8518203048896102333, guid: 71dc2c7506fe1f84a8a644eb6da41aa5,
     type: 3}
   menuCamera: {fileID: 891500465}
   panel: {fileID: 202528869}
   videoImage: {fileID: 56213572}
   statsUI: {fileID: 1548489622}
+  hostSpawnPoint: {fileID: 423140385}
+  guestSpawnPoint: {fileID: 423140385}
+  remotePlayerSpawnPoint: {fileID: 423140385}
 --- !u!114 &1225035828
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -19804,7 +19837,7 @@ MonoBehaviour:
       type: {class: HttpSignalingSettings, ns: Unity.RenderStreaming, asm: Unity.RenderStreaming}
       data:
         m_interval: 5000
-        m_url: http://192.168.1.63:80
+        m_url: http://10.17.4.54:80
         m_iceServers:
         - m_urls:
           - stun:stun.l.google.com:19302
@@ -27751,7 +27784,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1669186299}
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -24.7, y: 3.7610679, z: 37.2}
+  m_LocalPosition: {x: -24.7, y: 3.7610679, z: 48}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_Children:
   - {fileID: 1225035825}
@@ -32138,8 +32171,8 @@ RectTransform:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1963338290}
-  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 16.3}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 0, y: 0, z: 0}
   m_Children:
   - {fileID: 711689173}
@@ -32149,7 +32182,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
   m_AnchorMax: {x: 0, y: 0}
-  m_AnchoredPosition: {x: 7.4134502, y: -3.7610679}
+  m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 0, y: 0}
   m_Pivot: {x: 0, y: 0}
 --- !u!114 &1963338292
