@@ -13,7 +13,7 @@ GameObject:
   - component: {fileID: 5168163151517551634}
   - component: {fileID: 8944165783937047358}
   m_Layer: 0
-  m_Name: RobotAvatar_PH
+  m_Name: guestPb
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
