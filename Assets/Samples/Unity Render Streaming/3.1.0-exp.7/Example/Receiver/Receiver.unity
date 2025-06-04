@@ -1733,7 +1733,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   m_useDefault: 1
-  signalingSettingsObject: {fileID: 0}
+  signalingSettingsObject: {fileID: 11400000, guid: 8fc6654ff9790b545b5181a26df52b58,
+    type: 2}
   signalingSettings:
     id: 0
   handlers:
