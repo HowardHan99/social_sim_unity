@@ -1733,7 +1733,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   m_useDefault: 1
-  signalingSettingsObject: {fileID: 0}
+  signalingSettingsObject: {fileID: 11400000, guid: 8fc6654ff9790b545b5181a26df52b58,
+    type: 2}
   signalingSettings:
     id: 0
   handlers:
@@ -1745,7 +1746,7 @@ MonoBehaviour:
     00000000:
       type: {class: WebSocketSignalingSettings, ns: Unity.RenderStreaming, asm: Unity.RenderStreaming}
       data:
-        m_url: ws://127.0.0.1
+        m_url: ws://localhost
         m_iceServers:
         - m_urls:
           - stun:stun.l.google.com:19302
