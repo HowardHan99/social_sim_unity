@@ -3340,7 +3340,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   player: {fileID: 7296701733076765955}
-  cameraPivot: {fileID: 7244194158814979699}
+  cameraPivot: {fileID: 6004020823855633571, guid: f9f89412d43f4f34d8dae9bdd5aa10d8,
+    type: 3}
   playerInput: {fileID: 4036353885176659594}
   label: {fileID: 3254345048127680522}
   captionForMobile: {fileID: 4026740125019814381}

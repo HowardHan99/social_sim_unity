@@ -7,6 +7,7 @@ namespace IVI
 {
     public class SFPWDAgent : SEAN.Scenario.Agents.Base
     {
+        //To Dos: align with the old SFPWDAgent.cs
 
         private const int OBSTACLE_ANGLE_BINS = 6;
 

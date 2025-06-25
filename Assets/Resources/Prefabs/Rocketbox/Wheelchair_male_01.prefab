@@ -558,6 +558,112 @@ Transform:
   m_Father: {fileID: 1240899474440058207}
   m_RootOrder: 0
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1465843966689477208
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 4901773233183340932}
+  - component: {fileID: 4962281050291631443}
+  - component: {fileID: 2231798091847655368}
+  - component: {fileID: 4582612012099742280}
+  m_Layer: 0
+  m_Name: wheelchairCamera
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &4901773233183340932
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1465843966689477208}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0.94, z: -0.099}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_Children: []
+  m_Father: {fileID: 6348177221307780633}
+  m_RootOrder: 9
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!20 &4962281050291631443
+Camera:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1465843966689477208}
+  m_Enabled: 1
+  serializedVersion: 2
+  m_ClearFlags: 1
+  m_BackGroundColor: {r: 0.19215687, g: 0.3019608, b: 0.4745098, a: 0}
+  m_projectionMatrixMode: 1
+  m_GateFitMode: 2
+  m_FOVAxisMode: 0
+  m_SensorSize: {x: 36, y: 24}
+  m_LensShift: {x: 0, y: 0}
+  m_FocalLength: 50
+  m_NormalizedViewPortRect:
+    serializedVersion: 2
+    x: 0
+    y: 0
+    width: 1
+    height: 1
+  near clip plane: 0.3
+  far clip plane: 1000
+  field of view: 60
+  orthographic: 0
+  orthographic size: 5
+  m_Depth: 0
+  m_CullingMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  m_RenderingPath: -1
+  m_TargetTexture: {fileID: 0}
+  m_TargetDisplay: 1
+  m_TargetEye: 3
+  m_HDR: 1
+  m_AllowMSAA: 1
+  m_AllowDynamicResolution: 0
+  m_ForceIntoRT: 0
+  m_OcclusionCulling: 1
+  m_StereoConvergence: 10
+  m_StereoSeparation: 0.022
+--- !u!81 &2231798091847655368
+AudioListener:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1465843966689477208}
+  m_Enabled: 1
+--- !u!114 &4582612012099742280
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1465843966689477208}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c84f265c32fb3d74fb70cd9defd3f9e6, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  movementSpeed: 0.2
+  fastMovementSpeed: 3
+  freeLookSensitivity: 3
+  zoomSensitivity: 10
+  fastZoomSensitivity: 50
+  autoForwardSpeed: 0
+  enableAutoLookAt: 0
+  lookAtTarget: {fileID: 0}
+  autoTurnSpeed: 1
+  autoTurnAngleThreshold: 5
 --- !u!1 &2092548754051377651
 GameObject:
   m_ObjectHideFlags: 0
@@ -1806,6 +1912,7 @@ GameObject:
   - component: {fileID: -8129617901759436116}
   - component: {fileID: 3974159023153492028}
   - component: {fileID: 6374679031287003174}
+  - component: {fileID: 7923220642289013467}
   m_Layer: 0
   m_Name: Wheelchair_male_01
   m_TagString: Untagged
@@ -1820,8 +1927,8 @@ Transform:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 6004020823855633571}
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -1.2806123, y: -0.06058216, z: -0.71311045}
+  m_LocalRotation: {x: 0, y: 0.29661876, z: 0, w: 0.95499605}
+  m_LocalPosition: {x: 1.0212879, y: -0.06058216, z: 12.042046}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_Children:
   - {fileID: 2488095541549727869}
@@ -1833,6 +1940,7 @@ Transform:
   - {fileID: 1167461314322957982}
   - {fileID: 99124024861995150}
   - {fileID: 338057635081826497}
+  - {fileID: 4901773233183340932}
   m_Father: {fileID: 0}
   m_RootOrder: 0
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
@@ -1901,13 +2009,15 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   isObservedComponentsExpanded: 1
   replayIdentity:
-    id: 26542
+    id: 46560
   prefabIdentity:
     id: 24035
   observedComponents:
   - {fileID: -8129617901759436116}
   - {fileID: 3974159023153492028}
-  runtimeComponents: []
+  runtimeComponents:
+  - {fileID: -8129617901759436116}
+  - {fileID: 3974159023153492028}
   isPrefab: 1
   prefabType: 1
 --- !u!114 &-8129617901759436116
@@ -1924,7 +2034,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   noManagingObject: 0
   replayIdentity:
-    id: 22680
+    id: 15054
   replayObject:
     reference: {fileID: -5477524094443794759}
   positionFlags: 263
@@ -1944,7 +2054,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   noManagingObject: 0
   replayIdentity:
-    id: 59865
+    id: 54549
   replayObject:
     reference: {fileID: -5477524094443794759}
   observedAnimator: {fileID: 6090832110011958511}
@@ -1968,6 +2078,27 @@ MonoBehaviour:
   trackAnimator: 1
   customProperties: []
   debugMode: 1
+--- !u!114 &7923220642289013467
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6004020823855633571}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 82986ae7dfa33654295162cffcb1b085, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  moveSpeed: 2
+  rotationSpeed: 90
+  toggleModeKey: 303
+  forwardKey: 273
+  backwardKey: 274
+  leftKey: 276
+  rightKey: 275
+  useWASD: 1
+  isManualMode: 0
 --- !u!1 &6061559745281181226
 GameObject:
   m_ObjectHideFlags: 0
