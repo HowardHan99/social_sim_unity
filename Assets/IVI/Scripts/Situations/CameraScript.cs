@@ -29,6 +29,32 @@ namespace IVI
         /// </summary>
         public float fastZoomSensitivity = 50f;
 
+        [Header("Automation")]
+        /// <summary>
+        /// Speed of automatic forward movement. Set to 0 to disable.
+        /// </summary>
+        public float autoForwardSpeed = 0f;
+
+        /// <summary>
+        /// Enable automatic looking at a target. Manual look will override this.
+        /// </summary>
+        public bool enableAutoLookAt = false;
+
+        /// <summary>
+        /// Target for the camera to automatically look at.
+        /// </summary>
+        public Transform lookAtTarget;
+
+        /// <summary>
+        /// How fast the camera turns to face the target.
+        /// </summary>
+        public float autoTurnSpeed = 1.0f;
+
+        /// <summary>
+        /// The camera will only start turning if the angle to the target is greater than this value (in degrees).
+        /// </summary>
+        public float autoTurnAngleThreshold = 5.0f;
+
         /// <summary>
         /// Set to true when free looking (on right mouse button).
         /// </summary>
@@ -36,6 +62,29 @@ namespace IVI
 
         void Update()
         {
+            // Automatic forward movement
+            if (autoForwardSpeed != 0f)
+            {
+                transform.position += transform.forward * autoForwardSpeed * Time.deltaTime;
+            }
+
+            // Automatic look-at
+            if (enableAutoLookAt && lookAtTarget != null && !looking)
+            {
+                Vector3 directionToTarget = lookAtTarget.position - transform.position;
+
+                if (directionToTarget.sqrMagnitude > 0.001f)
+                {
+                    float angle = Vector3.Angle(transform.forward, directionToTarget);
+
+                    if (angle > autoTurnAngleThreshold)
+                    {
+                        Quaternion targetRotation = Quaternion.LookRotation(directionToTarget);
+                        transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, autoTurnSpeed * Time.deltaTime);
+                    }
+                }
+            }
+
             var fastMode = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
             var movementSpeed = fastMode ? this.fastMovementSpeed : this.movementSpeed;
 
