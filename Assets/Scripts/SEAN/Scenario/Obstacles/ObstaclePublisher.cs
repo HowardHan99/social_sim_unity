@@ -67,8 +67,6 @@ namespace SEAN.Scenario.Obstacles
 
         private void PublishObstacles()
         {
-            // TODO: Uncomment when MObstacleArray and MObstacle messages are generated
-            /*
             var message = new RosMessageTypes.SocialSimRos.MObstacleArray();
             message.header.frame_id = frame;
             message.header.stamp = sean.clock.LastPublishedTime();
@@ -107,14 +105,6 @@ namespace SEAN.Scenario.Obstacles
             }
 
             ros.Send(topicName, message);
-            */
-            
-            // TEMPORARY: Just log for now until ROS messages are generated
-            publishCount++;
-            if (showDebug)
-            {
-                Debug.Log($"[ObstaclePublisher] Would publish {sceneObstacles.Length} obstacles (messages not generated yet)");
-            }
         }
 
         /// <summary>
