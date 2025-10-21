@@ -20,6 +20,14 @@ namespace SEAN.Util
             return geometryVector3;
         }
 
+        public static RosMessageTypes.Geometry.MVector3 GetGeometryVector3Scale(Vector3 vector3)
+        {
+            // For scale, we swap axes from Unity (Right, Up, Forward) to ROS (Forward, Left, Up)
+            // but do not negate, as scale represents magnitude.
+            Vector3 rosVec = new Vector3(vector3.z, vector3.x, vector3.y);
+            return new RosMessageTypes.Geometry.MVector3(rosVec.x, rosVec.y, rosVec.z);
+        }
+
         public static RosMessageTypes.Geometry.MPoint GetGeometryPoint(Vector3<FLU> position)
         {
             RosMessageTypes.Geometry.MPoint geometryPoint = new RosMessageTypes.Geometry.MPoint();

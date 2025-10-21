@@ -43,13 +43,16 @@ namespace SEAN.Scenario.Obstacles
             ros = ROSConnection.instance;
             sean = SEAN.instance;
 
+            // Register the publisher with ROS before publishing any messages
+            // ros.RegisterPublisher(topicName, RosMessageTypes.SocialSimRos.MObstacleArray.RosMessageName);
+
             // Find all obstacles in the scene at startup
             sceneObstacles = FindObjectsOfType<TrackedObstacle>();
 
             if (showDebug)
             {
-                Debug.Log($"[ObstaclePublisher] Initialized. Found {sceneObstacles.Length} obstacles in the scene.");
-                Debug.Log($"[ObstaclePublisher] Publishing to topic: {topicName} in frame: {frame} at {publishRateHz} Hz");
+                // Debug.Log($"[ObstaclePublisher] Initialized. Found {sceneObstacles.Length} obstacles in the scene.");
+                // Debug.Log($"[ObstaclePublisher] Publishing to topic: {topicName} in frame: {frame} at {publishRateHz} Hz");
             }
 
             lastPublishTime = Time.time;
@@ -85,23 +88,41 @@ namespace SEAN.Scenario.Obstacles
 
                 // Get size with coordinate system transformation
                 Vector3 unitySize = obstacle.GetSize();
-                obstacleMsg.scale = Util.Geometry.GetGeometryVector3(unitySize.To<FLU>());
+                obstacleMsg.scale = Util.Geometry.GetGeometryVector3Scale(unitySize);
 
                 message.obstacles[i] = obstacleMsg;
             }
 
             // Debug logging
             publishCount++;
-            if (showDebug && publishCount % 10 == 0) // Log every 10th publish to avoid spam
+            if (showDebug)
             {
-                Debug.Log($"[ObstaclePublisher] Published {sceneObstacles.Length} obstacles (count: {publishCount})");
+                // A compact, single-line summary that is easy to read in the collapsed console view.
+                string summary = $"[ObstaclePublisher] Publishing {message.obstacles.Length} obstacles. Frame: '{message.header.frame_id}', Stamp: {message.header.stamp.secs}";
+                // Debug.Log(summary);
             }
 
-            // Detailed JSON logging for debugging (use sparingly)
+            // Detailed multi-line logging for debugging (use sparingly)
             if (printJsonMessage)
             {
-                string jsonMessage = JsonUtility.ToJson(message, true);
-                Debug.Log($"[ObstaclePublisher] Message JSON:\n{jsonMessage}");
+                var logBuilder = new System.Text.StringBuilder();
+                logBuilder.AppendLine("[ObstaclePublisher] Full Message Details:");
+                logBuilder.AppendFormat("  Header: frame='{0}', stamp={1}.{2:D9}\n", message.header.frame_id, message.header.stamp.secs, message.header.stamp.nsecs);
+                logBuilder.AppendFormat("  Obstacle Count: {0}\n", message.obstacles.Length);
+                foreach (var obstacleMsg in message.obstacles)
+                {
+                    logBuilder.AppendFormat("    - ID: {0}, Type: '{1}', Pos: ({2:F2}, {3:F2}, {4:F2}), Scale: ({5:F2}, {6:F2}, {7:F2})\n",
+                        obstacleMsg.id,
+                        obstacleMsg.type,
+                        obstacleMsg.pose.position.x,
+                        obstacleMsg.pose.position.y,
+                        obstacleMsg.pose.position.z,
+                        obstacleMsg.scale.x,
+                        obstacleMsg.scale.y,
+                        obstacleMsg.scale.z
+                    );
+                }
+                // Debug.Log(logBuilder.ToString());
             }
 
             ros.Send(topicName, message);
@@ -116,7 +137,7 @@ namespace SEAN.Scenario.Obstacles
             sceneObstacles = FindObjectsOfType<TrackedObstacle>();
             if (showDebug)
             {
-                Debug.Log($"[ObstaclePublisher] Refreshed obstacle list. Now tracking {sceneObstacles.Length} obstacles.");
+                // Debug.Log($"[ObstaclePublisher] Refreshed obstacle list. Now tracking {sceneObstacles.Length} obstacles.");
             }
         }
 
@@ -127,7 +148,7 @@ namespace SEAN.Scenario.Obstacles
         {
             if (showDebug)
             {
-                Debug.Log("[ObstaclePublisher] Force publishing obstacles.");
+                // Debug.Log("[ObstaclePublisher] Force publishing obstacles.");
             }
             PublishObstacles();
         }

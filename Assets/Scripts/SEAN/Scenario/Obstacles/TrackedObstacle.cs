@@ -30,24 +30,27 @@ namespace SEAN.Scenario.Obstacles
         public Vector3 GetSize()
         {
             Collider c = GetComponent<Collider>();
-            
+            // Ensure we use the absolute scale to prevent negative sizes in ROS, which can cause issues.
+            Vector3 absScale = new Vector3(Mathf.Abs(transform.lossyScale.x), Mathf.Abs(transform.lossyScale.y), Mathf.Abs(transform.lossyScale.z));
+
             if (c is BoxCollider)
             {
                 BoxCollider bc = (BoxCollider)c;
                 // Important: we need to account for the transform's scale
-                return Vector3.Scale(bc.size, transform.lossyScale);
+                return Vector3.Scale(bc.size, absScale);
             }
             else if (c is SphereCollider)
             {
                 SphereCollider sc = (SphereCollider)c;
-                float diameter = sc.radius * 2 * Mathf.Max(transform.lossyScale.x, transform.lossyScale.y, transform.lossyScale.z);
+                float maxScale = Mathf.Max(absScale.x, absScale.y, absScale.z);
+                float diameter = sc.radius * 2 * maxScale;
                 return new Vector3(diameter, diameter, diameter);
             }
             else if (c is CapsuleCollider)
             {
                 CapsuleCollider cc = (CapsuleCollider)c;
-                float radius = cc.radius * Mathf.Max(transform.lossyScale.x, transform.lossyScale.z);
-                float height = cc.height * transform.lossyScale.y;
+                float radius = cc.radius * Mathf.Max(absScale.x, absScale.z);
+                float height = cc.height * absScale.y;
                 return new Vector3(radius * 2, height, radius * 2);
             }
             
