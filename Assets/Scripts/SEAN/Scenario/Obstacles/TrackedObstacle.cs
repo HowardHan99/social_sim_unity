@@ -58,12 +58,39 @@ namespace SEAN.Scenario.Obstacles
             return c.bounds.size;
         }
 
+        /// <summary>
+        /// Get the world position of the obstacle's center (accounting for collider center offset).
+        /// </summary>
+        public Vector3 GetCenter()
+        {
+            Collider c = GetComponent<Collider>();
+            
+            if (c is BoxCollider)
+            {
+                BoxCollider bc = (BoxCollider)c;
+                return transform.TransformPoint(bc.center);
+            }
+            else if (c is SphereCollider)
+            {
+                SphereCollider sc = (SphereCollider)c;
+                return transform.TransformPoint(sc.center);
+            }
+            else if (c is CapsuleCollider)
+            {
+                CapsuleCollider cc = (CapsuleCollider)c;
+                return transform.TransformPoint(cc.center);
+            }
+            
+            // Fallback to collider bounds center
+            return c.bounds.center;
+        }
+
         private void OnDrawGizmos()
         {
             if (showDebug)
             {
                 Gizmos.color = Color.yellow;
-                Gizmos.DrawWireCube(transform.position, GetSize());
+                Gizmos.DrawWireCube(GetCenter(), GetSize());
             }
         }
 
@@ -71,7 +98,7 @@ namespace SEAN.Scenario.Obstacles
         {
             if (showDebug)
             {
-                Debug.Log($"[TrackedObstacle] ID:{id} Type:{type} Position:{transform.position} Size:{GetSize()}");
+                Debug.Log($"[TrackedObstacle] ID:{id} Type:{type} Center:{GetCenter()} Size:{GetSize()}");
             }
         }
     }

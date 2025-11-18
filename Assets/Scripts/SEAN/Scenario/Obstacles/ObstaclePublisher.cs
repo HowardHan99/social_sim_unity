@@ -44,7 +44,7 @@ namespace SEAN.Scenario.Obstacles
             sean = SEAN.instance;
 
             // Register the publisher with ROS before publishing any messages
-            // ros.RegisterPublisher(topicName, RosMessageTypes.SocialSimRos.MObstacleArray.RosMessageName);
+            ros.RegisterPublisher(topicName, RosMessageTypes.SocialSimRos.MObstacleArray.RosMessageName);
 
             // Find all obstacles in the scene at startup
             sceneObstacles = FindObjectsOfType<TrackedObstacle>();
@@ -84,7 +84,9 @@ namespace SEAN.Scenario.Obstacles
                 obstacleMsg.type = obstacle.type;
 
                 // Get pose with coordinate system transformation (Unity LHS Y-up to ROS RHS Z-up)
-                obstacleMsg.pose = Util.Geometry.GetMPose(obstacle.transform);
+                // Use the collider's center position (not just transform.position) to account for center offset
+                Pose obstaclePose = new Pose(obstacle.GetCenter(), obstacle.transform.rotation);
+                obstacleMsg.pose = Util.Geometry.GetMPose(obstaclePose);
 
                 // Get size with coordinate system transformation
                 Vector3 unitySize = obstacle.GetSize();

@@ -20,14 +20,15 @@ TagManager:
   - GroupMember
   - NavAgent
   - TopViewCamera
+  - Editable
   layers:
   - Default
   - TransparentFX
   - Ignore Raycast
-  - 
+  - Raycast
   - Water
   - UI
-  - 
+  - Gizmo
   - 
   - VirtualCollider
   - Fluorescent

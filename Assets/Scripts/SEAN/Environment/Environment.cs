@@ -25,7 +25,13 @@ namespace SEAN.Environment
         {
             get
             {
-                GameObject gameObject = environment.transform.Find("Cameras/TopViewCamera").gameObject;
+                Transform cameraTransform = environment.transform.Find("TopViewCamera");
+                if (cameraTransform == null)
+                {
+                    Debug.LogError("TopViewCamera not found under " + environment.name);
+                    return null;
+                }
+                GameObject gameObject = cameraTransform.gameObject;
                 gameObject.tag = "TopViewCamera";
                 return gameObject.GetComponent<Camera>();
             }
