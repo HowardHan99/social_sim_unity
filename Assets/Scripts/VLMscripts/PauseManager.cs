@@ -3,8 +3,7 @@ using UnityEngine;
 public class PauseManager : MonoBehaviour
 {
     public static PauseManager Instance { get; private set; }
-
-    private bool isPaused = false;
+    public bool isPaused = false; // this is the public variable that can be accessed from other scripts
 
     private void Awake()
     {
@@ -36,5 +35,21 @@ public class PauseManager : MonoBehaviour
     public bool IsGamePaused()
     {
         return isPaused;
+    }
+
+    private void Update()
+    {
+        // Toggle pause state when space key is pressed
+        if (Input.GetKeyDown(KeyCode.Space))
+        {
+            if (isPaused)
+            {
+                UnpauseGame();
+            }
+            else
+            {
+                PauseGame();
+            }
+        }
     }
 }

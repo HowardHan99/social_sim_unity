@@ -73,14 +73,14 @@ public class FreeCamera : MonoBehaviour
 
         Vector3 moveDelta = Vector3.zero;
 
-        if (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow)) moveDelta += -transform.right;
-        if (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow)) moveDelta += transform.right;
-        if (Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow)) moveDelta += transform.forward;
-        if (Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.DownArrow)) moveDelta += -transform.forward;
-        if (Input.GetKey(KeyCode.Q)) moveDelta += transform.up;
-        if (Input.GetKey(KeyCode.E)) moveDelta += -transform.up;
-        if (Input.GetKey(KeyCode.R) || Input.GetKey(KeyCode.PageUp)) moveDelta += Vector3.up;
-        if (Input.GetKey(KeyCode.F) || Input.GetKey(KeyCode.PageDown)) moveDelta += -Vector3.up;
+        // if (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow)) moveDelta += -transform.right;
+        // if (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow)) moveDelta += transform.right;
+        // if (Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow)) moveDelta += transform.forward;
+        // if (Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.DownArrow)) moveDelta += -transform.forward;
+        // if (Input.GetKey(KeyCode.Q)) moveDelta += transform.up;
+        // if (Input.GetKey(KeyCode.E)) moveDelta += -transform.up;
+        // if (Input.GetKey(KeyCode.R) || Input.GetKey(KeyCode.PageUp)) moveDelta += Vector3.up;
+        // if (Input.GetKey(KeyCode.F) || Input.GetKey(KeyCode.PageDown)) moveDelta += -Vector3.up;
 
         var moveSpeed = fastMode ? fastMovementSpeed : movementSpeed;
         transform.position += moveDelta * moveSpeed * Time.deltaTime;

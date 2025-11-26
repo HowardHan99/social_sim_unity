@@ -94,3 +94,6 @@ Assets/openaiapikey.txt.meta
 /Assets/RenderStreaming/Unity Render Streaming
 /Assets/Samples/Unity Render Streaming
 /Assets/Samples
+*.rerunstate
+*.meta
+Assets/Rerun

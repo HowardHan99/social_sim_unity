@@ -1,12 +1,15 @@
 using UnityEngine;
 using System.Collections.Generic;
 using UnityEngine.EventSystems;
+using UnityEngine.UI;
+using TMPro;
 
 [System.Serializable]
 public class SpawnableObject
 {
     public string id;
     public GameObject prefab;
+    public Button spawnButton; // Reference to the UI button
 }
 
 public class RuntimeEditorManager : MonoBehaviour
@@ -108,12 +111,12 @@ public class RuntimeEditorManager : MonoBehaviour
         
         if (mainCamera != null)
         {
-            Debug.Log($"[RuntimeEditor] Camera Details:");
-            Debug.Log($"  - Name: {mainCamera.name}, GameObject: {mainCamera.gameObject.name}");
-            Debug.Log($"  - Position: {mainCamera.transform.position}, Rotation: {mainCamera.transform.rotation.eulerAngles}");
-            Debug.Log($"  - FOV: {mainCamera.fieldOfView}, Near: {mainCamera.nearClipPlane}, Far: {mainCamera.farClipPlane}");
-            Debug.Log($"  - Viewport Rect: {mainCamera.rect}");
-            Debug.Log($"  - RenderTexture: {(mainCamera.targetTexture != null ? mainCamera.targetTexture.name : "None (renders to screen)")}");
+            // Debug.Log($"[RuntimeEditor] Camera Details:");
+            // Debug.Log($"  - Name: {mainCamera.name}, GameObject: {mainCamera.gameObject.name}");
+            // Debug.Log($"  - Position: {mainCamera.transform.position}, Rotation: {mainCamera.transform.rotation.eulerAngles}");
+            // Debug.Log($"  - FOV: {mainCamera.fieldOfView}, Near: {mainCamera.nearClipPlane}, Far: {mainCamera.farClipPlane}");
+            // Debug.Log($"  - Viewport Rect: {mainCamera.rect}");
+            // Debug.Log($"  - RenderTexture: {(mainCamera.targetTexture != null ? mainCamera.targetTexture.name : "None (renders to screen)")}");
         }
         else
         {
@@ -121,6 +124,7 @@ public class RuntimeEditorManager : MonoBehaviour
         }
 
         SetupGizmoCamera();
+        SetupSpawnButtons();
 
         // Configure layer mask
         if (ignoreUILayer)
@@ -201,7 +205,14 @@ public class RuntimeEditorManager : MonoBehaviour
             //spawnCanvas.worldCamera = mainCamera;
         }
 
-        Debug.Log("Editor Mode Enabled - Press " + toggleKey + " to exit. Click objects to edit them.");
+        // Pause the game when entering editor mode
+        if (PauseManager.Instance != null)
+        {
+            PauseManager.Instance.PauseGame();
+            Debug.Log("Game paused - Editor mode active");
+        }
+
+        Debug.Log("Editor Mode Enabled - Press " + toggleKey + " or ESC to exit. Click objects to edit them.");
     }
 
     void ExitEditorMode()
@@ -220,6 +231,13 @@ public class RuntimeEditorManager : MonoBehaviour
             spawnCanvas.gameObject.SetActive(false);
         }
 
+        // Unpause the game when exiting editor mode
+        if (PauseManager.Instance != null)
+        {
+            PauseManager.Instance.UnpauseGame();
+            Debug.Log("Game unpaused - Normal mode resumed");
+        }
+
         Debug.Log("Editor Mode Disabled - Normal mode resumed.");
     }
 
@@ -234,7 +252,7 @@ public class RuntimeEditorManager : MonoBehaviour
 
         if (editableObjects.Count == 0)
         {
-            Debug.LogWarning("No editable objects found! Assign objects manually or set a tag.");
+            // Debug.LogWarning("No editable objects found! Assign objects manually or set a tag.");
         }
     }
 
@@ -289,8 +307,22 @@ public class RuntimeEditorManager : MonoBehaviour
             }
         }
 
-        // Press Escape or right click to deselect
-        if (Input.GetKeyDown(KeyCode.Escape) || Input.GetMouseButtonDown(1))
+        // Press Escape to deselect or exit editor mode
+        if (Input.GetKeyDown(KeyCode.Escape))
+        {
+            if (currentSelectedObject != null)
+            {
+                DeselectObject();
+            }
+            else
+            {
+                // If no object selected, exit editor mode
+                SetEditorMode(false);
+            }
+        }
+
+        // Right click to deselect
+        if (Input.GetMouseButtonDown(1))
         {
             if (currentSelectedObject != null)
             {
@@ -329,7 +361,7 @@ public class RuntimeEditorManager : MonoBehaviour
         // This allows clicking anywhere on screen to raycast through the camera's view
         Vector3 viewportPoint = new Vector3(normalizedScreenX, normalizedScreenY, 0);
         
-        Debug.Log($"[Ray Calculation] Normalized Screen: ({normalizedScreenX:F3}, {normalizedScreenY:F3}) -> Viewport: ({viewportPoint.x:F3}, {viewportPoint.y:F3})");
+        // Debug.Log($"[Ray Calculation] Normalized Screen: ({normalizedScreenX:F3}, {normalizedScreenY:F3}) -> Viewport: ({viewportPoint.x:F3}, {viewportPoint.y:F3})");
         
         // Use ViewportPointToRay which properly handles the camera's viewport rect
         return mainCamera.ViewportPointToRay(viewportPoint);
@@ -426,7 +458,7 @@ public class RuntimeEditorManager : MonoBehaviour
         style.alignment = TextAnchor.UpperLeft;
 
         string helpText = "=== RUNTIME EDITOR MODE ===\n";
-        helpText += "Press [" + toggleKey + "] to exit\n";
+        helpText += "Press [" + toggleKey + "] or [ESC] to exit\n";
         helpText += "Click object to select\n";
 
         if (currentSelectedObject != null)
@@ -434,11 +466,12 @@ public class RuntimeEditorManager : MonoBehaviour
             helpText += "\nSelected: " + currentSelectedObject.name + "\n";
             helpText += "[T] Translate Mode\n";
             helpText += "[R] Rotate Mode\n";
-            helpText += "[ESC] Deselect";
+            helpText += "[ESC] Deselect (press again to exit)";
         }
         else
         {
-            helpText += "\nNo object selected";
+            helpText += "\nNo object selected\n";
+            helpText += "[ESC] Exit editor mode";
         }
 
         GUI.Label(new Rect(10, 10, 300, 200), helpText, style);
@@ -562,6 +595,36 @@ public class RuntimeEditorManager : MonoBehaviour
         gizmoCamera.cullingMask = 1 << gizmoLayer;
         gizmoCamera.clearFlags = CameraClearFlags.Depth;
         gizmoCamera.depth = mainCamera.depth + 1;
+    }
+
+    void SetupSpawnButtons()
+    {
+        foreach (var spawnableObject in spawnableObjects)
+        {
+            if (spawnableObject.spawnButton != null && spawnableObject.prefab != null)
+            {
+                // Get the prefab name
+                string objectName = spawnableObject.prefab.name;
+                
+                // Set button text to "Add + [object name]"
+                TMP_Text buttonText = spawnableObject.spawnButton.GetComponentInChildren<TMP_Text>();
+                if (buttonText != null)
+                {
+                    buttonText.text = "Add + " + objectName;
+                }
+                else
+                {
+                    // Fallback to regular Text component if TMP_Text is not found
+                    Text legacyButtonText = spawnableObject.spawnButton.GetComponentInChildren<Text>();
+                    if (legacyButtonText != null)
+                    {
+                        legacyButtonText.text = "Add + " + objectName;
+                    }
+                }
+                
+                Debug.Log($"[RuntimeEditor] Set button text to 'Add + {objectName}'");
+            }
+        }
     }
 
 

@@ -1913,8 +1913,9 @@ GameObject:
   - component: {fileID: 3974159023153492028}
   - component: {fileID: 6374679031287003174}
   - component: {fileID: 7923220642289013467}
+  - component: {fileID: 4480597360762319672}
   m_Layer: 0
-  m_Name: Wheelchair_male_01
+  m_Name: Wheelchair_male
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -2009,7 +2010,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   isObservedComponentsExpanded: 1
   replayIdentity:
-    id: 46560
+    id: 22241
   prefabIdentity:
     id: 24035
   observedComponents:
@@ -2034,7 +2035,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   noManagingObject: 0
   replayIdentity:
-    id: 15054
+    id: 18017
   replayObject:
     reference: {fileID: -5477524094443794759}
   positionFlags: 263
@@ -2054,7 +2055,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   noManagingObject: 0
   replayIdentity:
-    id: 54549
+    id: 37881
   replayObject:
     reference: {fileID: -5477524094443794759}
   observedAnimator: {fileID: 6090832110011958511}
@@ -2085,7 +2086,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 6004020823855633571}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 82986ae7dfa33654295162cffcb1b085, type: 3}
   m_Name: 
@@ -2099,6 +2100,21 @@ MonoBehaviour:
   rightKey: 275
   useWASD: 1
   isManualMode: 0
+--- !u!114 &4480597360762319672
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6004020823855633571}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b4e94d7334da65042afa75d2d7b48b40, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  plannerFPS: 5
+  neighbors: []
+  pwdPersonalRadius: 0.4
 --- !u!1 &6061559745281181226
 GameObject:
   m_ObjectHideFlags: 0

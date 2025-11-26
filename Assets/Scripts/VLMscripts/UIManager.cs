@@ -1,5 +1,5 @@
 using UnityEngine;
-using TMPro; 
+using TMPro;
 using System.Collections.Generic;
 using UnityEngine.UI;
 using System.Collections;
@@ -7,33 +7,91 @@ using System.Collections;
 public class UIManager : MonoBehaviour
 {
     public GameObject popUpWindow; // Reference to the pop-up panel for the response content selection
-    public GameObject responseWindow; 
+    public GameObject responseWindow;
 
-    public List<GameObject> signalButtons; 
+    public List<GameObject> signalButtons;
 
     public List<Toggle> optionToggles; // List of all toggles
     public TMP_Text promptDisplay; // To show the generated prompt
-    //public CamCapture camCapture; // Reference to CamCapture.cs
+
+    public TMP_InputField responseInputField; // Editable text field for LLM response
+    public Button confirmResponseButton; // Button to confirm the edited response
+    public TTSManager ttsManager; // Reference to TTSManager
 
     private string prompt; // Store the generated prompt string
+    private string finalResponse; // Store the confirmed response text
 
     float elapsedTime = 0f;
+
+    void Start()
+    {
+        // Setup confirm button listener
+        if (confirmResponseButton != null)
+        {
+            confirmResponseButton.onClick.AddListener(OnConfirmResponseButtonPressed);
+        }
+    }
 
     void Update()
     {
         elapsedTime += Time.unscaledDeltaTime; // Ensures the UI works even when the game is paused
+
+        // Show signal buttons only when the game is paused
+        if (PauseManager.Instance != null)
+        {
+            bool shouldShow = PauseManager.Instance.isPaused;
+            foreach (GameObject item in signalButtons)
+            {
+                if (item.activeSelf != shouldShow)
+                {
+                    item.SetActive(shouldShow);
+                }
+            }
+        }
     }
 
 
     public string GetPrompt() // Allow other scripts to access the prompt
     {
-        //OnConfirmButtonPressed();
         Debug.Log(prompt);
         promptDisplay.text = prompt;
         return prompt;
     }
 
+    public void DisplayLLMResponse(string response)
+    {
+        if (responseInputField != null)
+        {
+            responseInputField.text = response;
+            responseInputField.interactable = true; // Make sure it's editable
 
+            // Select all text for easy editing
+            responseInputField.Select();
+            responseInputField.ActivateInputField();
+        }
+    }
+
+    void OnConfirmResponseButtonPressed()
+    {
+        if (responseInputField != null && ttsManager != null)
+        {
+            finalResponse = responseInputField.text;
+            Debug.Log("User confirmed response: " + finalResponse);
+
+            // Convert to speech
+            ttsManager.ConvertTextToSpeech(finalResponse);
+
+            // Optional: Disable the confirm button to prevent multiple clicks
+            confirmResponseButton.interactable = false;
+            StartCoroutine(ReEnableConfirmButton());
+        }
+    }
+
+    IEnumerator ReEnableConfirmButton()
+    {
+        yield return new WaitForSeconds(2f);
+        confirmResponseButton.interactable = true;
+    }
 
     public void OnConfirmButtonPressed()
     {
@@ -59,18 +117,19 @@ public class UIManager : MonoBehaviour
         Debug.Log(prompt);
 
         StartCoroutine(HidePopUp());
-        //promptDisplay.text = "Generated Prompt:\n" + prompt; // Show the prompt on UI
     }
 
     string GeneratePromptString(List<string> options)
     {
-        string basePrompt = "The delivery robot is navigating on a sidewalk. The image is a real-time capture from the robot's perspective. The robot signal message should be intuitive, clear, and brief to prevent accidents and guarantee pedestrian safety.";
+        string basePrompt = "The delivery robot is navigating on a sidewalk. The image is a real-time capture from the robot's perspective. Generate a brief, natural, and friendly spoken message that the robot would say to nearby pedestrians. The message should be conversational and intuitive to prevent accidents and guarantee pedestrian safety.";
 
         if (options.Count > 0)
         {
-            basePrompt += " The signal message should include the following information: ";
+            basePrompt += " The message should include the following information: ";
             basePrompt += string.Join(", ", options) + ".";
         }
+
+        basePrompt += " Keep it under 30 words and speak naturally as if the robot is politely communicating with people around it.";
 
         return basePrompt;
     }
@@ -80,6 +139,7 @@ public class UIManager : MonoBehaviour
         PauseManager.Instance.PauseGame();
         ShowPopUp();
     }
+
     public void ShowPopUp()
     {
         popUpWindow.SetActive(true); // Show the pop-up window
@@ -93,9 +153,8 @@ public class UIManager : MonoBehaviour
 
     private IEnumerator HidePopUp()
     {
-        //yield return new WaitForSeconds(5f);
         yield return null;
-        popUpWindow.SetActive(false); // Show the pop-up window
+        popUpWindow.SetActive(false); // Hide the pop-up window
         responseWindow.SetActive(true);
 
         //show previous buttons

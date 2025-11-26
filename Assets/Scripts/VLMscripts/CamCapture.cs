@@ -6,93 +6,46 @@ using UnityEngine.UI;
 
 public class CamCapture : MonoBehaviour
 {
-    public Camera cam; // The reference camera to sync with
+    public Camera cam;
     public Button captureButton;
+    public FreeCamera freeCamera; // Reference to movement data
 
-    private Camera localCam; // The camera attached to this GameObject
     private int imageIndex = 0; // Counter for naming images
 
     private string savedFilePath;
     private string customPrompt;
     public UIManager uiManager;
 
-    private string openAI_API_Key = "";
+    private string openAI_API_Key;
 
+    private void Awake()
+    {
+        // Reads the API key from a file called "openai_key.txt" in the persistent data path
+        string keyPath = Path.Combine(Application.persistentDataPath, "openaiapikey.txt");
+        if (File.Exists(keyPath))
+        {
+            openAI_API_Key = File.ReadAllText(keyPath).Trim();
+        }
+        else
+        {
+            openAI_API_Key = "";
+        }
+    } 
     void Start()
     {
-        // Check if reference camera is assigned in the Inspector
         if (cam == null)
         {
-            Debug.LogError("Reference Camera not assigned to CamCapture. Please assign a camera in the Inspector.");
+            cam = GetComponent<Camera>();
         }
-
-        // Get the local camera component
-        localCam = GetComponent<Camera>();
-        if (localCam == null)
-        {
-            Debug.LogError("No Camera component found on this GameObject.");
-        }
-        
-        // Load API key from file
-        try
-        {
-            string filePath = Path.Combine(Application.dataPath, "openaiapikey.txt");
-            if (File.Exists(filePath))
-            {
-                openAI_API_Key = File.ReadAllText(filePath).Trim();
-                Debug.Log("API key loaded successfully");
-            }
-            else
-            {
-                Debug.LogError("API key file not found at: " + filePath);
-            }
-        }
-        catch (System.Exception e)
-        {
-            Debug.LogError("Error loading API key: " + e.Message);
-        }
-    }
-
-    void Update()
-    {
-        // Sync the local camera with the reference camera (except display settings)
-        if (cam != null && localCam != null)
-        {
-            SyncCameras();
-        }
-    }
-
-    void SyncCameras()
-    {
-        // Sync properties from reference camera to local camera (excluding display settings)
-        localCam.nearClipPlane = cam.nearClipPlane;
-        localCam.farClipPlane = cam.farClipPlane;
-        localCam.fieldOfView = cam.fieldOfView;
-        localCam.cullingMask = cam.cullingMask;
-        localCam.clearFlags = cam.clearFlags;
-        localCam.backgroundColor = cam.backgroundColor;
-        localCam.depth = cam.depth;
-        localCam.renderingPath = cam.renderingPath;
-        localCam.useOcclusionCulling = cam.useOcclusionCulling;
-        localCam.allowHDR = cam.allowHDR;
-        localCam.allowMSAA = cam.allowMSAA;
-        localCam.allowDynamicResolution = cam.allowDynamicResolution;
-        
-        // Sync transform parameters
-        localCam.transform.position = cam.transform.position;
-        localCam.transform.rotation = cam.transform.rotation;
-        
-        // Don't sync the target texture or other display-specific settings
     }
 
     public void CaptureAndProcessImage()
     {
-        // Use the reference camera for capturing
         Texture2D image = CaptureImage();
         string filePath = SaveImage(image);
         Debug.Log("Image captured and saved at: " + filePath);
 
-        // StartCoroutine(UploadImageToOpenAI(filePath)); // Upload image after capturing - Temporarily Disabled
+        StartCoroutine(UploadImageToOpenAI(filePath)); // Upload image after capturing
     }
 
     public void CaptureAndSaveImage()
@@ -106,7 +59,7 @@ public class CamCapture : MonoBehaviour
     {
         if (!string.IsNullOrEmpty(savedFilePath) && !string.IsNullOrEmpty(customPrompt))
         {
-            // StartCoroutine(UploadImageToOpenAI(savedFilePath)); // Temporarily Disabled
+            StartCoroutine(UploadImageToOpenAI(savedFilePath));
         }
         else
         {
@@ -201,11 +154,11 @@ public class CamCapture : MonoBehaviour
     {
         Debug.Log("Sending image file to OpenAI...");
 
-        // Removed movement status reference
+        string movementStatus = freeCamera.GetMovementStatus();
+        Debug.Log(movementStatus);
         customPrompt = uiManager.GetPrompt();
-        
-        // Modified JSON data to remove movement status
-        string jsonData = "{\"model\": \"gpt-4o-mini\", \"messages\": [{\"role\": \"user\", \"content\": \"" + customPrompt + "\", \"type\": \"file\", \"file\": \"file:" + fileId + "\"}]}";
+
+        string jsonData = "{\"model\": \"gpt-4o-mini\", \"messages\": [{\"role\": \"user\", \"content\": \"" + customPrompt + " Movement Status: " + movementStatus + "\", \"type\": \"file\", \"file\": \"file:" + fileId + "\"}]}";
 
         using (UnityWebRequest request = new UnityWebRequest("https://api.openai.com/v1/chat/completions", "POST"))
         {
@@ -223,8 +176,17 @@ public class CamCapture : MonoBehaviour
                 string response = request.downloadHandler.text;
                 Debug.Log("OpenAI Response: " + request.downloadHandler.text);
 
+                // NEW: Parse and extract the actual message content
+                string messageContent = ParseOpenAIResponse(response);
+
+                // NEW: Display the response in the editable UI field
+                if (uiManager != null)
+                {
+                    uiManager.DisplayLLMResponse(messageContent);
+                }
+
                 // Save the response to a log file
-                SaveResponseToLog(response, imageName);
+                SaveResponseToLog(response, imageName, movementStatus);
             }
             else
             {
@@ -233,8 +195,89 @@ public class CamCapture : MonoBehaviour
         }
     }
 
-    // Save responses to a log file - removed movement status parameter
-    void SaveResponseToLog(string response, string imageName)
+    string ParseOpenAIResponse(string jsonResponse)
+    {
+        try
+        {
+            Debug.Log("Attempting to parse response...");
+
+            // Find the `"content":` key (allowing spaces after colon)
+            int keyIndex = jsonResponse.IndexOf("\"content\":");
+            if (keyIndex == -1)
+            {
+                Debug.LogError("Could not find 'content' field in response");
+                return jsonResponse; // Fallback: return whole JSON
+            }
+
+            // Move to the character after `"content":`
+            int i = keyIndex + "\"content\":".Length;
+
+            // Skip whitespace
+            while (i < jsonResponse.Length && char.IsWhiteSpace(jsonResponse[i]))
+            {
+                i++;
+            }
+
+            // Expect starting quote for the string
+            if (i >= jsonResponse.Length || jsonResponse[i] != '\"')
+            {
+                Debug.LogError("Content field is not a JSON string");
+                return jsonResponse;
+            }
+
+            int contentStart = i + 1;
+
+            // Find the closing quote, handling escape sequences
+            int contentEnd = contentStart;
+            bool isEscaped = false;
+
+            for (int j = contentStart; j < jsonResponse.Length; j++)
+            {
+                char c = jsonResponse[j];
+
+                if (c == '\\' && !isEscaped)
+                {
+                    isEscaped = true;
+                    continue;
+                }
+
+                if (c == '\"' && !isEscaped)
+                {
+                    contentEnd = j;
+                    break;
+                }
+
+                isEscaped = false;
+            }
+
+            if (contentEnd <= contentStart)
+            {
+                Debug.LogError("Failed to locate end of content string");
+                return jsonResponse;
+            }
+
+            string content = jsonResponse.Substring(contentStart, contentEnd - contentStart);
+
+            // Unescape common sequences
+            content = content
+                .Replace("\\n", "\n")
+                .Replace("\\r", "\r")
+                .Replace("\\\"", "\"")
+                .Replace("\\\\", "\\");
+
+            Debug.Log("Successfully parsed content: " + content);
+            return content;
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError("Error parsing OpenAI response: " + e.Message);
+            Debug.LogError("Full response: " + jsonResponse);
+            return "Error parsing response. Check console for details.";
+        }
+    }
+
+    // Save responses to a log file
+    void SaveResponseToLog(string response, string imageName, string movementStatus)
     {
         string logFilePath = Application.persistentDataPath + "/ResponseLog.txt";
 
@@ -243,7 +286,7 @@ public class CamCapture : MonoBehaviour
         {
             writer.WriteLine("Timestamp: " + System.DateTime.Now);
             writer.WriteLine("Image Name: " + imageName);
-            // Removed movement status logging
+            writer.WriteLine("Movement Status: " + movementStatus);
             writer.WriteLine("User Prompt: " + customPrompt);
             writer.WriteLine("Response: " + response);
             writer.WriteLine("----------");

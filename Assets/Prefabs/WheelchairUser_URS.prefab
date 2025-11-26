@@ -2588,7 +2588,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   isObservedComponentsExpanded: 0
   replayIdentity:
-    id: 51537
+    id: 5103
   prefabIdentity:
     id: 24035
   observedComponents:
@@ -2613,7 +2613,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   noManagingObject: 0
   replayIdentity:
-    id: 20521
+    id: 27288
   replayObject:
     reference: {fileID: 426270120587482905}
   positionFlags: 263
@@ -2633,7 +2633,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   noManagingObject: 0
   replayIdentity:
-    id: 6932
+    id: 48394
   replayObject:
     reference: {fileID: 426270120587482905}
   observedAnimator: {fileID: 7104284622883413327}

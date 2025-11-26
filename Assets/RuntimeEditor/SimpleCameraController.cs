@@ -60,6 +60,9 @@ namespace UnityTemplateProjects
 
         CameraState m_TargetCameraState = new CameraState();
         CameraState m_InterpolatingCameraState = new CameraState();
+        CameraState m_InitialCameraState = new CameraState(); // Store initial state before edit mode
+        
+        private bool m_WasEditorActive = false; // Track editor state changes
 
         [Header("Movement Settings")]
         [Tooltip("Pan speed when dragging with middle mouse button.")]
@@ -133,6 +136,7 @@ namespace UnityTemplateProjects
         {
             m_TargetCameraState.SetFromTransform(transform);
             m_InterpolatingCameraState.SetFromTransform(transform);
+            m_InitialCameraState.SetFromTransform(transform); // Store initial state
         }
 
         Vector3 GetInputTranslationDirection()
@@ -185,9 +189,43 @@ namespace UnityTemplateProjects
             }
 
             // Check if editor is active - camera only moveable when editor is active
-            if (RuntimeEditorManager.Instance != null && !RuntimeEditorManager.Instance.isEditorActive)
+            if (RuntimeEditorManager.Instance != null)
             {
-                return; // Exit early if editor is not active
+                bool isEditorActive = RuntimeEditorManager.Instance.isEditorActive;
+                
+                // Detect when editor becomes active - store initial state
+                if (isEditorActive && !m_WasEditorActive)
+                {
+                    m_InitialCameraState.SetFromTransform(transform);
+                }
+                
+                // Detect when editor becomes inactive - restore initial state
+                if (!isEditorActive && m_WasEditorActive)
+                {
+                    m_TargetCameraState = new CameraState();
+                    m_TargetCameraState.yaw = m_InitialCameraState.yaw;
+                    m_TargetCameraState.pitch = m_InitialCameraState.pitch;
+                    m_TargetCameraState.roll = m_InitialCameraState.roll;
+                    m_TargetCameraState.x = m_InitialCameraState.x;
+                    m_TargetCameraState.y = m_InitialCameraState.y;
+                    m_TargetCameraState.z = m_InitialCameraState.z;
+                    
+                    m_InterpolatingCameraState.yaw = m_InitialCameraState.yaw;
+                    m_InterpolatingCameraState.pitch = m_InitialCameraState.pitch;
+                    m_InterpolatingCameraState.roll = m_InitialCameraState.roll;
+                    m_InterpolatingCameraState.x = m_InitialCameraState.x;
+                    m_InterpolatingCameraState.y = m_InitialCameraState.y;
+                    m_InterpolatingCameraState.z = m_InitialCameraState.z;
+                    
+                    m_InitialCameraState.UpdateTransform(transform);
+                }
+                
+                m_WasEditorActive = isEditorActive;
+                
+                if (!isEditorActive)
+                {
+                    return; // Exit early if editor is not active
+                }
             }
 
             // Hide and lock cursor when right mouse button or middle mouse button pressed
@@ -243,8 +281,9 @@ namespace UnityTemplateProjects
 
             // Framerate-independent interpolation
             // Calculate the lerp amount, such that we get 99% of the way to our target in the specified time
-            var positionLerpPct = 1f - Mathf.Exp((Mathf.Log(1f - 0.99f) / positionLerpTime) * Time.deltaTime);
-            var rotationLerpPct = 1f - Mathf.Exp((Mathf.Log(1f - 0.99f) / rotationLerpTime) * Time.deltaTime);
+            // Use unscaledDeltaTime so camera works even when game is paused
+            var positionLerpPct = 1f - Mathf.Exp((Mathf.Log(1f - 0.99f) / positionLerpTime) * Time.unscaledDeltaTime);
+            var rotationLerpPct = 1f - Mathf.Exp((Mathf.Log(1f - 0.99f) / rotationLerpTime) * Time.unscaledDeltaTime);
             m_InterpolatingCameraState.LerpTowards(m_TargetCameraState, positionLerpPct, rotationLerpPct);
 
             m_InterpolatingCameraState.UpdateTransform(transform);
