@@ -19,7 +19,6 @@ namespace SEAN.Environment
         {
             // First child is the name of the environment
             name = environment.name;
-            Debug.Log($"[Environment] Set environment name to: '{name}' (from first child GameObject: {environment.name})");
         }
 
         public Camera topViewCamera
@@ -28,15 +27,11 @@ namespace SEAN.Environment
             {
                 // Search recursively for TopViewCamera, including inactive objects
                 Camera[] cameras = environment.GetComponentsInChildren<Camera>(true);
-                Debug.Log($"[Environment] Searching for TopViewCamera. Found {cameras.Length} cameras under {environment.name}");
-
                 foreach (Camera cam in cameras)
                 {
-                    Debug.Log($"[Environment] Checking camera: {cam.gameObject.name} (active: {cam.gameObject.activeInHierarchy})");
                     if (cam.gameObject.name == "TopViewCamera")
                     {
                         cam.gameObject.tag = "TopViewCamera";
-                        Debug.Log($"[Environment] Found TopViewCamera at path: {GetGameObjectPath(cam.gameObject)}");
                         return cam;
                     }
                 }
@@ -45,7 +40,6 @@ namespace SEAN.Environment
                 Transform cameraTransform = FindTransformRecursive(environment.transform, "TopViewCamera");
                 if (cameraTransform != null)
                 {
-                    Debug.Log($"[Environment] Found TopViewCamera via recursive search at: {GetGameObjectPath(cameraTransform.gameObject)}");
                     Camera cam = cameraTransform.GetComponent<Camera>();
                     if (cam != null)
                     {

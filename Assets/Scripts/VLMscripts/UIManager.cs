@@ -3,6 +3,7 @@ using TMPro;
 using System.Collections.Generic;
 using UnityEngine.UI;
 using System.Collections;
+using Rerun;
 
 public class UIManager : MonoBehaviour
 {
@@ -18,8 +19,23 @@ public class UIManager : MonoBehaviour
     public Button confirmResponseButton; // Button to confirm the edited response
     public TTSManager ttsManager; // Reference to TTSManager
 
+    public RerunManager rerunManager; // Reference to RerunManager
+
     private string prompt; // Store the generated prompt string
     private string finalResponse; // Store the confirmed response text
+
+    private Camera tempReplayCamera; // Temporary camera for replay viewing
+    private Camera mainCamera; // Reference to the main camera
+    private Vector2 camRotation = Vector2.zero;
+    private float flySpeed = 5f; // Speed for camera movement
+    private float lookSpeed = 2f; // Speed for camera rotation
+    private bool isUsingTempCamera = false;
+    private bool isPositioningCamera = false; // True when user is finding a spot
+    private bool isReplaying = false; // True when replay is active
+    
+    public GameObject instructionPanel; // Reference to InstructionPanel
+    public TMP_InputField instructionInputField; // Reference to InputField (TMP) for showing instructions
+    public Button confirmBN; // Reference to ConfirmBN button
 
     float elapsedTime = 0f;
 
@@ -47,6 +63,61 @@ public class UIManager : MonoBehaviour
                     item.SetActive(shouldShow);
                 }
             }
+        }
+
+        // Handle temp camera movement when positioning
+        if (isPositioningCamera && tempReplayCamera != null)
+        {
+            HandleTempCameraMovement();
+            
+            // Check for Enter key to confirm position and start replay
+            if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter))
+            {
+                StartReplayFromCurrentPosition();
+            }
+        }
+    }
+
+    void HandleTempCameraMovement()
+    {
+        // WASD movement (horizontal only, Y-axis locked at 0)
+        float v = Input.GetKey(KeyCode.W) ? 1 : Input.GetKey(KeyCode.S) ? -1 : 0;
+        float h = Input.GetKey(KeyCode.A) ? -1 : Input.GetKey(KeyCode.D) ? 1 : 0;
+
+        // Move camera in local space
+        tempReplayCamera.transform.Translate(Vector3.forward * flySpeed * v * Time.unscaledDeltaTime, Space.Self);
+        tempReplayCamera.transform.Translate(Vector3.right * flySpeed * h * Time.unscaledDeltaTime, Space.Self);
+
+        // Lock Y-axis to 0
+        tempReplayCamera.transform.position = new Vector3(
+            tempReplayCamera.transform.position.x,
+            0f,
+            tempReplayCamera.transform.position.z
+        );
+
+        // Mouse look (right mouse button)
+        if (Input.GetMouseButtonDown(1))
+        {
+            // Initialize rotation to prevent snapping
+            camRotation.y = tempReplayCamera.transform.localRotation.eulerAngles.y;
+            camRotation.x = tempReplayCamera.transform.localRotation.eulerAngles.x;
+
+            if (camRotation.y > 360)
+                camRotation.y = 0;
+        }
+
+        if (Input.GetMouseButton(1))
+        {
+            float mouseX = Input.GetAxis("Mouse X");
+            float mouseY = -Input.GetAxis("Mouse Y");
+
+            camRotation.y += mouseX * lookSpeed;
+            camRotation.x += mouseY * lookSpeed;
+
+            // Clamp vertical rotation
+            camRotation.x = Mathf.Clamp(camRotation.x, -90f, 90f);
+
+            tempReplayCamera.transform.rotation = Quaternion.Euler(camRotation.x, camRotation.y, 0);
         }
     }
 
@@ -173,6 +244,194 @@ public class UIManager : MonoBehaviour
     {
         responseWindow.SetActive(false);
         PauseManager.Instance.UnpauseGame();
+    }
+
+    /// <summary>
+    /// Starts the replay camera positioning mode - allows user to find a spot before replay starts
+    /// </summary>
+    public void OnReplayButtonPressed()
+    {
+        // Find RerunManager if not assigned
+        if (rerunManager == null)
+        {
+            rerunManager = FindObjectOfType<RerunManager>();
+            if (rerunManager == null)
+            {
+                Debug.LogError("RerunManager not found in scene!");
+                return;
+            }
+        }
+
+        // Get the main camera
+        mainCamera = Camera.main;
+        if (mainCamera == null)
+        {
+            Debug.LogError("Main camera not found!");
+            return;
+        }
+
+        // Pause the game
+        if (PauseManager.Instance != null)
+        {
+            PauseManager.Instance.PauseGame();
+        }
+
+        // Create temporary camera and enter positioning mode
+        CreateTempReplayCamera();
+        isPositioningCamera = true;
+        isReplaying = false;
+
+        // Show instructions to the user
+        ShowReplayInstructions("Position the camera to find a good viewing spot.\n\nWASD - Move | Right-Click - Look Around\n\nPress ENTER to start replay");
+        
+        Debug.Log("Positioning replay camera. Press ENTER when ready to start replay.");
+    }
+
+    /// <summary>
+    /// Starts the actual replay after the user has positioned the camera
+    /// </summary>
+    void StartReplayFromCurrentPosition()
+    {
+        isPositioningCamera = false;
+        isReplaying = true;
+
+        // Update instructions
+        ShowReplayInstructions("Replaying past 10 seconds...");
+
+        // Unpause the game for replay
+        if (PauseManager.Instance != null)
+        {
+            PauseManager.Instance.UnpauseGame();
+        }
+
+        // Call the replay function
+        rerunManager.ReplayPast10Seconds();
+        
+        // Start coroutine to handle end of replay
+        StartCoroutine(SwitchBackToMainCamera(5f));
+        
+        Debug.Log("Starting replay from current camera position.");
+    }
+
+    /// <summary>
+    /// Shows or updates replay instruction text
+    /// </summary>
+    void ShowReplayInstructions(string message, bool showConfirmButton = false)
+    {
+        if (instructionPanel != null)
+        {
+            instructionPanel.SetActive(true);
+        }
+
+        if (instructionInputField != null)
+        {
+            instructionInputField.text = message;
+            instructionInputField.interactable = false; // Make it read-only for instructions
+        }
+
+        // Show/hide the confirm button based on parameter
+        if (confirmBN != null)
+        {
+            confirmBN.gameObject.SetActive(showConfirmButton);
+        }
+    }
+
+    /// <summary>
+    /// Hides replay instruction UI
+    /// </summary>
+    void HideReplayInstructions()
+    {
+        if (instructionPanel != null)
+        {
+            instructionPanel.SetActive(false);
+        }
+    }
+
+    void CreateTempReplayCamera()
+    {
+        // Clean up any existing temp camera
+        if (tempReplayCamera != null)
+        {
+            Destroy(tempReplayCamera.gameObject);
+        }
+
+        // Create new camera GameObject
+        GameObject tempCamObj = new GameObject("TempReplayCamera");
+        tempReplayCamera = tempCamObj.AddComponent<Camera>();
+
+        // Position it 5 meters ahead of the main camera in XZ plane, but Y is fixed at 0
+        Vector3 forwardXZ = new Vector3(mainCamera.transform.forward.x, 0, mainCamera.transform.forward.z).normalized;
+        Vector3 offsetPosition = mainCamera.transform.position + (forwardXZ * 5f);
+        offsetPosition.y = 0f; // Fix Y at 0
+        
+        tempReplayCamera.transform.position = offsetPosition;
+
+        // Make it look at the main camera's position (at ground level)
+        Vector3 lookTarget = new Vector3(mainCamera.transform.position.x, 0f, mainCamera.transform.position.z);
+        tempReplayCamera.transform.LookAt(lookTarget);
+
+        // Copy camera settings from main camera
+        tempReplayCamera.fieldOfView = mainCamera.fieldOfView;
+        tempReplayCamera.nearClipPlane = mainCamera.nearClipPlane;
+        tempReplayCamera.farClipPlane = mainCamera.farClipPlane;
+
+        // Enable the temp camera and disable the main camera
+        mainCamera.enabled = false;
+        tempReplayCamera.enabled = true;
+
+        isUsingTempCamera = true;
+
+        Debug.Log("Temporary replay camera created at position: " + offsetPosition);
+    }
+
+    IEnumerator SwitchBackToMainCamera(float duration)
+    {
+        // Wait for the replay duration
+        yield return new WaitForSeconds(duration);
+
+        isReplaying = false;
+
+        // Pause the game and prompt user to take over
+        if (PauseManager.Instance != null)
+        {
+            PauseManager.Instance.PauseGame();
+        }
+
+        // Show take over prompt
+        ShowReplayInstructions("Replay finished!\n\nPress SPACE to take over and return to main camera");
+
+        // Wait for user to press space to take over
+        while (!Input.GetKeyDown(KeyCode.Space))
+        {
+            yield return null;
+        }
+
+        // Switch back to main camera
+        if (mainCamera != null)
+        {
+            mainCamera.enabled = true;
+        }
+
+        // Destroy temp camera
+        if (tempReplayCamera != null)
+        {
+            Destroy(tempReplayCamera.gameObject);
+            tempReplayCamera = null;
+        }
+
+        isUsingTempCamera = false;
+        isPositioningCamera = false;
+
+        // Hide instructions
+        HideReplayInstructions();
+
+        // Unpause the game
+        if (PauseManager.Instance != null)
+        {
+            PauseManager.Instance.UnpauseGame();
+        }
+
+        Debug.Log("User took over. Switched back to main camera.");
     }
 
 }
