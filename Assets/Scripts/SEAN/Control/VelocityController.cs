@@ -34,6 +34,49 @@ namespace SEAN.Control
         [Header("Debug ROS Speeds (Read-Only)")]
         public float DebugROSLinSpeed;
         public float DebugROSAngSpeed;
+        
+        [Header("Debug Motion (Read-Only)")]
+        public float DebugCommandedLinSpeed;
+        public float DebugCommandedAngSpeed;
+        public float DebugAppliedLinSpeed;
+        public float DebugAppliedAngSpeed;
+        public float DebugActualPlanarForwardSpeed;
+        public float DebugActualTotalSpeed;
+
+        [Header("Debug Stream Health (Read-Only)")]
+        public float DebugCmdHz;
+        public float DebugExpectedFixedHz;
+        public float DebugSecondsSinceLastCmd = -1f;
+        public bool DebugCmdIsFresh;
+        public bool DebugTimedOut;
+
+        [Header("Debug Stuck (Read-Only)")]
+        public bool DebugIsLikelyStuck;
+
+        [Header("Stuck Detection Settings")]
+        public float stuckMinCommandedSpeed = 0.05f;
+        public float stuckMaxActualPlanarSpeed = 0.01f;
+        public float stuckHoldSeconds = 0.5f;
+
+        [Header("Command Shaping")]
+        public bool enableCommandShaping = true;
+        public float linearCommandDeadband = 0.01f;
+        public float angularCommandDeadband = 0.03f;
+        public float maxLinearCommand = 0.6f;
+        public float maxAngularCommand = 1.2f;
+
+        [Header("Stuck Mitigation")]
+        public bool suppressSpinWhenStuck = true;
+        [Range(0f, 1f)]
+        public float stuckAngularScale = 0.25f;
+
+        [Header("On-Screen Debug Overlay")]
+        public bool showOnScreenDebug = true;
+        public Vector2 debugOverlayPosition = new Vector2(15f, 15f);
+        public Vector2 debugOverlaySize = new Vector2(430f, 90f);
+
+        private float lastCmdReceiptRealtime = -1f;
+        private float stuckAccumulatedSeconds = 0f;
 
         protected void Start()
         {
@@ -130,6 +173,16 @@ namespace SEAN.Control
 
         private void FixedUpdate()
         {
+            float now = Time.realtimeSinceStartup;
+            DebugExpectedFixedHz = Time.fixedDeltaTime > 1e-5f ? (1f / Time.fixedDeltaTime) : 0f;
+            DebugSecondsSinceLastCmd = lastCmdReceiptRealtime > 0f ? (now - lastCmdReceiptRealtime) : -1f;
+            DebugCmdIsFresh = lastCmdReceiptRealtime > 0f && DebugSecondsSinceLastCmd <= maxTimeDeltaSec;
+            DebugTimedOut = !manualControlActive && !DebugCmdIsFresh;
+            if (!DebugCmdIsFresh)
+            {
+                DebugCmdHz = 0f;
+            }
+
             // Only check for ROS message timeout if not in manual control
             if (!manualControlActive && Time.time - lastMessageTS > maxTimeDeltaSec)
             {
@@ -143,18 +196,44 @@ namespace SEAN.Control
 
             if (rb == null) return;
 
+            // Motion diagnostics: command vs actual robot motion on ground plane.
+            DebugActualTotalSpeed = rb.velocity.magnitude;
+            Vector3 planarVelocityBefore = Vector3.ProjectOnPlane(rb.velocity, Vector3.up);
+            Vector3 planarForward = Vector3.ProjectOnPlane(rb.transform.forward, Vector3.up).normalized;
+            DebugActualPlanarForwardSpeed = Vector3.Dot(planarVelocityBefore, planarForward);
+            DebugCommandedLinSpeed = targetLinVelocity;
+            DebugCommandedAngSpeed = targetAngVelocity;
+
+            float appliedLinVelocity = targetLinVelocity;
+            float appliedAngVelocity = targetAngVelocity;
+            if (enableCommandShaping)
+            {
+                if (Mathf.Abs(appliedLinVelocity) < linearCommandDeadband) { appliedLinVelocity = 0f; }
+                if (Mathf.Abs(appliedAngVelocity) < angularCommandDeadband) { appliedAngVelocity = 0f; }
+                appliedLinVelocity = Mathf.Clamp(appliedLinVelocity, -maxLinearCommand, maxLinearCommand);
+                appliedAngVelocity = Mathf.Clamp(appliedAngVelocity, -maxAngularCommand, maxAngularCommand);
+            }
+            if (suppressSpinWhenStuck &&
+                DebugIsLikelyStuck &&
+                Mathf.Abs(appliedLinVelocity) >= stuckMinCommandedSpeed)
+            {
+                appliedAngVelocity *= stuckAngularScale;
+            }
+            DebugAppliedLinSpeed = appliedLinVelocity;
+            DebugAppliedAngSpeed = appliedAngVelocity;
+
             // Apply angular velocity
-            if (Mathf.Approximately(targetAngVelocity, 0.0f) && Mathf.Approximately(rb.angularVelocity.y, 0.0f))
+            if (Mathf.Approximately(appliedAngVelocity, 0.0f) && Mathf.Approximately(rb.angularVelocity.y, 0.0f))
             {
                 rb.angularVelocity = Vector3.zero; // Ensure it's truly zero if target is zero
             }
             else
             {
-                rb.angularVelocity = new Vector3(0, -1 * targetAngVelocity, 0);
+                rb.angularVelocity = new Vector3(0, -1 * appliedAngVelocity, 0);
             }
 
             // Apply linear velocity
-            if (Mathf.Approximately(targetLinVelocity, 0.0f) && Mathf.Approximately(rb.velocity.magnitude, 0.0f))
+            if (Mathf.Approximately(appliedLinVelocity, 0.0f) && Mathf.Approximately(rb.velocity.magnitude, 0.0f))
             {
                  // If target is 0 and current velocity is already very small (or zero), set rb.velocity to zero.
                  // This helps prevent tiny residual velocities if rb.velocity.y is non-zero from physics.
@@ -164,16 +243,40 @@ namespace SEAN.Control
             {
                 // Apply forward/backward velocity, preserving existing Y velocity (for gravity/physics)
                 Vector3 currentVelocity = rb.velocity;
-                Vector3 targetWorldVelocity = rb.transform.forward * targetLinVelocity;
+                Vector3 targetWorldVelocity = rb.transform.forward * appliedLinVelocity;
                 rb.velocity = new Vector3(targetWorldVelocity.x, currentVelocity.y, targetWorldVelocity.z);
             }
+
+            bool stuckCandidate =
+                Mathf.Abs(DebugAppliedLinSpeed) >= stuckMinCommandedSpeed &&
+                Mathf.Abs(DebugActualPlanarForwardSpeed) <= stuckMaxActualPlanarSpeed;
+            if (stuckCandidate)
+            {
+                stuckAccumulatedSeconds += Time.fixedDeltaTime;
+            }
+            else
+            {
+                stuckAccumulatedSeconds = 0f;
+            }
+            DebugIsLikelyStuck = stuckAccumulatedSeconds >= stuckHoldSeconds;
         }
 
         override sealed protected void CmdVelMessage(RosMessageTypes.Geometry.MTwist msg)
         {
             if (msg == null) { return; }
             if (rb == null) { return; }
-            
+
+            float now = Time.realtimeSinceStartup;
+            if (lastCmdReceiptRealtime > 0f)
+            {
+                float cmdDt = now - lastCmdReceiptRealtime;
+                if (cmdDt > 1e-5f)
+                {
+                    DebugCmdHz = 1f / cmdDt;
+                }
+            }
+            lastCmdReceiptRealtime = now;
+
             // Update debug fields with raw ROS values
             DebugROSLinSpeed = (float)msg.linear.x;
             DebugROSAngSpeed = (float)msg.angular.z;
@@ -193,6 +296,39 @@ namespace SEAN.Control
                 prevAngVelocity = targetAngVelocity;
                 lastMessageTS = Time.time;
             }
+        }
+
+        private void OnGUI()
+        {
+            if (!showOnScreenDebug) { return; }
+
+            string statusText;
+            Color statusColor;
+            if (DebugTimedOut)
+            {
+                statusText = "TIMEOUT";
+                statusColor = new Color(1f, 0.35f, 0.35f);
+            }
+            else if (DebugIsLikelyStuck)
+            {
+                statusText = "LIKELY STUCK";
+                statusColor = new Color(1f, 0.75f, 0.25f);
+            }
+            else
+            {
+                statusText = "OK";
+                statusColor = new Color(0.45f, 1f, 0.45f);
+            }
+
+            string overlayText =
+                $"[{statusText}] cmd_fresh={DebugCmdIsFresh} cmd_hz={DebugCmdHz:F1} dt_last_cmd={DebugSecondsSinceLastCmd:F2}s\n" +
+                $"cmd_lin={DebugCommandedLinSpeed:F3} app_lin={DebugAppliedLinSpeed:F3} app_ang={DebugAppliedAngSpeed:F3} act_planar={DebugActualPlanarForwardSpeed:F3}";
+
+            Rect rect = new Rect(debugOverlayPosition.x, debugOverlayPosition.y, debugOverlaySize.x, debugOverlaySize.y);
+            Color previousColor = GUI.color;
+            GUI.color = statusColor;
+            GUI.Box(rect, overlayText);
+            GUI.color = previousColor;
         }
 
         // PID function - not directly used by momentum control but part of the original script

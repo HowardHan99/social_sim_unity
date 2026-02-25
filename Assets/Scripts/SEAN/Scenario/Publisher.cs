@@ -36,7 +36,6 @@ namespace SEAN.Scenario
             message.num_people = (ushort)sean.pedestrianBehavior.agents.Length;
             message.num_groups = (ushort)sean.pedestrianBehavior.groups.Length;
             message.environment = sean.environment.name;
-            Debug.Log($"[Publisher] Sending environment name: '{message.environment}' to topic {Topic}");
             ros.Send(Topic, message);
         }
     }

@@ -7,6 +7,11 @@ public class SceneChange : MonoBehaviour
     [SerializeField] private List<string> sceneNames = new List<string>();
     private static int currentSceneIndex = 0;
 
+    public int CurrentSceneIndex => currentSceneIndex;
+    public int SceneCount => sceneNames.Count;
+    public string CurrentSceneName => sceneNames.Count > 0 ? sceneNames[currentSceneIndex] : string.Empty;
+    public IReadOnlyList<string> SceneNames => sceneNames;
+
     void Awake()
     {
         DontDestroyOnLoad(this.gameObject);
@@ -15,35 +20,42 @@ public class SceneChange : MonoBehaviour
         {
             string activeScene = SceneManager.GetActiveScene().name;
 
-            // If we're not already in the first scene, load it
-            if (activeScene != sceneNames[0])
-            {
-                currentSceneIndex = 0;
-                SceneManager.LoadScene(sceneNames[currentSceneIndex]);
-            }
-            else
-            {
-                currentSceneIndex = 0;
-            }
+            // Sync the index to whichever scene is currently open so any scene
+            // in the list can be played directly without being redirected away.
+            int found = sceneNames.IndexOf(activeScene);
+            currentSceneIndex = found >= 0 ? found : 0;
         }
     }
 
     public void GoToNextScene()
     {
         if (sceneNames.Count < 1) return;
-
-        // Advance the index and wrap around if necessary
         currentSceneIndex = (currentSceneIndex + 1) % sceneNames.Count;
+        SceneManager.LoadScene(sceneNames[currentSceneIndex]);
+    }
+
+    public void GoToPreviousScene()
+    {
+        if (sceneNames.Count < 1) return;
+        currentSceneIndex = (currentSceneIndex - 1 + sceneNames.Count) % sceneNames.Count;
+        SceneManager.LoadScene(sceneNames[currentSceneIndex]);
+    }
+
+    public void LoadSceneAtIndex(int index)
+    {
+        if (index < 0 || index >= sceneNames.Count) return;
+        currentSceneIndex = index;
         SceneManager.LoadScene(sceneNames[currentSceneIndex]);
     }
 
     void Update()
     {
-        // Hold Ctrl and press N to go to the next scene
-        if ((Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl))
-            && Input.GetKeyDown(KeyCode.N))
-        {
+        bool ctrl = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
+
+        if (ctrl && Input.GetKeyDown(KeyCode.N))
             GoToNextScene();
-        }
+
+        if (ctrl && Input.GetKeyDown(KeyCode.P))
+            GoToPreviousScene();
     }
 }

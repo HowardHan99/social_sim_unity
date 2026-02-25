@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2021, Members of Yale Interactive Machines Group, Yale University,
+// Copyright (c) 2021, Members of Yale Interactive Machines Group, Yale University,
 // Nathan Tsoi
 // All rights reserved.
 // This source code is licensed under the BSD-style license found in the
@@ -16,12 +16,9 @@ namespace SEAN.Metrics
 
         public string TopicName = "/social_sim/metrics";
 
-        private RosMessageTypes.SocialSimRos.MTrialInfo trialInfoMessage;
-
 
         void Start()
         {
-            trialInfoMessage = new RosMessageTypes.SocialSimRos.MTrialInfo();
             ros = ROSConnection.instance;
             sean = SEAN.instance;
         }
@@ -29,6 +26,8 @@ namespace SEAN.Metrics
         private void Update()
         {
             if (!sean.robotTask.isRunning) { return; }
+            // Build a fresh message each frame to avoid cross-thread mutation while ROS serializes.
+            var trialInfoMessage = new RosMessageTypes.SocialSimRos.MTrialInfo();
             sean.clock.UpdateMHeader(trialInfoMessage.header);
 
             // Information about the current interaction
@@ -46,12 +45,13 @@ namespace SEAN.Metrics
             // Robot location / distance relative to start / goal
             trialInfoMessage.dist_to_target = sean.metrics.TargetDist;
             trialInfoMessage.min_dist_to_target = sean.metrics.MinDistToTarget;
-            trialInfoMessage.robot_poses = new RosMessageTypes.Geometry.MPose[sean.metrics.RobotPoses.Count];
-            trialInfoMessage.robot_poses_ts = new RosMessageTypes.Std.MTime[sean.metrics.RobotPoses.Count];
-            for (int i = 0; i < sean.metrics.RobotPoses.Count; i++)
+            int poseCount = Mathf.Min(sean.metrics.RobotPoses.Count, sean.metrics.RobotPosesTS.Count);
+            trialInfoMessage.robot_poses = new RosMessageTypes.Geometry.MPose[poseCount];
+            trialInfoMessage.robot_poses_ts = new RosMessageTypes.Std.MTime[poseCount];
+            for (int i = 0; i < poseCount; i++)
             {
                 trialInfoMessage.robot_poses[i] = Util.Geometry.GetMPose(sean.metrics.RobotPoses[i]);
-                trialInfoMessage.robot_poses_ts[i] = sean.metrics.RobotPosesTS[i];
+                trialInfoMessage.robot_poses_ts[i] = sean.metrics.RobotPosesTS[i] ?? new RosMessageTypes.Std.MTime();
             }
 
             // Robot location relative to pedestrians

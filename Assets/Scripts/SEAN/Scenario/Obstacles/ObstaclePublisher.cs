@@ -7,6 +7,7 @@
 using UnityEngine;
 using Unity.Robotics.ROSTCPConnector;
 using Unity.Robotics.ROSTCPConnector.ROSGeometry;
+using System.Collections.Generic;
 
 namespace SEAN.Scenario.Obstacles
 {
@@ -23,8 +24,14 @@ namespace SEAN.Scenario.Obstacles
         [Tooltip("The frame of reference for the obstacle poses.")]
         public string frame = "map";
 
-        [Tooltip("How often to publish obstacle data (in seconds). Set to 0 for every frame.")]
-        public float publishRateHz = 1.0f;
+        [Tooltip("How often to publish obstacle data (in Hz). Lower values publish less frequently. Set to 0 for every frame.")]
+        public float publishRateHz = 0.2f;
+
+        [Tooltip("Refresh scene obstacles before each publish so added/removed obstacles are reflected immediately.")]
+        public bool refreshBeforePublish = true;
+
+        [Tooltip("Publish a full obstacle snapshot once at startup.")]
+        public bool publishImmediatelyOnStart = true;
 
         [Tooltip("Enable debug logging.")]
         public bool showDebug = true;
@@ -35,6 +42,7 @@ namespace SEAN.Scenario.Obstacles
         private ROSConnection ros;
         private SEAN sean;
         private TrackedObstacle[] sceneObstacles;
+        private readonly HashSet<int> lastPublishedObstacleIds = new HashSet<int>();
         private float lastPublishTime;
         private int publishCount = 0;
 
@@ -46,15 +54,23 @@ namespace SEAN.Scenario.Obstacles
             // Register the publisher with ROS before publishing any messages
             ros.RegisterPublisher(topicName, RosMessageTypes.SocialSimRos.MObstacleArray.RosMessageName);
 
-            // Find all obstacles in the scene at startup
+            // Find all active obstacles in the scene at startup
             sceneObstacles = FindObjectsOfType<TrackedObstacle>();
 
             if (showDebug)
             {
-                // Debug.Log($"[ObstaclePublisher] Initialized. Found {sceneObstacles.Length} obstacles in the scene.");
-                // Debug.Log($"[ObstaclePublisher] Publishing to topic: {topicName} in frame: {frame} at {publishRateHz} Hz");
+                Debug.Log($"[ObstaclePublisher] Initialized. Found {sceneObstacles.Length} obstacles in the scene.");
+                Debug.Log($"[ObstaclePublisher] Publishing to topic: {topicName} in frame: {frame} at {publishRateHz} Hz");
+                foreach (var obs in sceneObstacles)
+                {
+                    Debug.Log($"[ObstaclePublisher]   -> '{obs.gameObject.name}' id={obs.id} type='{obs.type}' active={obs.gameObject.activeInHierarchy}");
+                }
             }
 
+            if (publishImmediatelyOnStart)
+            {
+                PublishObstacles();
+            }
             lastPublishTime = Time.time;
         }
 
@@ -70,14 +86,35 @@ namespace SEAN.Scenario.Obstacles
 
         private void PublishObstacles()
         {
+            if (refreshBeforePublish)
+            {
+                RefreshObstacles();
+            }
+
+            Dictionary<int, TrackedObstacle> obstaclesById = new Dictionary<int, TrackedObstacle>();
+            for (int i = 0; i < sceneObstacles.Length; i++)
+            {
+                TrackedObstacle obstacle = sceneObstacles[i];
+                if (obstacle == null || !obstacle.isActiveAndEnabled || !obstacle.gameObject.activeInHierarchy)
+                {
+                    continue;
+                }
+
+                if (obstaclesById.ContainsKey(obstacle.id) && showDebug)
+                {
+                    Debug.LogWarning($"[ObstaclePublisher] Duplicate obstacle id {obstacle.id} found. Keeping latest obstacle '{obstacle.name}'.");
+                }
+                obstaclesById[obstacle.id] = obstacle;
+            }
+
             var message = new RosMessageTypes.SocialSimRos.MObstacleArray();
             message.header.frame_id = frame;
             message.header.stamp = sean.clock.LastPublishedTime();
-            message.obstacles = new RosMessageTypes.SocialSimRos.MObstacle[sceneObstacles.Length];
+            message.obstacles = new RosMessageTypes.SocialSimRos.MObstacle[obstaclesById.Count];
 
-            for (int i = 0; i < sceneObstacles.Length; i++)
+            int messageIndex = 0;
+            foreach (TrackedObstacle obstacle in obstaclesById.Values)
             {
-                var obstacle = sceneObstacles[i];
                 var obstacleMsg = new RosMessageTypes.SocialSimRos.MObstacle();
 
                 obstacleMsg.id = obstacle.id;
@@ -92,16 +129,35 @@ namespace SEAN.Scenario.Obstacles
                 Vector3 unitySize = obstacle.GetSize();
                 obstacleMsg.scale = Util.Geometry.GetGeometryVector3Scale(unitySize);
 
-                message.obstacles[i] = obstacleMsg;
+                message.obstacles[messageIndex] = obstacleMsg;
+                messageIndex++;
+            }
+
+            if (showDebug && lastPublishedObstacleIds.Count > 0)
+            {
+                foreach (int previousId in lastPublishedObstacleIds)
+                {
+                    if (!obstaclesById.ContainsKey(previousId))
+                    {
+                        Debug.Log($"[ObstaclePublisher] Obstacle id {previousId} removed from latest publish set.");
+                    }
+                }
+            }
+
+            lastPublishedObstacleIds.Clear();
+            foreach (int currentId in obstaclesById.Keys)
+            {
+                lastPublishedObstacleIds.Add(currentId);
             }
 
             // Debug logging
             publishCount++;
             if (showDebug)
             {
-                // A compact, single-line summary that is easy to read in the collapsed console view.
-                string summary = $"[ObstaclePublisher] Publishing {message.obstacles.Length} obstacles. Frame: '{message.header.frame_id}', Stamp: {message.header.stamp.secs}";
-                // Debug.Log(summary);
+                int foundCount = sceneObstacles != null ? sceneObstacles.Length : 0;
+                int droppedCount = foundCount - obstaclesById.Count;
+                string summary = $"[ObstaclePublisher] #{publishCount}: Found {foundCount} TrackedObstacles, publishing {message.obstacles.Length} (dropped {droppedCount} due to inactive/duplicate id). Frame: '{message.header.frame_id}'";
+                Debug.Log(summary);
             }
 
             // Detailed multi-line logging for debugging (use sparingly)
@@ -124,7 +180,7 @@ namespace SEAN.Scenario.Obstacles
                         obstacleMsg.scale.z
                     );
                 }
-                // Debug.Log(logBuilder.ToString());
+                Debug.Log(logBuilder.ToString());
             }
 
             ros.Send(topicName, message);
@@ -139,7 +195,7 @@ namespace SEAN.Scenario.Obstacles
             sceneObstacles = FindObjectsOfType<TrackedObstacle>();
             if (showDebug)
             {
-                // Debug.Log($"[ObstaclePublisher] Refreshed obstacle list. Now tracking {sceneObstacles.Length} obstacles.");
+                Debug.Log($"[ObstaclePublisher] Refreshed obstacle list. Now tracking {sceneObstacles.Length} obstacles.");
             }
         }
 
@@ -150,7 +206,7 @@ namespace SEAN.Scenario.Obstacles
         {
             if (showDebug)
             {
-                // Debug.Log("[ObstaclePublisher] Force publishing obstacles.");
+                Debug.Log("[ObstaclePublisher] Force publishing obstacles.");
             }
             PublishObstacles();
         }

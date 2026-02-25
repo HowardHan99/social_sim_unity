@@ -2009,7 +2009,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   isObservedComponentsExpanded: 1
   replayIdentity:
-    id: 46560
+    id: 64225
   prefabIdentity:
     id: 24035
   observedComponents:
@@ -2034,7 +2034,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   noManagingObject: 0
   replayIdentity:
-    id: 15054
+    id: 36431
   replayObject:
     reference: {fileID: -5477524094443794759}
   positionFlags: 263
@@ -2054,7 +2054,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   noManagingObject: 0
   replayIdentity:
-    id: 54549
+    id: 63237
   replayObject:
     reference: {fileID: -5477524094443794759}
   observedAnimator: {fileID: 6090832110011958511}
@@ -2077,7 +2077,7 @@ MonoBehaviour:
   trackRigidbody: 1
   trackAnimator: 1
   customProperties: []
-  debugMode: 1
+  debugMode: 0
 --- !u!114 &7923220642289013467
 MonoBehaviour:
   m_ObjectHideFlags: 0
