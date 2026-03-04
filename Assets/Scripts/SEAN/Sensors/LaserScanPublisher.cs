@@ -41,18 +41,18 @@ namespace SEAN.Sensors
 
         private void FixedUpdate()
         {
-            //if (Time.realtimeSinceStartup >= previousScanTime + scanPeriod)
-            //{
-            //    UpdateMessage();
-            //    previousScanTime = Time.realtimeSinceStartup;
-            //}
+            if (Time.realtimeSinceStartup >= previousScanTime + scanPeriod)
+            {
+               UpdateMessage();
+               previousScanTime = Time.realtimeSinceStartup;
+            }
         }
 
         private void UpdateMessage()
         {
-            //SEAN.instance.clock.UpdateMHeader(message.header);
-            //message.ranges = laserScanner.Scan();
-            //ros.Send(Topic, message);
+            SEAN.instance.clock.UpdateMHeader(message.header);
+            message.ranges = laserScanner.Scan();
+            ros.Send(Topic, message);
         }
     }
 
