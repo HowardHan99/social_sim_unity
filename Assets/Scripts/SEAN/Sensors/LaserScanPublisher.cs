@@ -1,4 +1,4 @@
-﻿/*
+/*
 © Siemens AG, 2018
 Author: Berkay Alp Cakal (berkay_alp.cakal.ct@siemens.com)
 Modified and incorporated into SEAN by Nathan Tsoi and the Yale Interactive Machines Group
@@ -41,18 +41,18 @@ namespace SEAN.Sensors
 
         private void FixedUpdate()
         {
-            if (Time.realtimeSinceStartup >= previousScanTime + scanPeriod)
-            {
-                UpdateMessage();
-                previousScanTime = Time.realtimeSinceStartup;
-            }
+            //if (Time.realtimeSinceStartup >= previousScanTime + scanPeriod)
+            //{
+            //    UpdateMessage();
+            //    previousScanTime = Time.realtimeSinceStartup;
+            //}
         }
 
         private void UpdateMessage()
         {
-            SEAN.instance.clock.UpdateMHeader(message.header);
-            message.ranges = laserScanner.Scan();
-            ros.Send(Topic, message);
+            //SEAN.instance.clock.UpdateMHeader(message.header);
+            //message.ranges = laserScanner.Scan();
+            //ros.Send(Topic, message);
         }
     }
 
