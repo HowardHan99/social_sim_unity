@@ -1,4 +1,4 @@
-﻿using System.Collections;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
@@ -82,6 +82,12 @@ namespace IVI
                     var pos = node.transform.position + new Vector3(Mathf.Sin(theta), SPAWN_HEIGHT, Mathf.Cos(theta)) * Random.value * node.radius;
                     var sfRandom = Instantiate(agentPrefab, pos, Quaternion.identity);
                     var agent = sfRandom.GetComponentInChildren<INavigable>();
+                    if (agent == null)
+                    {
+                        Debug.LogWarning($"[NavManager] Spawned agentPrefab has no INavigable child (node {node.name}, index {i}). Destroying.", sfRandom);
+                        Destroy(sfRandom);
+                        continue;
+                    }
                     agent.name = "Agent_" + j++;
                     agent.transform.parent = agentsGO.transform;
                 }
@@ -99,6 +105,12 @@ namespace IVI
                     }
                     var sfRandom = Instantiate(agentPrefab, Vector3.zero, Quaternion.identity);
                     var agent = sfRandom.GetComponentInChildren<INavigable>();
+                    if (agent == null)
+                    {
+                        Debug.LogWarning($"[NavManager] Spawned agentPrefab has no INavigable child (group node {node.name}, index {i}). Destroying.", sfRandom);
+                        Destroy(sfRandom);
+                        continue;
+                    }
                     agent.name = "Agent_" + j++;
                     (float, Vector3) pose = node.AddMember(agent);
                     float degRot = pose.Item1 * (180 / Mathf.PI);

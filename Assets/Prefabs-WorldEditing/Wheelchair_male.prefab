@@ -664,6 +664,7 @@ MonoBehaviour:
   lookAtTarget: {fileID: 0}
   autoTurnSpeed: 1
   autoTurnAngleThreshold: 5
+  lockPosition: 0
 --- !u!1 &2092548754051377651
 GameObject:
   m_ObjectHideFlags: 0
@@ -2094,11 +2095,8 @@ MonoBehaviour:
   moveSpeed: 2
   rotationSpeed: 90
   toggleModeKey: 303
-  forwardKey: 273
-  backwardKey: 274
-  leftKey: 276
-  rightKey: 275
   useWASD: 1
+  startInManualMode: 0
   isManualMode: 0
 --- !u!114 &4480597360762319672
 MonoBehaviour:
@@ -2115,6 +2113,9 @@ MonoBehaviour:
   plannerFPS: 5
   neighbors: []
   pwdPersonalRadius: 0.4
+  useWaypoints: 1
+  waypointStart: {x: 0, y: 0, z: 0}
+  waypointGoal: {x: 0, y: 0, z: 0}
 --- !u!1 &6061559745281181226
 GameObject:
   m_ObjectHideFlags: 0

@@ -89,3 +89,12 @@ MonoBehaviour:
     type: 3}
   controller: 0
   isPlayer: 0
+  isPwdPlayer: 1
+  pwdGender: 0
+  pwdAvatarPrefabMale: {fileID: 6004020823855633571, guid: f9f89412d43f4f34d8dae9bdd5aa10d8,
+    type: 3}
+  pwdAvatarPrefabFemale: {fileID: 4123353721614615874, guid: bba6774b950b2c843ad5d47502eaa9d4,
+    type: 3}
+  startObjectName: start
+  goalObjectName: end
+  bgPwdGender: 2

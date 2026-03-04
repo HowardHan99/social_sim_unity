@@ -1,199 +1,219 @@
+using System.Collections;
 using UnityEngine;
-using UnityEngine.AI;
 
 namespace IVI
 {
     public class ManualWheelchairController : MonoBehaviour
     {
-        [Header("Manual Control Settings")]
+        [Header("Control Settings")]
         public float moveSpeed = 3f;
         public float rotationSpeed = 90f;
         public KeyCode toggleModeKey = KeyCode.RightShift;
-        
-        [Header("Movement Keys")]
-        public KeyCode forwardKey = KeyCode.UpArrow;
-        public KeyCode backwardKey = KeyCode.DownArrow;
-        public KeyCode leftKey = KeyCode.LeftArrow;
-        public KeyCode rightKey = KeyCode.RightArrow;
-        
-        [Header("Alternative WASD Keys")]
-        public bool useWASD = true;
-        
-        [Header("Status")]
+        public bool useWASD = false;
+        public bool startInManualMode = false;
+
+        [Header("Status (read-only)")]
         public bool isManualMode = false;
-        
-        // Components
+
         private SFPWDAgent sfpwdAgent;
-        private NavMeshAgent navMeshAgent;
         private Rigidbody rb;
-        private SEAN.Scenario.Agents.Base baseAgent;
-        
-        // Manual movement
+        private Animator animator;
         private Vector3 manualVelocity;
-        
+        private bool initialized = false;
+        private bool waitingForStart = true;
+        private Quaternion spawnRotation;
+        private WheelchairCameraSmoothing camSmoothing;
+
         void Start()
         {
-            // Get components
+            spawnRotation = transform.rotation;
             sfpwdAgent = GetComponent<SFPWDAgent>();
-            navMeshAgent = GetComponent<NavMeshAgent>();
             rb = GetComponent<Rigidbody>();
-            baseAgent = GetComponent<SEAN.Scenario.Agents.Base>();
-            
-            // Start in automatic mode by default
-            SetAutomaticMode();
+            animator = GetComponent<Animator>();
+            StartCoroutine(InitAfterBase());
         }
-        
+
+        IEnumerator InitAfterBase()
+        {
+            yield return null;
+
+            if (animator != null)
+                animator.applyRootMotion = false;
+
+            if (rb != null)
+                rb.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
+
+            // Freeze the agent on spawn; navigation begins on Space press.
+            if (sfpwdAgent != null)
+            {
+                sfpwdAgent.KillNavigationCoroutine();
+                sfpwdAgent.enabled = false;
+            }
+            if (rb != null)
+                rb.velocity = Vector3.zero;
+
+            // Restore the exact spawn rotation (the one-frame agent tick may have changed it).
+            transform.rotation = spawnRotation;
+
+            // Disable camera smoothing during wait so the user can free-look.
+            camSmoothing = GetComponentInChildren<WheelchairCameraSmoothing>(true);
+            if (camSmoothing != null)
+                camSmoothing.enabled = false;
+
+            waitingForStart = true;
+            initialized = true;
+            Debug.Log("[PWD] ManualWheelchairController ready. Waiting for Space to start.");
+        }
+
         void Update()
         {
-            // Check for mode toggle
+            if (!initialized) return;
+
+            if (waitingForStart)
+            {
+                if (Input.GetKeyDown(KeyCode.Space))
+                {
+                    waitingForStart = false;
+
+                    if (camSmoothing != null)
+                        camSmoothing.enabled = true;
+
+                    Debug.Log("[PWD] Space pressed -- starting navigation.");
+                    if (startInManualMode)
+                        SetManualMode();
+                    else
+                        SetAutomaticMode();
+                }
+                return;
+            }
+
             if (Input.GetKeyDown(toggleModeKey))
             {
-                ToggleControlMode();
+                if (isManualMode)
+                    SetAutomaticMode();
+                else
+                    SetManualMode();
             }
-            
-            // Handle input based on current mode
+
             if (isManualMode)
             {
-                HandleManualInput();
-                ApplyManualMovement();
+                HandleInput();
+                transform.position += manualVelocity * Time.deltaTime;
+                UpdateAnimator();
+            }
+            else if (sfpwdAgent != null && sfpwdAgent.enabled)
+            {
+                // SFPWDAgent (Base.Update) computes velocity, handles rotation
+                // and animator params, but doesn't drive position when root motion
+                // is off. Apply the computed velocity as a direct position update.
+                Vector3 vel = sfpwdAgent.velocity;
+                vel.y = 0f;
+                if (vel.sqrMagnitude > 0.001f)
+                    transform.position += vel * Time.deltaTime;
             }
         }
-        
-        void HandleManualInput()
+
+        void HandleInput()
         {
-            float horizontal = 0f;
-            float vertical = 0f;
-            
-            // Check arrow keys
-            if (Input.GetKey(forwardKey)) vertical += 1f;
-            if (Input.GetKey(backwardKey)) vertical -= 1f;
-            if (Input.GetKey(leftKey)) horizontal -= 1f;
-            if (Input.GetKey(rightKey)) horizontal += 1f;
-            
-            // Check WASD keys if enabled
+            float h = 0f, v = 0f;
+
+            if (Input.GetKey(KeyCode.UpArrow)) v += 1f;
+            if (Input.GetKey(KeyCode.DownArrow)) v -= 1f;
+            if (Input.GetKey(KeyCode.LeftArrow)) h -= 1f;
+            if (Input.GetKey(KeyCode.RightArrow)) h += 1f;
+
             if (useWASD)
             {
-                if (Input.GetKey(KeyCode.W)) vertical += 1f;
-                if (Input.GetKey(KeyCode.S)) vertical -= 1f;
-                if (Input.GetKey(KeyCode.A)) horizontal -= 1f;
-                if (Input.GetKey(KeyCode.D)) horizontal += 1f;
+                if (Input.GetKey(KeyCode.W)) v += 1f;
+                if (Input.GetKey(KeyCode.S)) v -= 1f;
+                if (Input.GetKey(KeyCode.A)) h -= 1f;
+                if (Input.GetKey(KeyCode.D)) h += 1f;
             }
-            
-            // Calculate movement
-            Vector3 moveDirection = transform.forward * vertical;
-            float rotation = horizontal * rotationSpeed * Time.deltaTime;
-            
-            // Apply rotation
-            if (Mathf.Abs(rotation) > 0.01f)
-            {
-                transform.Rotate(0, rotation, 0);
-            }
-            
-            // Set manual velocity
-            manualVelocity = moveDirection * moveSpeed;
+
+            v = Mathf.Clamp(v, -1f, 1f);
+            h = Mathf.Clamp(h, -1f, 1f);
+
+            float rot = h * rotationSpeed * Time.deltaTime;
+            if (Mathf.Abs(rot) > 0.001f)
+                transform.Rotate(0f, rot, 0f);
+
+            Vector3 fwd = transform.forward;
+            fwd.y = 0f;
+            if (fwd.sqrMagnitude > 0.001f) fwd.Normalize();
+            manualVelocity = fwd * v * moveSpeed;
         }
-        
-        void ApplyManualMovement()
+
+        void UpdateAnimator()
         {
-            if (rb != null)
-            {
-                // Use rigidbody for movement if available
-                Vector3 newVelocity = manualVelocity;
-                newVelocity.y = rb.velocity.y; // Preserve y velocity for gravity
-                rb.velocity = newVelocity;
-            }
-            else
-            {
-                // Use transform movement as fallback
-                transform.position += manualVelocity * Time.deltaTime;
-            }
+            if (animator == null) return;
+            float speed = manualVelocity.magnitude;
+            Vector3 local = Quaternion.Euler(0, -transform.eulerAngles.y, 0) * manualVelocity;
+            animator.SetBool("Idling", speed < 0.1f);
+            animator.SetFloat("Forward", local.z / 0.6f);
+            animator.SetFloat("Strafe", local.x / 0.6f);
+            animator.speed = speed > 0.1f ? speed : 1f;
         }
-        
-        void ToggleControlMode()
-        {
-            if (isManualMode)
-            {
-                SetAutomaticMode();
-                Debug.Log("Switched to Automatic Control Mode");
-            }
-            else
-            {
-                SetManualMode();
-                Debug.Log("Switched to Manual Control Mode");
-            }
-        }
-        
+
+
         void SetManualMode()
         {
             isManualMode = true;
-            
-            // Disable automatic components
-            if (sfpwdAgent != null)
-                sfpwdAgent.enabled = false;
-            
-            if (navMeshAgent != null)
-            {
-                navMeshAgent.enabled = false;
-            }
-            
-            // Reset manual velocity
             manualVelocity = Vector3.zero;
-            
-            // Stop any existing movement
-            if (rb != null)
+
+            if (sfpwdAgent != null)
             {
-                rb.velocity = new Vector3(0, rb.velocity.y, 0);
+                sfpwdAgent.KillNavigationCoroutine();
+                sfpwdAgent.enabled = false;
             }
+
+            if (animator != null)
+                animator.applyRootMotion = false;
+
+            if (rb != null)
+                rb.velocity = Vector3.zero;
+
+            Debug.Log("[PWD] MANUAL mode");
         }
-        
+
         void SetAutomaticMode()
         {
             isManualMode = false;
-            
-            // Reset manual velocity
             manualVelocity = Vector3.zero;
-            
-            // Re-enable automatic components
+
+            // Keep root motion OFF -- ManualWheelchairController drives position
+            // directly using the SFPWDAgent's computed velocity.
+            if (animator != null)
+                animator.applyRootMotion = false;
+
             if (sfpwdAgent != null)
+            {
                 sfpwdAgent.enabled = true;
-            
-            if (navMeshAgent != null)
-            {
-                navMeshAgent.enabled = true;
+                sfpwdAgent.RestartNavigationCoroutine();
             }
-            
-            // Clear any manual velocity
+
             if (rb != null)
-            {
-                rb.velocity = new Vector3(0, rb.velocity.y, 0);
-            }
+                rb.velocity = Vector3.zero;
+
+            Debug.Log("[PWD] AUTO mode");
         }
-        
+
         void OnGUI()
         {
-            // Display current mode in the corner
-            string modeText = isManualMode ? "MANUAL MODE" : "AUTO MODE";
-            string controlText = isManualMode ? 
-                "Use Arrow Keys/WASD to move\nRight Shift: Switch to Auto" : 
-                "Right Shift: Switch to Manual";
-            
-            GUI.Box(new Rect(10, 10, 250, 60), $"{modeText}\n{controlText}");
-        }
-        
-        // Public methods for external control
-        public void ForceManualMode()
-        {
-            SetManualMode();
-        }
-        
-        public void ForceAutomaticMode()
-        {
-            SetAutomaticMode();
-        }
-        
-        public bool IsInManualMode()
-        {
-            return isManualMode;
+            if (!initialized) return;
+
+            if (waitingForStart)
+            {
+                GUI.Box(new Rect(10, 10, 300, 40), "Press SPACE to start");
+                return;
+            }
+
+            string mode = isManualMode ? "MANUAL" : "AUTO";
+            string pos = $"({transform.position.x:F1}, {transform.position.z:F1})";
+            string vel = isManualMode
+                ? $"{manualVelocity.magnitude:F1}"
+                : (sfpwdAgent != null ? $"{sfpwdAgent.velocity.magnitude:F1}" : "--");
+            GUI.Box(new Rect(10, 10, 300, 60),
+                $"[{mode}] Pos:{pos} Vel:{vel}\nRShift: toggle | WASD/Arrows: move");
         }
     }
-} 
+}

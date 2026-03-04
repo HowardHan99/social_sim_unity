@@ -44,6 +44,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   animationController: {fileID: 9100000, guid: d3b7ebf8605e64140b49960db196f694, type: 2}
+  pwdAnimationController: {fileID: 0}
   avatars:
   - {fileID: 7598931690601634740, guid: 096264169a903ea1ab0d43dda0b1080f, type: 3}
   - {fileID: 1973057334926565540, guid: b6517e622ee8f787592a4f25b896d56a, type: 3}
@@ -83,5 +84,15 @@ MonoBehaviour:
   - {fileID: 5740475629495303944, guid: f723404bf5e79afdc9e64e322f5571cf, type: 3}
   - {fileID: 5502001187223423140, guid: 326181d652a8632a7a59d32a45a7fb38, type: 3}
   - {fileID: 4535516779831726438, guid: 8d984c9104b977beb85ded9b4d3edc19, type: 3}
+  pwdAvatarPrefab: {fileID: 0}
   controller: 0
-  isPlayer: 1
+  isPlayer: 0
+  isPwdPlayer: 1
+  pwdGender: 0
+  pwdAvatarPrefabMale: {fileID: 6004020823855633571, guid: 82f2e314ed765164ea3ea7903adc22a6,
+    type: 3}
+  pwdAvatarPrefabFemale: {fileID: 4123353721614615874, guid: bba6774b950b2c843ad5d47502eaa9d4,
+    type: 3}
+  startObjectName: start
+  goalObjectName: end
+  bgPwdGender: 2

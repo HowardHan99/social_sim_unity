@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 using UnityEngine.AI;
@@ -12,7 +12,7 @@ namespace SEAN.Scenario.Agents
         protected const float ROBOT_RADIUS = 0.2f;
         protected const float MASS = 80;
         protected const float PERCEPTION_RADIUS = 2;
-        protected const float ANGULAR_SPEED = 120;
+        protected float angularSpeed = 120;
         protected const float ANIMATION_SMOOTHING = 0.6f;
 
         //private CapsuleCollider collisionCapsule;
@@ -198,7 +198,7 @@ namespace SEAN.Scenario.Agents
             {
                 if (GetType().Equals(typeof(PlayerAgent)))
                 {
-                    angle = velocity.y * ANGULAR_SPEED * Time.deltaTime;
+                    angle = velocity.y * angularSpeed * Time.deltaTime;
                 }
                 // read the angular velocity from the velocity field
                 // note: this line is nearly identical to the following lines
@@ -210,11 +210,11 @@ namespace SEAN.Scenario.Agents
                 }
             }
             //Angular Velocity and rotation
-            if (Mathf.Abs(angle) > ANGULAR_SPEED * Time.deltaTime)
+            if (Mathf.Abs(angle) > angularSpeed * Time.deltaTime)
             {
-                angle = Mathf.Sign(angle) * ANGULAR_SPEED * Time.deltaTime;
+                angle = Mathf.Sign(angle) * angularSpeed * Time.deltaTime;
             }
-            //angle = Mathf.Sign(angle) * Mathf.Min(ANGULAR_SPEED, Mathf.Abs(angle)) * Time.deltaTime;
+            //angle = Mathf.Sign(angle) * Mathf.Min(angularSpeed, Mathf.Abs(angle)) * Time.deltaTime;
             transform.RotateAround(transform.position, Vector3.up, angle);
 
             // Motion
@@ -247,6 +247,7 @@ namespace SEAN.Scenario.Agents
         protected override void OnDrawGizmosSelected()
         {
             if (!ShowDebug) { return; }
+            if (nmPath == null) { base.OnDrawGizmosSelected(); return; }
             Gizmos.color = Color.black;
             Vector3 lastPos = transform.position;
             foreach (Vector3 position in nmPath.corners)

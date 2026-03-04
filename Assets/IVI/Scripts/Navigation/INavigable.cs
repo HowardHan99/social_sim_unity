@@ -1,4 +1,4 @@
-﻿using System.Collections;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
@@ -104,6 +104,7 @@ namespace IVI
         /// <param name="position"></param>
         public void InitDest(Vector3 destPos)
         {
+            this.destNode = null;
             this.destPos = SampledGoalPosition(destPos);
             navigating = true;
             PlanNavigation();
@@ -141,7 +142,6 @@ namespace IVI
             if (!ShowDebug) { return; }
             Gizmos.color = Color.blue;
             Gizmos.DrawCube(destPos, new Vector3(0.25f, 0.25f, 0.25f));
-            //Gizmos.DrawSphere(transform.position, 0.25f);
         }
 
     }

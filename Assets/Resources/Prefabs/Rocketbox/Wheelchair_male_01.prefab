@@ -1992,9 +1992,9 @@ CapsuleCollider:
   m_IsTrigger: 0
   m_Enabled: 1
   m_Radius: 0.76
-  m_Height: 1.8706249
+  m_Height: 1.6745893
   m_Direction: 1
-  m_Center: {x: -0.04, y: 0.43531245, z: 0}
+  m_Center: {x: -0.04000002, y: 0.8, z: 0}
 --- !u!114 &-5477524094443794759
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2009,7 +2009,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   isObservedComponentsExpanded: 1
   replayIdentity:
-    id: 64225
+    id: 50791
   prefabIdentity:
     id: 24035
   observedComponents:
@@ -2034,7 +2034,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   noManagingObject: 0
   replayIdentity:
-    id: 36431
+    id: 29291
   replayObject:
     reference: {fileID: -5477524094443794759}
   positionFlags: 263
@@ -2054,7 +2054,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   noManagingObject: 0
   replayIdentity:
-    id: 63237
+    id: 35
   replayObject:
     reference: {fileID: -5477524094443794759}
   observedAnimator: {fileID: 6090832110011958511}
@@ -2085,7 +2085,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 6004020823855633571}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 82986ae7dfa33654295162cffcb1b085, type: 3}
   m_Name: 
@@ -2093,11 +2093,8 @@ MonoBehaviour:
   moveSpeed: 2
   rotationSpeed: 90
   toggleModeKey: 303
-  forwardKey: 273
-  backwardKey: 274
-  leftKey: 276
-  rightKey: 275
   useWASD: 1
+  startInManualMode: 1
   isManualMode: 0
 --- !u!1 &6061559745281181226
 GameObject:

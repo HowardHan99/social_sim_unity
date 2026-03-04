@@ -60,72 +60,79 @@ namespace IVI
         /// </summary>
         private bool looking = false;
 
+        [Header("Position Lock")]
+        [Tooltip("When true, all positional movement is disabled; only rotation (free-look) remains active.")]
+        public bool lockPosition = false;
+
         void Update()
         {
-            // Automatic forward movement
-            if (autoForwardSpeed != 0f)
+            if (!lockPosition)
             {
-                transform.position += transform.forward * autoForwardSpeed * Time.deltaTime;
-            }
-
-            // Automatic look-at
-            if (enableAutoLookAt && lookAtTarget != null && !looking)
-            {
-                Vector3 directionToTarget = lookAtTarget.position - transform.position;
-
-                if (directionToTarget.sqrMagnitude > 0.001f)
+                // Automatic forward movement
+                if (autoForwardSpeed != 0f)
                 {
-                    float angle = Vector3.Angle(transform.forward, directionToTarget);
+                    transform.position += transform.forward * autoForwardSpeed * Time.deltaTime;
+                }
 
-                    if (angle > autoTurnAngleThreshold)
+                // Automatic look-at
+                if (enableAutoLookAt && lookAtTarget != null && !looking)
+                {
+                    Vector3 directionToTarget = lookAtTarget.position - transform.position;
+
+                    if (directionToTarget.sqrMagnitude > 0.001f)
                     {
-                        Quaternion targetRotation = Quaternion.LookRotation(directionToTarget);
-                        transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, autoTurnSpeed * Time.deltaTime);
+                        float angle = Vector3.Angle(transform.forward, directionToTarget);
+
+                        if (angle > autoTurnAngleThreshold)
+                        {
+                            Quaternion targetRotation = Quaternion.LookRotation(directionToTarget);
+                            transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, autoTurnSpeed * Time.deltaTime);
+                        }
                     }
                 }
-            }
 
-            var fastMode = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
-            var movementSpeed = fastMode ? this.fastMovementSpeed : this.movementSpeed;
+                var fastMode = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+                var movementSpeed = fastMode ? this.fastMovementSpeed : this.movementSpeed;
 
-            if (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow))
-            {
-                transform.position = transform.position + (-transform.right * movementSpeed * Time.deltaTime);
-            }
+                if (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow))
+                {
+                    transform.position = transform.position + (-transform.right * movementSpeed * Time.deltaTime);
+                }
 
-            if (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow))
-            {
-                transform.position = transform.position + (transform.right * movementSpeed * Time.deltaTime);
-            }
+                if (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow))
+                {
+                    transform.position = transform.position + (transform.right * movementSpeed * Time.deltaTime);
+                }
 
-            if (Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow))
-            {
-                transform.position = transform.position + (transform.forward * movementSpeed * Time.deltaTime);
-            }
+                if (Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow))
+                {
+                    transform.position = transform.position + (transform.forward * movementSpeed * Time.deltaTime);
+                }
 
-            if (Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.DownArrow))
-            {
-                transform.position = transform.position + (-transform.forward * movementSpeed * Time.deltaTime);
-            }
+                if (Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.DownArrow))
+                {
+                    transform.position = transform.position + (-transform.forward * movementSpeed * Time.deltaTime);
+                }
 
-            if (Input.GetKey(KeyCode.Q))
-            {
-                transform.position = transform.position + (-transform.up * movementSpeed * Time.deltaTime);
-            }
+                if (Input.GetKey(KeyCode.Q))
+                {
+                    transform.position = transform.position + (-transform.up * movementSpeed * Time.deltaTime);
+                }
 
-            if (Input.GetKey(KeyCode.E))
-            {
-                transform.position = transform.position + (transform.up * movementSpeed * Time.deltaTime);
-            }
+                if (Input.GetKey(KeyCode.E))
+                {
+                    transform.position = transform.position + (transform.up * movementSpeed * Time.deltaTime);
+                }
 
-            if (Input.GetKey(KeyCode.R) || Input.GetKey(KeyCode.PageUp))
-            {
-                transform.position = transform.position + (Vector3.up * movementSpeed * Time.deltaTime);
-            }
+                if (Input.GetKey(KeyCode.R) || Input.GetKey(KeyCode.PageUp))
+                {
+                    transform.position = transform.position + (Vector3.up * movementSpeed * Time.deltaTime);
+                }
 
-            if (Input.GetKey(KeyCode.F) || Input.GetKey(KeyCode.PageDown))
-            {
-                transform.position = transform.position + (-Vector3.up * movementSpeed * Time.deltaTime);
+                if (Input.GetKey(KeyCode.F) || Input.GetKey(KeyCode.PageDown))
+                {
+                    transform.position = transform.position + (-Vector3.up * movementSpeed * Time.deltaTime);
+                }
             }
 
             if (looking)
@@ -135,11 +142,15 @@ namespace IVI
                 transform.localEulerAngles = new Vector3(newRotationY, newRotationX, 0f);
             }
 
-            float axis = Input.GetAxis("Mouse ScrollWheel");
-            if (axis != 0)
+            if (!lockPosition)
             {
-                var zoomSensitivity = fastMode ? this.fastZoomSensitivity : this.zoomSensitivity;
-                transform.position = transform.position + transform.forward * axis * zoomSensitivity;
+                bool fastZoom = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+                float axis = Input.GetAxis("Mouse ScrollWheel");
+                if (axis != 0)
+                {
+                    var zoomSensitivity = fastZoom ? this.fastZoomSensitivity : this.zoomSensitivity;
+                    transform.position = transform.position + transform.forward * axis * zoomSensitivity;
+                }
             }
 
             if (Input.GetKeyDown(KeyCode.Mouse1))

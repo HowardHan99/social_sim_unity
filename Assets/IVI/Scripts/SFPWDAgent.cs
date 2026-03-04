@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
@@ -7,30 +8,25 @@ namespace IVI
 {
     public class SFPWDAgent : SEAN.Scenario.Agents.Base
     {
-        //To Dos: align with the old SFPWDAgent.cs
-
         private const int OBSTACLE_ANGLE_BINS = 6;
 
         private SphereCollider perceptionSphere;
 
-        //NEIGHBORS
         [SerializeField] private List<GameObject> neighbors = new List<GameObject>();
         private HashSet<GameObject> obstacles = new HashSet<GameObject>();
 
-        // Neighbor Computed Values
         Dictionary<int, Vector3> closestPoints;
 
-        // IMPORTANT: GO2Agent dictionary is now shared from Base.cs
-        // Previously each agent type had its own static dictionary which prevented
-        // different agent types from finding each other in the dictionary
-
-        //ROBOT REPULSION
         private float robotRepulsion;
 
-        // PWD PERSONAL RADIUS
         public float pwdPersonalRadius = 2*RADIUS;
 
-
+        [Header("Waypoint Navigation")]
+        [Tooltip("When true, navigates between waypointStart and waypointGoal instead of using NavManager.")]
+        public bool useWaypoints = false;
+        public Vector3 waypointStart;
+        public Vector3 waypointGoal;
+        private bool headingToGoal = true;
 
         protected override void Start()
         {
@@ -54,11 +50,65 @@ namespace IVI
             perceptionSphere.radius = PERCEPTION_RADIUS;
 
             robotRepulsion = Random.value * (Parameters.ROBOT_REPULSION_DAMPENING_MAX - Parameters.ROBOT_REPULSION_DAMPENING_MIN) + Parameters.ROBOT_REPULSION_DAMPENING_MIN;
+
+            if (useWaypoints)
+                Debug.Log($"[PWD] SFPWDAgent.Start: useWaypoints=true, start=({waypointStart.x:F1},{waypointStart.y:F1},{waypointStart.z:F1}), goal=({waypointGoal.x:F1},{waypointGoal.y:F1},{waypointGoal.z:F1})");
+            else
+                Debug.Log("[PWD] SFPWDAgent.Start: useWaypoints=false, using NavManager");
         }
+
+        #region Waypoint Coroutine Override
+
+        protected override IEnumerator Coroutine()
+        {
+            if (!useWaypoints)
+            {
+                IEnumerator baseRoutine = base.Coroutine();
+                while (baseRoutine.MoveNext())
+                    yield return baseRoutine.Current;
+                yield break;
+            }
+
+            InitDest(headingToGoal ? waypointGoal : waypointStart);
+            Debug.Log($"[PWD] Waypoint nav started -> {(headingToGoal ? "goal" : "start")}");
+
+            while (true)
+            {
+                if (CloseEnough())
+                {
+                    headingToGoal = !headingToGoal;
+                    Vector3 next = headingToGoal ? waypointGoal : waypointStart;
+                    InitDest(next);
+                    Debug.Log($"[PWD] Reached waypoint, heading to {(headingToGoal ? "goal" : "start")} at ({next.x:F1},{next.z:F1})");
+                }
+                else
+                {
+                    PlanNavigation();
+                }
+
+                yield return new WaitForSeconds(1f / plannerFPS);
+            }
+        }
+
+        #endregion
+
+        #region Coroutine Control (called by ManualWheelchairController)
+
+        public void KillNavigationCoroutine()
+        {
+            StopAllCoroutines();
+        }
+
+        public void RestartNavigationCoroutine()
+        {
+            StopAllCoroutines();
+            StartCoroutine(Coroutine());
+        }
+
+        #endregion
 
         protected override Vector3 UpdateVelocity()
         {
-
             SEAN.Scenario.Agents.SocialForce totalForce = ComputeForce();
             var accel = totalForce.force / MASS;
             Vector3 nextVelocity = velocity + accel * Time.deltaTime;
@@ -135,11 +185,6 @@ namespace IVI
             //}
 
             #endregion
-
-            //if (totalForce.force.magnitude > 0)
-            //{
-            //    totalForce.force = totalForce.force.normalized * Mathf.Min(totalForce.force.magnitude, 200);
-            //}
 
             return totalForce;
         }
@@ -267,9 +312,8 @@ namespace IVI
         {
             base.OnDrawGizmosSelected();
             if (!ShowDebug) { return; }
-            // Display the explosion radius when selected
-            
-            // Draw lines to neighbors
+
+            // --- Neighbor lines ---
             foreach (GameObject n in neighbors)
             {
                 if (GO2Agent.ContainsKey(n))
@@ -277,38 +321,139 @@ namespace IVI
                     var neighbor = GO2Agent[n];
                     if (neighbor != null)
                     {
-                        // Check if the neighbor is an SFPWDAgent
-                        if (neighbor is SFPWDAgent)
-                        {
-                            Gizmos.color = Color.blue; // Blue line for PWD agents
-                        }
-                        else
-                        {
-                            Gizmos.color = Color.red; // Red line for other agents/robot
-                        }
+                        Gizmos.color = neighbor is SFPWDAgent ? Color.blue : Color.red;
                         Gizmos.DrawLine(transform.position, neighbor.transform.position);
                     }
-                    else // Special case for robot if GO2Agent stores null for it
+                    else
                     {
                         SEAN.Scenario.Robot robot = n.GetComponent<SEAN.Scenario.Robot>();
                         if (robot != null)
                         {
-                             Gizmos.color = Color.red; // Keep robot line red
-                             Gizmos.DrawLine(transform.position, robot.transform.position);
+                            Gizmos.color = Color.red;
+                            Gizmos.DrawLine(transform.position, robot.transform.position);
                         }
                     }
                 }
             }
 
-            // Green lines to walls (existing logic)
-            Gizmos.color = new Color(0, 1, 0, 0.5F);
-            if (closestPoints != null)
+            DrawObstacleDebug();
+        }
+
+        private void DrawObstacleDebug()
+        {
+            if (!Application.isPlaying) return;
+
+            Vector3 agentPos = transform.position;
+            Bounds agentBounds = default;
+            var rend = GetComponentInChildren<Renderer>();
+            if (rend != null) agentBounds = rend.bounds;
+
+            // --- Show perception sphere ---
+            Gizmos.color = new Color(1f, 1f, 0f, 0.08f);
+            Gizmos.DrawWireSphere(agentPos, PERCEPTION_RADIUS);
+
+            // --- Iterate all obstacles, highlight each one ---
+            foreach (var obstacle in obstacles)
             {
-                foreach (var closestPoint in closestPoints.Values) // Use .Values for Dictionary
+                if (obstacle == null) continue;
+                var boxCol = obstacle.GetComponent<BoxCollider>();
+                if (boxCol == null) continue;
+
+                var obsBounds = boxCol.bounds;
+                bool heightFiltered = obsBounds.max.y < agentBounds.min.y + 0.1f
+                                   || obsBounds.min.y > agentBounds.max.y;
+
+                if (heightFiltered)
                 {
-                    Gizmos.DrawLine(transform.position, closestPoint);
+                    Gizmos.color = new Color(0.5f, 0.5f, 0.5f, 0.25f);
                 }
+                else
+                {
+                    Gizmos.color = new Color(1f, 0.9f, 0f, 0.5f);
+                }
+                Gizmos.DrawWireCube(obsBounds.center, obsBounds.size);
+
+#if UNITY_EDITOR
+                var labelStyle = new GUIStyle(UnityEditor.EditorStyles.label);
+                labelStyle.normal.textColor = heightFiltered ? Color.gray : Color.yellow;
+                labelStyle.fontSize = 10;
+                Vector3 closestPt = boxCol.ClosestPoint(agentPos);
+                float dist = Vector3.Distance(agentPos, closestPt);
+                string label = $"{obstacle.name}\nd={dist:F2}" + (heightFiltered ? " [FILTERED]" : "");
+                UnityEditor.Handles.Label(obsBounds.center + Vector3.up * obsBounds.extents.y, label, labelStyle);
+#endif
             }
+
+            // --- Per-bin closest-point forces ---
+            if (closestPoints == null || closestPoints.Count == 0) return;
+
+            Vector3 totalWallForce = Vector3.zero;
+
+            Color[] binColors = {
+                Color.green, Color.cyan, new Color(1f, 0.5f, 0f),
+                Color.magenta, new Color(0.5f, 1f, 0.5f), new Color(0.3f, 0.7f, 1f)
+            };
+
+            foreach (var kvp in closestPoints)
+            {
+                int bin = kvp.Key;
+                Vector3 closestPoint = kvp.Value;
+                Color binColor = binColors[bin % binColors.Length];
+
+                Gizmos.color = binColor;
+                Gizmos.DrawLine(agentPos + Vector3.up * 0.05f, new Vector3(closestPoint.x, agentPos.y, closestPoint.z) + Vector3.up * 0.05f);
+                Gizmos.DrawSphere(new Vector3(closestPoint.x, agentPos.y, closestPoint.z) + Vector3.up * 0.05f, 0.05f);
+
+                var wallNorm = agentPos - closestPoint;
+                wallNorm.y = 0;
+                float overlap = RADIUS - wallNorm.magnitude;
+                Vector3 force = Parameters.WALL_A * Mathf.Exp(overlap / Parameters.WALL_B) * wallNorm;
+                totalWallForce += force;
+
+                float forceVizScale = 0.002f;
+                Vector3 forceViz = force * forceVizScale;
+                if (forceViz.magnitude > 5f) forceViz = forceViz.normalized * 5f;
+
+                DrawArrow(agentPos + Vector3.up * 0.3f, forceViz, binColor);
+
+#if UNITY_EDITOR
+                var style = new GUIStyle(UnityEditor.EditorStyles.label);
+                style.normal.textColor = binColor;
+                style.fontSize = 9;
+                float dist = wallNorm.magnitude;
+                string info = $"bin{bin} d={dist:F2}\novlp={overlap:F2}\n|F|={force.magnitude:F1}";
+                UnityEditor.Handles.Label(closestPoint + Vector3.up * 0.2f, info, style);
+#endif
+            }
+
+            // --- Total wall force arrow ---
+            {
+                float forceVizScale = 0.002f;
+                Vector3 totalViz = totalWallForce * forceVizScale;
+                if (totalViz.magnitude > 5f) totalViz = totalViz.normalized * 5f;
+                DrawArrow(agentPos + Vector3.up * 0.6f, totalViz, new Color(1f, 0f, 1f, 1f));
+#if UNITY_EDITOR
+                var style = new GUIStyle(UnityEditor.EditorStyles.boldLabel);
+                style.normal.textColor = Color.magenta;
+                style.fontSize = 11;
+                UnityEditor.Handles.Label(agentPos + Vector3.up * 1.2f,
+                    $"TOTAL WALL F: ({totalWallForce.x:F1}, {totalWallForce.z:F1})\n|F|={totalWallForce.magnitude:F1}\nObstacles: {obstacles.Count}  Bins: {closestPoints.Count}/{OBSTACLE_ANGLE_BINS}",
+                    style);
+#endif
+            }
+        }
+
+        private static void DrawArrow(Vector3 from, Vector3 direction, Color color)
+        {
+            if (direction.sqrMagnitude < 0.0001f) return;
+            Gizmos.color = color;
+            Vector3 to = from + direction;
+            Gizmos.DrawLine(from, to);
+            float headSize = Mathf.Min(0.15f, direction.magnitude * 0.3f);
+            Vector3 right = Quaternion.LookRotation(direction) * Quaternion.Euler(0, 150, 0) * Vector3.forward * headSize;
+            Vector3 left  = Quaternion.LookRotation(direction) * Quaternion.Euler(0, -150, 0) * Vector3.forward * headSize;
+            Gizmos.DrawLine(to, to + right);
+            Gizmos.DrawLine(to, to + left);
         }
     }
 }
