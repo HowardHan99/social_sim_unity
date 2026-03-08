@@ -21,6 +21,7 @@ namespace IVI
         private Vector3 manualVelocity;
         private bool initialized = false;
         private bool waitingForStart = true;
+        public bool WaitingForStart => waitingForStart;
         private Quaternion spawnRotation;
         private WheelchairCameraSmoothing camSmoothing;
 

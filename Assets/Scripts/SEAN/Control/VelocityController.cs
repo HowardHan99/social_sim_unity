@@ -22,8 +22,17 @@ namespace SEAN.Control
 
         // Manual control variables
         private bool manualControlActive = false;
+        public bool ManualControlActive => manualControlActive;
         public float manualLinearSpeed = 0.01f;
         public float manualAngularSpeed = 0.01f;
+        
+        [Header("Manual Brake/Reverse Behavior")]
+        public float brakeStopThreshold = 0.02f;
+        public int sPressesToEnableReverse = 2;
+        public float sPressWindowSec = 0.6f;
+
+        [Header("Debug Manual Brake (Read-Only)")]
+        public int DebugSBrakePressCount;
 
         // Momentum-based Transition variables
         private float prevLinVelocity = 0f;
@@ -77,6 +86,7 @@ namespace SEAN.Control
 
         private float lastCmdReceiptRealtime = -1f;
         private float stuckAccumulatedSeconds = 0f;
+        private float lastSBrakePressRealtime = -1f;
 
         protected void Start()
         {
@@ -99,6 +109,8 @@ namespace SEAN.Control
                     // This helps if switching while robot was moving under ROS.
                     prevLinVelocity = targetLinVelocity;
                     prevAngVelocity = targetAngVelocity;
+                    DebugSBrakePressCount = 0;
+                    lastSBrakePressRealtime = -1f;
                 }
                 else
                 {
@@ -108,6 +120,8 @@ namespace SEAN.Control
                     // This helps if switching while robot was moving under manual control.
                     prevLinVelocity = targetLinVelocity;
                     prevAngVelocity = targetAngVelocity;
+                    DebugSBrakePressCount = 0;
+                    lastSBrakePressRealtime = -1f;
                 }
             }
 
@@ -128,14 +142,58 @@ namespace SEAN.Control
             // This means if A/D is not pressed, the robot will try to stop turning.
             float manualDesiredAng = 0f; 
 
+            bool wHeld = UnityEngine.Input.GetKey(KeyCode.W);
+            bool sHeld = UnityEngine.Input.GetKey(KeyCode.S);
+            bool sPressed = UnityEngine.Input.GetKeyDown(KeyCode.S);
+            float nowRealtime = Time.realtimeSinceStartup;
+
+            if (!sHeld &&
+                lastSBrakePressRealtime > 0f &&
+                nowRealtime - lastSBrakePressRealtime > sPressWindowSec)
+            {
+                DebugSBrakePressCount = 0;
+                lastSBrakePressRealtime = -1f;
+            }
+
+            if (sPressed)
+            {
+                if (lastSBrakePressRealtime < 0f ||
+                    nowRealtime - lastSBrakePressRealtime > sPressWindowSec)
+                {
+                    DebugSBrakePressCount = 0;
+                }
+                DebugSBrakePressCount++;
+                lastSBrakePressRealtime = nowRealtime;
+            }
+
             // Forward/Backward
-            if (UnityEngine.Input.GetKey(KeyCode.W))
+            if (wHeld)
             {
                 manualDesiredLin = manualLinearSpeed; // Accelerate/set target to forward speed
+                DebugSBrakePressCount = 0;
+                lastSBrakePressRealtime = -1f;
             }
-            else if (UnityEngine.Input.GetKey(KeyCode.S))
+            else if (sHeld)
             {
-                manualDesiredLin = -manualLinearSpeed; // Accelerate/set target to backward speed
+                bool movingForward = prevLinVelocity > brakeStopThreshold;
+                bool nearStop = Mathf.Abs(prevLinVelocity) <= brakeStopThreshold;
+                bool reverseArmed = DebugSBrakePressCount >= Mathf.Max(1, sPressesToEnableReverse);
+
+                // S behaves as brake first while moving forward.
+                if (movingForward)
+                {
+                    manualDesiredLin = 0f;
+                }
+                else if (nearStop)
+                {
+                    // Only engage reverse after repeated S presses near stop.
+                    manualDesiredLin = reverseArmed ? -manualLinearSpeed : 0f;
+                }
+                else
+                {
+                    // Already moving backward: keep backward command while S is held.
+                    manualDesiredLin = -manualLinearSpeed;
+                }
             }
 
             // Turning (A for Right, D for Left as per original logic)
@@ -155,6 +213,8 @@ namespace SEAN.Control
             {
                 manualDesiredLin = 0;
                 manualDesiredAng = 0;
+                DebugSBrakePressCount = 0;
+                lastSBrakePressRealtime = -1f;
             }
 
             float interpolationFactor = 1.0f - Mathf.Clamp(velocityDamping, 0.0f, 0.999f);
