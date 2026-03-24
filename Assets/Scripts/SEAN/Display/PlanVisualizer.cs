@@ -38,6 +38,17 @@ namespace SEAN.Display
 
         VolumetricLineStripBehavior lineStripBehavior;
 
+        /// <summary>
+        /// Returns a copy of the current planned path positions, or null if no plan exists.
+        /// Used by LiveTrajectoryRecorder to snapshot the ROS nav plan for session review.
+        /// </summary>
+        public Vector3[] GetCurrentPlanPositions()
+        {
+            if (renderPathPositions == null || renderPathPositions.Length == 0)
+                return null;
+            return (Vector3[])renderPathPositions.Clone();
+        }
+
         void Awake()
         {
             // Make sure we catch the first global plan message

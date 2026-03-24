@@ -12,7 +12,6 @@ namespace SessionReview
         [SerializeField] private KeyCode nextTrialKey = KeyCode.RightBracket;
         [SerializeField] private KeyCode playPauseKey = KeyCode.Space;
         [SerializeField] private KeyCode ghostTrailKey = KeyCode.G;
-        [SerializeField] private KeyCode futurePathKey = KeyCode.T;
 
         [Header("Perspective Keys")]
         [SerializeField] private KeyCode robotFPKey = KeyCode.F1;
@@ -24,6 +23,12 @@ namespace SessionReview
         [Header("Speed")]
         [SerializeField] private KeyCode speedUpKey = KeyCode.Equals;
         [SerializeField] private KeyCode speedDownKey = KeyCode.Minus;
+
+        [Header("VLM Capture Annotation")]
+        [Tooltip("Transform whose position is recorded when a VLM capture occurs (e.g. the robot base_link). If null, falls back to SEAN robot.")]
+        public Transform vlmCaptureSource;
+        [Tooltip("Optional: assign the VLM capture UI Button here to auto-wire the onClick event.")]
+        public UnityEngine.UI.Button vlmCaptureButton;
 
         private SessionTracker sessionTracker;
         private ControlModeLog controlModeLog;
@@ -86,10 +91,16 @@ namespace SessionReview
         {
             if (sessionTracker != null)
                 sessionTracker.TrialEnded += OnTrialEnded;
+
+            if (vlmCaptureButton != null)
+                vlmCaptureButton.onClick.AddListener(RecordVLMCapture);
         }
 
         void OnDestroy()
         {
+            if (vlmCaptureButton != null)
+                vlmCaptureButton.onClick.RemoveListener(RecordVLMCapture);
+
             if (sessionTracker != null)
                 sessionTracker.TrialEnded -= OnTrialEnded;
             if (Instance == this)
@@ -166,8 +177,6 @@ namespace SessionReview
 
             if (Input.GetKeyDown(ghostTrailKey))
                 rewindController.ToggleTrails();
-            if (Input.GetKeyDown(futurePathKey))
-                rewindController.ToggleFuturePaths();
 
             if (Input.GetKeyDown(prevTrialKey) && trialArchive.TrialCount > 1)
                 EnterRewindMode(Mathf.Max(0, reviewTrialIndex - 1));
@@ -190,11 +199,16 @@ namespace SessionReview
             var recording = trajectoryRecorder.BuildSnapshot();
             float timeOffset = trajectoryRecorder.RecordingStartTime;
 
+            float recStart = trial.startTime - timeOffset;
+            float recEnd = trial.endTime - timeOffset;
+            var planSnapshots = trajectoryRecorder.GetPlanSnapshots(recStart, recEnd);
+            var vlmCaptures = trajectoryRecorder.GetVLMCaptures(recStart, recEnd);
+
             // Freeze the simulation
             savedTimeScale = Time.timeScale;
             Time.timeScale = 0f;
 
-            trajectoryRenderer.ShowTrajectories(trial, recording, controlModeLog, timeOffset);
+            trajectoryRenderer.ShowTrajectories(trial, recording, controlModeLog, planSnapshots, vlmCaptures, timeOffset);
             metricsOverlay.ShowTrial(trial);
             rewindController.EnterRewind(trial, recording, controlModeLog, trajectoryRenderer, timeOffset);
         }
@@ -208,6 +222,37 @@ namespace SessionReview
 
             // Restore simulation
             Time.timeScale = savedTimeScale;
+        }
+
+        /// <summary>
+        /// Call this from VLM capture button onClick (or any script) to record a VLM annotation.
+        /// Can also be called via SessionReviewManager.Instance.RecordVLMCapture() from code.
+        /// </summary>
+        public void RecordVLMCapture()
+        {
+            if (trajectoryRecorder == null) return;
+
+            Transform source = ResolveVLMSource();
+            if (source == null)
+            {
+                Debug.LogWarning("[SessionReview] RecordVLMCapture: no source transform available.");
+                return;
+            }
+
+            string agentId = SessionTracker.GetObjectId(source.gameObject);
+            trajectoryRecorder.RecordVLMCapture(agentId, source.position, source.rotation);
+        }
+
+        private Transform ResolveVLMSource()
+        {
+            if (vlmCaptureSource != null)
+                return vlmCaptureSource;
+
+            var sean = SEAN.SEAN.instance;
+            if (sean != null && sean.robot != null && sean.robot.base_link != null)
+                return sean.robot.base_link.transform;
+
+            return null;
         }
 
         public void CyclePerspective()

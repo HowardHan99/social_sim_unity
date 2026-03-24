@@ -5,10 +5,24 @@ using Rerun;
 
 namespace SessionReview
 {
+    [System.Serializable]
+    public class PlanPathSnapshot
+    {
+        public float timestamp;
+        public Vector3[] positions;
+    }
+
+    [System.Serializable]
+    public class PlanPathRecording
+    {
+        public List<PlanPathSnapshot> snapshots = new List<PlanPathSnapshot>();
+    }
+
     /// <summary>
     /// Self-contained trajectory recorder that samples all registered agents at 10 Hz.
     /// Agents are registered explicitly via TrackAgent() -- typically called by SessionTracker
     /// when it discovers agents at trial start (the right moment in the lifecycle).
+    /// Also records the ROS planned navigation path from PlanVisualizer for session review.
     /// </summary>
     public class LiveTrajectoryRecorder : MonoBehaviour
     {
@@ -21,6 +35,12 @@ namespace SessionReview
         private Dictionary<string, ObjectStateTimeline> timelines = new Dictionary<string, ObjectStateTimeline>();
         private Dictionary<string, Transform> trackedTransforms = new Dictionary<string, Transform>();
         private bool isRecording;
+
+        private SEAN.Display.PlanVisualizer planVisualizer;
+        private List<PlanPathSnapshot> planSnapshots = new List<PlanPathSnapshot>();
+        private Vector3[] lastRecordedPlan;
+
+        private List<VLMCaptureEvent> vlmCaptures = new List<VLMCaptureEvent>();
 
         public float RecordingStartTime => recordingStartTime;
         public int TrackedCount => trackedTransforms.Count;
@@ -36,6 +56,7 @@ namespace SessionReview
             recordingStartTime = Time.time;
             lastSampleTime = recordingStartTime;
             isRecording = true;
+            planVisualizer = FindObjectOfType<SEAN.Display.PlanVisualizer>();
         }
 
         void Update()
@@ -82,6 +103,36 @@ namespace SessionReview
                     properties = new List<SerializedProperty>()
                 });
             }
+
+            SamplePlanPath(timestamp);
+        }
+
+        private void SamplePlanPath(float timestamp)
+        {
+            if (planVisualizer == null)
+                planVisualizer = FindObjectOfType<SEAN.Display.PlanVisualizer>();
+            if (planVisualizer == null) return;
+
+            Vector3[] plan = planVisualizer.GetCurrentPlanPositions();
+            if (plan == null || plan.Length == 0) return;
+
+            if (lastRecordedPlan != null && plan.Length == lastRecordedPlan.Length)
+            {
+                bool same = true;
+                for (int i = 0; i < plan.Length; i++)
+                {
+                    if (Vector3.SqrMagnitude(plan[i] - lastRecordedPlan[i]) > 0.01f)
+                    { same = false; break; }
+                }
+                if (same) return;
+            }
+
+            lastRecordedPlan = plan;
+            planSnapshots.Add(new PlanPathSnapshot
+            {
+                timestamp = timestamp,
+                positions = plan
+            });
         }
 
         public StateRecording BuildSnapshot()
@@ -93,6 +144,58 @@ namespace SessionReview
             };
             recording.BuildCache();
             return recording;
+        }
+
+        /// <summary>
+        /// Returns plan path snapshots within the given recording-relative time window.
+        /// </summary>
+        public List<PlanPathSnapshot> GetPlanSnapshots(float recStart, float recEnd)
+        {
+            var result = new List<PlanPathSnapshot>();
+            foreach (var snap in planSnapshots)
+            {
+                if (snap.timestamp >= recStart && snap.timestamp <= recEnd)
+                    result.Add(snap);
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Returns the plan path active at the given recording-relative time.
+        /// </summary>
+        public Vector3[] GetPlanAtTime(float time)
+        {
+            Vector3[] last = null;
+            foreach (var snap in planSnapshots)
+            {
+                if (snap.timestamp > time) break;
+                last = snap.positions;
+            }
+            return last;
+        }
+
+        public void RecordVLMCapture(string agentId, Vector3 position, Quaternion rotation)
+        {
+            float timestamp = Time.time - recordingStartTime;
+            vlmCaptures.Add(new VLMCaptureEvent
+            {
+                timestamp = timestamp,
+                position = position,
+                rotation = rotation,
+                agentId = agentId
+            });
+            Debug.Log($"[SessionReview] VLM capture recorded at t={timestamp:F2}, pos={position}, agent={agentId}");
+        }
+
+        public List<VLMCaptureEvent> GetVLMCaptures(float recStart, float recEnd)
+        {
+            var result = new List<VLMCaptureEvent>();
+            foreach (var evt in vlmCaptures)
+            {
+                if (evt.timestamp >= recStart && evt.timestamp <= recEnd)
+                    result.Add(evt);
+            }
+            return result;
         }
 
         public Dictionary<string, ObjectState> GetStateAtTime(float time)
@@ -200,6 +303,24 @@ namespace SessionReview
             File.WriteAllText(combinedPath, JsonUtility.ToJson(combined, true));
 
             Debug.Log($"[SessionReview] Saved {trialTimelines.Count} agent trajectories to: {trialFolder}");
+
+            var trialPlans = GetPlanSnapshots(recStart, recEnd);
+            if (trialPlans.Count > 0)
+            {
+                var planData = new PlanPathRecording { snapshots = trialPlans };
+                string planFile = Path.Combine(trialFolder, "plan_paths.json");
+                File.WriteAllText(planFile, JsonUtility.ToJson(planData, true));
+                Debug.Log($"[SessionReview] Saved {trialPlans.Count} plan path snapshots to: {planFile}");
+            }
+
+            var trialVLM = GetVLMCaptures(recStart, recEnd);
+            if (trialVLM.Count > 0)
+            {
+                var vlmData = new VLMCaptureRecording { events = trialVLM };
+                string vlmFile = Path.Combine(trialFolder, "vlm_captures.json");
+                File.WriteAllText(vlmFile, JsonUtility.ToJson(vlmData, true));
+                Debug.Log($"[SessionReview] Saved {trialVLM.Count} VLM capture events to: {vlmFile}");
+            }
         }
     }
 }

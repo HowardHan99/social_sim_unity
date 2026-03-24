@@ -27,7 +27,6 @@ namespace SessionReview
         [Header("Trail Overlay")]
         [SerializeField] private float trailLineWidth = 0.05f;
 
-        private RerunPlaybackCameraManager playbackCamManager;
         private LiveTrajectoryRecorder liveRecorder;
 
         private TrialRecord currentTrial;
@@ -55,9 +54,13 @@ namespace SessionReview
         private GameObject trailParent;
         private Dictionary<string, LineRenderer> trailRenderers = new Dictionary<string, LineRenderer>();
         private bool showTrails = true;
-        private bool showFuturePaths;
 
         private MultiAgentTrajectoryRenderer trajectoryRenderer;
+
+        [Header("Plan Path")]
+        [SerializeField] private Color activePlanColor = new Color(0.2f, 1f, 0.3f, 0.9f);
+        [SerializeField] private float activePlanWidth = 0.14f;
+        private LineRenderer activePlanLine;
 
         public bool IsRewinding => isRewinding;
         public float CurrentTime => currentTime;
@@ -95,7 +98,6 @@ namespace SessionReview
                 currentRecording.BuildCache();
 
             liveRecorder = FindObjectOfType<LiveTrajectoryRecorder>();
-            playbackCamManager = FindObjectOfType<RerunPlaybackCameraManager>();
 
             savedMainCamera = Camera.main;
             if (savedMainCamera != null)
@@ -158,6 +160,8 @@ namespace SessionReview
 
             if (showTrails)
                 UpdateTrails();
+
+            UpdateActivePlanPath();
 
             if (perspectiveMode == PerspectiveMode.PedestrianOverShoulder)
                 UpdateOverShoulderCamera();
@@ -252,24 +256,13 @@ namespace SessionReview
             if (!showTrails) ClearTrails();
         }
 
-        public void ToggleFuturePaths()
-        {
-            showFuturePaths = !showFuturePaths;
-        }
-
         private void ApplyStateAtCurrentTime()
         {
-            if (currentRecording == null) return;
+            if (liveRecorder == null) return;
 
-            Dictionary<string, ObjectState> states;
-            if (liveRecorder != null)
-                states = liveRecorder.GetStateAtTime(currentTime);
-            else
-                states = GetStatesFromRecording(currentTime);
-
+            var states = liveRecorder.GetStateAtTime(currentTime);
             if (states == null || states.Count == 0) return;
 
-            // Apply to transforms directly via a lookup of the agent GameObjects
             foreach (var kvp in states)
             {
                 Transform t = FindTransformForId(kvp.Key);
@@ -277,45 +270,6 @@ namespace SessionReview
                 t.position = kvp.Value.position;
                 t.rotation = kvp.Value.rotation;
             }
-        }
-
-        private Dictionary<string, ObjectState> GetStatesFromRecording(float time)
-        {
-            var result = new Dictionary<string, ObjectState>();
-            if (currentRecording.timelineDict == null) return result;
-
-            foreach (var timeline in currentRecording.timelineDict.Values)
-            {
-                if (timeline.states.Count == 0) continue;
-                var states = timeline.states;
-                ObjectState state = null;
-
-                if (time <= states[0].timestamp) { state = states[0]; }
-                else if (time >= states[states.Count - 1].timestamp) { state = states[states.Count - 1]; }
-                else
-                {
-                    int lo = 0, hi = states.Count - 1;
-                    while (lo < hi - 1)
-                    {
-                        int mid = (lo + hi) / 2;
-                        if (states[mid].timestamp <= time) lo = mid; else hi = mid;
-                    }
-                    var a = states[lo]; var b = states[hi];
-                    float t = (time - a.timestamp) / Mathf.Max(0.001f, b.timestamp - a.timestamp);
-                    state = new ObjectState
-                    {
-                        objectId = a.objectId, timestamp = time,
-                        position = Vector3.Lerp(a.position, b.position, t),
-                        rotation = Quaternion.Slerp(a.rotation, b.rotation, t),
-                        scale = Vector3.Lerp(a.scale, b.scale, t),
-                        properties = new List<SerializedProperty>()
-                    };
-                }
-
-                if (state != null)
-                    result[timeline.objectId] = state;
-            }
-            return result;
         }
 
         private Dictionary<string, Transform> transformCache = new Dictionary<string, Transform>();
@@ -497,42 +451,27 @@ namespace SessionReview
 
         private void ActivateFreeCam()
         {
-            if (playbackCamManager != null)
-            {
-                playbackCamManager.EnableCameras();
-                return;
-            }
-
-            rewindCamera.transform.position = ComputeSceneCenter() + Vector3.up * 10f + Vector3.back * 10f;
-            rewindCamera.transform.LookAt(ComputeSceneCenter());
+            Vector3 center = ComputeSceneCenter();
+            rewindCamera.transform.position = center + Vector3.up * 10f + Vector3.back * 10f;
+            rewindCamera.transform.LookAt(center);
             rewindCamera.orthographic = false;
             rewindCamera.enabled = true;
         }
 
         private Vector3 ComputeSceneCenter()
         {
-            if (currentTrial == null || currentRecording == null)
+            if (currentTrial == null || liveRecorder == null)
+                return Vector3.zero;
+
+            var states = liveRecorder.GetStateAtTime(currentTime);
+            if (states == null || states.Count == 0)
                 return Vector3.zero;
 
             Vector3 sum = Vector3.zero;
-            int count = 0;
+            foreach (var kvp in states)
+                sum += kvp.Value.position;
 
-            Dictionary<string, ObjectState> states;
-            if (liveRecorder != null)
-                states = liveRecorder.GetStateAtTime(currentTime);
-            else
-                states = GetStatesFromRecording(currentTime);
-
-            if (states != null)
-            {
-                foreach (var kvp in states)
-                {
-                    sum += kvp.Value.position;
-                    count++;
-                }
-            }
-
-            return count > 0 ? sum / count : Vector3.zero;
+            return sum / states.Count;
         }
 
         private void UpdateTrails()
@@ -596,12 +535,56 @@ namespace SessionReview
             }
         }
 
+        private void UpdateActivePlanPath()
+        {
+            if (liveRecorder == null) return;
+
+            Vector3[] plan = liveRecorder.GetPlanAtTime(currentTime);
+
+            if (plan == null || plan.Length < 2)
+            {
+                if (activePlanLine != null)
+                    activePlanLine.enabled = false;
+                return;
+            }
+
+            if (activePlanLine == null)
+            {
+                var obj = new GameObject("ActivePlanPath");
+                obj.transform.SetParent(transform);
+                activePlanLine = obj.AddComponent<LineRenderer>();
+                activePlanLine.startWidth = activePlanWidth;
+                activePlanLine.endWidth = activePlanWidth;
+                activePlanLine.useWorldSpace = true;
+                activePlanLine.material = new Material(Shader.Find("Sprites/Default"));
+                activePlanLine.material.color = Color.white;
+                activePlanLine.startColor = activePlanColor;
+                activePlanLine.endColor = activePlanColor;
+                activePlanLine.numCornerVertices = 4;
+            }
+
+            activePlanLine.positionCount = plan.Length;
+            for (int i = 0; i < plan.Length; i++)
+            {
+                Vector3 p = plan[i];
+                p.y += 0.08f;
+                activePlanLine.SetPosition(i, p);
+            }
+            activePlanLine.enabled = true;
+        }
+
         private void ClearTrails()
         {
             if (trailParent != null)
                 Destroy(trailParent);
             trailRenderers.Clear();
             trailParent = null;
+
+            if (activePlanLine != null)
+            {
+                Destroy(activePlanLine.gameObject);
+                activePlanLine = null;
+            }
         }
 
         void OnGUI()

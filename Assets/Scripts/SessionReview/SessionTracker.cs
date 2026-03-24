@@ -129,32 +129,6 @@ namespace SessionReview
                 }
             }
 
-            // Also try finding PWD by SFPWDAgent + ManualWheelchairController on same object
-            // in case FindObjectOfType missed it above (e.g. it's inside pedestrianBehavior.agents)
-            if (pwdController == null)
-            {
-                foreach (var mwc in FindObjectsOfType<ManualWheelchairController>())
-                {
-                    if (mwc == null) continue;
-                    pwdController = mwc;
-                    pwdNavigable = mwc.GetComponent<IVI.INavigable>();
-                    string pwdId2 = GetObjectId(mwc.gameObject);
-                    if (!string.IsNullOrEmpty(pwdId2) && !agentRoles.ContainsKey(pwdId2))
-                    {
-                        agentRoles[pwdId2] = AgentRole.PWDPlayer;
-                        agentArrivals[pwdId2] = new AgentArrivalInfo
-                        {
-                            objectId = pwdId2,
-                            agentName = mwc.gameObject.name,
-                            role = AgentRole.PWDPlayer,
-                            arrived = false,
-                            arrivalTime = -1f
-                        };
-                    }
-                    break;
-                }
-            }
-
             if (sean.pedestrianBehavior != null && sean.pedestrianBehavior.agents != null)
             {
                 foreach (var agent in sean.pedestrianBehavior.agents)

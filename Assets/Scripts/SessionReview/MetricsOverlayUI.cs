@@ -27,12 +27,6 @@ namespace SessionReview
             currentTrial = null;
         }
 
-        public void Toggle()
-        {
-            if (visible) Hide();
-            else if (currentTrial != null) visible = true;
-        }
-
         private static string FormatDist(double val)
         {
             if (val >= double.MaxValue * 0.5 || double.IsInfinity(val) || double.IsNaN(val))

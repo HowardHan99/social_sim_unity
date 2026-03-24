@@ -155,11 +155,6 @@ namespace SessionReview
             return last;
         }
 
-        public void Clear()
-        {
-            Entries.Clear();
-        }
-
         public void SaveToFile(string basePath)
         {
             SaveToFile(basePath, Entries);

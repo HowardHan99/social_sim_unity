@@ -14,6 +14,21 @@ namespace SessionReview
     }
 
     [Serializable]
+    public class VLMCaptureEvent
+    {
+        public float timestamp;
+        public Vector3 position;
+        public Quaternion rotation;
+        public string agentId;
+    }
+
+    [Serializable]
+    public class VLMCaptureRecording
+    {
+        public List<VLMCaptureEvent> events = new List<VLMCaptureEvent>();
+    }
+
+    [Serializable]
     public class MetricsSnapshot
     {
         public double minDistToPed;
@@ -59,8 +74,7 @@ namespace SessionReview
         public List<ControlModeEntry> controlModeEntries = new List<ControlModeEntry>();
         public List<AgentControlSummary> controlSummaries = new List<AgentControlSummary>();
         public MetricsSnapshot metrics;
-
-        public string rerunstateFilePath;
+        public List<VLMCaptureEvent> vlmCaptures = new List<VLMCaptureEvent>();
 
         public float Duration => endTime - startTime;
     }
@@ -118,6 +132,13 @@ namespace SessionReview
             {
                 record.controlModeEntries = controlModeLog.GetEntriesInRange(info.startTime, info.endTime);
                 record.controlSummaries = ComputeControlSummaries(record);
+            }
+
+            if (trajectoryRecorder != null)
+            {
+                float recStart = info.startTime - trajectoryRecorder.RecordingStartTime;
+                float recEnd = info.endTime - trajectoryRecorder.RecordingStartTime;
+                record.vlmCaptures = trajectoryRecorder.GetVLMCaptures(recStart, recEnd);
             }
 
             Trials.Add(record);
