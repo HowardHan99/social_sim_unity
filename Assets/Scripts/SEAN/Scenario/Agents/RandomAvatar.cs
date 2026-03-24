@@ -17,6 +17,7 @@ namespace SEAN.Scenario.Agents
         static private List<GameObject> avatarsList;
         static private int numPWDSFAgentsInstantiated = 0;
         static private bool pwdPlayerSpawned = false;
+        static private int lastSceneHandle = int.MinValue;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         static void ResetStatics()
@@ -24,6 +25,7 @@ namespace SEAN.Scenario.Agents
             avatarsList = null;
             numPWDSFAgentsInstantiated = 0;
             pwdPlayerSpawned = false;
+            lastSceneHandle = int.MinValue;
         }
 
         [Header("PWD Player")]
@@ -47,9 +49,16 @@ namespace SEAN.Scenario.Agents
 
         void Awake()
         {
+            EnsureSceneScopedStatics();
+
             if (SEAN.instance)
             {
                 controller = SEAN.instance.AgentController;
+            }
+
+            if (SessionReview.SessionOnboardingSettings.HasCompletedOnboarding)
+            {
+                ApplyOnboardingOverrides();
             }
 
             if (isPwdPlayer)
@@ -82,6 +91,34 @@ namespace SEAN.Scenario.Agents
             {
                 avatarObject.transform.parent = transform;
             }
+        }
+
+        private static void EnsureSceneScopedStatics()
+        {
+            int sceneHandle = SceneManager.GetActiveScene().handle;
+            if (sceneHandle == lastSceneHandle)
+                return;
+
+            avatarsList = null;
+            numPWDSFAgentsInstantiated = 0;
+            pwdPlayerSpawned = false;
+            lastSceneHandle = sceneHandle;
+        }
+
+        private void ApplyOnboardingOverrides()
+        {
+            if (!isPwdPlayer)
+                return;
+
+            if (SessionReview.SessionOnboardingSettings.PlayerMode == SessionReview.OnboardingPlayerMode.Human)
+            {
+                pwdGender = SessionReview.SessionOnboardingSettings.SelectedPwdGender;
+                return;
+            }
+
+            isPwdPlayer = false;
+            if (bgPwdGender == PwdGender.Random)
+                bgPwdGender = PwdGender.Male;
         }
 
         private void SpawnPwdPlayer()
@@ -152,6 +189,7 @@ namespace SEAN.Scenario.Agents
             manualCtrl.startInManualMode = false;
 
             AttachCameraToHead(avatarObject);
+            ActivatePwdPlayerView(avatarObject);
 
             // Lock position on the camera's CameraScript so mouse/keyboard input
             // cannot move the camera away from the avatar. Rotation (free-look) still works.
@@ -265,6 +303,38 @@ namespace SEAN.Scenario.Agents
             }
 
             Debug.Log($"[PWD] Camera attached to avatar root at offset {camOffset}");
+        }
+
+        private void ActivatePwdPlayerView(GameObject avatar)
+        {
+            if (!SessionReview.SessionOnboardingSettings.HasCompletedOnboarding ||
+                SessionReview.SessionOnboardingSettings.PlayerMode != SessionReview.OnboardingPlayerMode.Human)
+                return;
+
+            Camera pwdCamera = null;
+            foreach (var cam in avatar.GetComponentsInChildren<Camera>(true))
+            {
+                cam.targetDisplay = 0;
+                cam.enabled = true;
+                cam.gameObject.SetActive(true);
+                if (pwdCamera == null)
+                    pwdCamera = cam;
+            }
+
+            foreach (Camera cam in Camera.allCameras)
+            {
+                if (pwdCamera != null && cam == pwdCamera)
+                    continue;
+
+                cam.enabled = false;
+            }
+
+            if (SEAN.instance != null)
+            {
+                SEAN.instance.PlayerControl = false;
+                if (SEAN.instance.player != null)
+                    SEAN.instance.player.gameObject.SetActive(false);
+            }
         }
 
         private Transform FindBoneRecursive(Transform root, string boneName)

@@ -16148,6 +16148,8 @@ MonoBehaviour:
   speedDownKey: 45
   vlmCaptureSource: {fileID: 0}
   vlmCaptureButton: {fileID: 1212636001}
+  showOnboardingOnStart: 1
+  onboardingToggleKey: 111
 --- !u!1 &706113846
 GameObject:
   m_ObjectHideFlags: 0
@@ -24821,7 +24823,7 @@ MeshCollider:
   m_GameObject: {fileID: 1167204619}
   m_Material: {fileID: 0}
   m_IsTrigger: 0
-  m_Enabled: 1
+  m_Enabled: 0
   serializedVersion: 4
   m_Convex: 0
   m_CookingOptions: 30
@@ -32273,7 +32275,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1478002795}
   m_LocalRotation: {x: 0, y: 0, z: 0.7071068, w: 0.7071068}
-  m_LocalPosition: {x: -0.507, y: 0.043, z: 0.027}
+  m_LocalPosition: {x: -0.502, y: 0.043, z: 0.027}
   m_LocalScale: {x: 0.07464489, y: 0.07464489, z: 0.07464489}
   m_Children: []
   m_Father: {fileID: 2083580311}
@@ -32288,7 +32290,7 @@ MeshCollider:
   m_GameObject: {fileID: 1478002795}
   m_Material: {fileID: 0}
   m_IsTrigger: 0
-  m_Enabled: 1
+  m_Enabled: 0
   serializedVersion: 4
   m_Convex: 0
   m_CookingOptions: 30
@@ -62842,8 +62844,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1970872362}
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0.019, y: 0.51, z: 0.05}
-  m_LocalScale: {x: 0.070315465, y: 0.13593386, z: 0.070315465}
+  m_LocalPosition: {x: 0.024, y: 0.503, z: 0.119}
+  m_LocalScale: {x: 0.070315465, y: 0.13593386, z: 0.043443}
   m_Children: []
   m_Father: {fileID: 2083580311}
   m_RootOrder: 2
@@ -62857,7 +62859,7 @@ MeshCollider:
   m_GameObject: {fileID: 1970872362}
   m_Material: {fileID: 0}
   m_IsTrigger: 0
-  m_Enabled: 1
+  m_Enabled: 0
   serializedVersion: 4
   m_Convex: 0
   m_CookingOptions: 30
@@ -65194,7 +65196,7 @@ GameObject:
   - component: {fileID: 2083580313}
   - component: {fileID: 2083580312}
   m_Layer: 0
-  m_Name: Cube
+  m_Name: Deliveryrobotbody
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -65208,8 +65210,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2083580310}
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0.002, y: -0.045, z: 0.198}
-  m_LocalScale: {x: 0.3235209, y: 0.40239, z: 0.22170578}
+  m_LocalPosition: {x: 0.002, y: -0.046, z: 0.197}
+  m_LocalScale: {x: 0.3235209, y: 0.4674735, z: 0.19076453}
   m_Children:
   - {fileID: 1167204620}
   - {fileID: 1478002796}
@@ -77452,7 +77454,7 @@ PrefabInstance:
     - target: {fileID: 3706348141055009566, guid: 1ee64ee3879e7ce47971dd241d063b02,
         type: 3}
       propertyPath: m_LocalPosition.y
-      value: -0.43
+      value: -0.4
       objectReference: {fileID: 0}
     - target: {fileID: 3706348141055009566, guid: 1ee64ee3879e7ce47971dd241d063b02,
         type: 3}
