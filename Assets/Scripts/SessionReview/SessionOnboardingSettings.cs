@@ -15,6 +15,7 @@ namespace SessionReview
         public static SEAN.Scenario.Agents.PwdGender SelectedPwdGender { get; private set; } = SEAN.Scenario.Agents.PwdGender.Male;
         public static int SelectedSceneIndex { get; private set; } = -1;
         public static string SelectedSceneName { get; private set; } = string.Empty;
+        public static bool PendingTrialStart { get; private set; }
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void Reset()
@@ -24,6 +25,7 @@ namespace SessionReview
             SelectedPwdGender = SEAN.Scenario.Agents.PwdGender.Male;
             SelectedSceneIndex = -1;
             SelectedSceneName = string.Empty;
+            PendingTrialStart = false;
         }
 
         public static void Apply(OnboardingPlayerMode playerMode,
@@ -36,6 +38,12 @@ namespace SessionReview
             SelectedPwdGender = pwdGender;
             SelectedSceneIndex = sceneIndex;
             SelectedSceneName = sceneName ?? string.Empty;
+            PendingTrialStart = true;
+        }
+
+        public static void MarkTrialStarted()
+        {
+            PendingTrialStart = false;
         }
     }
 }

@@ -17,6 +17,7 @@ namespace SEAN.Scenario.Agents
         static private List<GameObject> avatarsList;
         static private int numPWDSFAgentsInstantiated = 0;
         static private bool pwdPlayerSpawned = false;
+        static private bool autonomousPwdSpawned = false;
         static private int lastSceneHandle = int.MinValue;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
@@ -25,6 +26,7 @@ namespace SEAN.Scenario.Agents
             avatarsList = null;
             numPWDSFAgentsInstantiated = 0;
             pwdPlayerSpawned = false;
+            autonomousPwdSpawned = false;
             lastSceneHandle = int.MinValue;
         }
 
@@ -46,6 +48,71 @@ namespace SEAN.Scenario.Agents
         private GameObject avatarPrefab;
         private GameObject avatarObject;
         private LowLevelControl assignedController;
+        private bool spawnAutonomousPwdFromOnboarding;
+
+        private void RebuildAvatarPoolIfNeeded()
+        {
+            if (avatarsList != null && avatarsList.Count > 0)
+                return;
+
+            avatarsList = new List<GameObject>();
+            if (avatars != null)
+            {
+                foreach (var avatar in avatars)
+                {
+                    if (avatar != null)
+                        avatarsList.Add(avatar);
+                }
+            }
+
+            if (pwdAvatarPrefab != null)
+                avatarsList.Remove(pwdAvatarPrefab);
+            if (pwdAvatarPrefabMale != null)
+                avatarsList.Remove(pwdAvatarPrefabMale);
+            if (pwdAvatarPrefabFemale != null)
+                avatarsList.Remove(pwdAvatarPrefabFemale);
+        }
+
+        private GameObject GetFallbackAvatarPrefab()
+        {
+            if (avatars != null)
+            {
+                foreach (var avatar in avatars)
+                {
+                    if (avatar != null && avatar != pwdAvatarPrefab && avatar != pwdAvatarPrefabMale && avatar != pwdAvatarPrefabFemale)
+                        return avatar;
+                }
+
+                foreach (var avatar in avatars)
+                {
+                    if (avatar != null)
+                        return avatar;
+                }
+            }
+
+            return null;
+        }
+
+        private Animator GetAvatarAnimator(GameObject avatarInstance)
+        {
+            if (avatarInstance == null)
+                return null;
+
+            return avatarInstance.GetComponent<Animator>() ?? avatarInstance.GetComponentInChildren<Animator>(true);
+        }
+
+        private bool TrySpawnAvatarInstance(GameObject prefab, Vector3 position, Quaternion rotation, out GameObject instance)
+        {
+            instance = null;
+            if (prefab == null)
+                return false;
+
+            instance = Instantiate(prefab, position, rotation);
+            if (instance == null)
+                return false;
+
+            return true;
+        }
 
         void Awake()
         {
@@ -78,9 +145,25 @@ namespace SEAN.Scenario.Agents
             else if (isPlayer)
             {
                 avatarObject = Instantiate(avatars[0], transform.position, transform.rotation);
-                Animator animator = avatarObject.GetComponent<Animator>();
-                animator.runtimeAnimatorController = animationController;
+                Animator animator = GetAvatarAnimator(avatarObject);
+                if (animator != null)
+                    animator.runtimeAnimatorController = animationController;
+                else
+                    Debug.LogWarning($"[RandomAvatar] No Animator found on player avatar prefab '{avatars[0].name}'.", this);
                 avatarObject.AddComponent<PlayerAgent>();
+            }
+            else if (spawnAutonomousPwdFromOnboarding)
+            {
+                if (autonomousPwdSpawned)
+                {
+                    Debug.LogWarning($"[PWD] Duplicate autonomous onboarding spawn on '{gameObject.name}' suppressed.", this);
+                    gameObject.SetActive(false);
+                    return;
+                }
+
+                autonomousPwdSpawned = true;
+                SpawnAutonomousPwdAgent();
+                return;
             }
             else
             {
@@ -102,6 +185,7 @@ namespace SEAN.Scenario.Agents
             avatarsList = null;
             numPWDSFAgentsInstantiated = 0;
             pwdPlayerSpawned = false;
+            autonomousPwdSpawned = false;
             lastSceneHandle = sceneHandle;
         }
 
@@ -113,12 +197,16 @@ namespace SEAN.Scenario.Agents
             if (SessionReview.SessionOnboardingSettings.PlayerMode == SessionReview.OnboardingPlayerMode.Human)
             {
                 pwdGender = SessionReview.SessionOnboardingSettings.SelectedPwdGender;
+                spawnAutonomousPwdFromOnboarding = false;
                 return;
             }
 
             isPwdPlayer = false;
-            if (bgPwdGender == PwdGender.Random)
-                bgPwdGender = PwdGender.Male;
+            bgPwdGender = SessionReview.SessionOnboardingSettings.SelectedPwdGender;
+            spawnAutonomousPwdFromOnboarding = true;
+
+            if (SEAN.instance != null)
+                numPWDSFAgentsInstantiated = SEAN.instance.numPwDSFAgents;
         }
 
         private void SpawnPwdPlayer()
@@ -128,10 +216,7 @@ namespace SEAN.Scenario.Agents
             // Without this, the early return below would leave the list empty.
             if (avatarsList is null || avatarsList.Count == 0)
             {
-                avatarsList = new List<GameObject>(avatars);
-                if (pwdAvatarPrefab != null) avatarsList.Remove(pwdAvatarPrefab);
-                if (pwdAvatarPrefabMale != null) avatarsList.Remove(pwdAvatarPrefabMale);
-                if (pwdAvatarPrefabFemale != null) avatarsList.Remove(pwdAvatarPrefabFemale);
+                RebuildAvatarPoolIfNeeded();
             }
 
             avatarPrefab = ResolvePwdPrefab(pwdGender);
@@ -203,6 +288,68 @@ namespace SEAN.Scenario.Agents
                       $"goal=({goalPos.x:F1},{goalPos.y:F1},{goalPos.z:F1}), " +
                       $"startObj={(startObj != null ? startObj.name : "null")}, " +
                       $"goalObj={(goalObj != null ? goalObj.name : "null")}");
+        }
+
+        private void SpawnAutonomousPwdAgent()
+        {
+            if (avatarsList is null || avatarsList.Count == 0)
+            {
+                RebuildAvatarPoolIfNeeded();
+            }
+
+            avatarPrefab = ResolvePwdPrefab(bgPwdGender);
+            if (avatarPrefab == null)
+            {
+                Debug.LogError("No autonomous PWD avatar prefab assigned.", this);
+                return;
+            }
+
+            GameObject startObj = FindByName(startObjectName);
+            GameObject goalObj = FindByName(goalObjectName);
+
+            Vector3 rawPos = startObj != null ? startObj.transform.position : transform.position;
+            UnityEngine.AI.NavMeshHit navHit;
+            Vector3 spawnPos = rawPos;
+            if (UnityEngine.AI.NavMesh.SamplePosition(rawPos, out navHit, 5f, UnityEngine.AI.NavMesh.AllAreas)
+                && Mathf.Abs(navHit.position.y - rawPos.y) < 1.5f)
+                spawnPos = navHit.position;
+
+            float yAngle = startObj != null ? startObj.transform.eulerAngles.y : transform.eulerAngles.y;
+            Quaternion spawnRot = Quaternion.Euler(0f, yAngle, 0f);
+
+            avatarObject = Instantiate(avatarPrefab, spawnPos, spawnRot);
+            avatarObject.name = "PWDAutonomous";
+
+            Animator animator = avatarObject.GetComponent<Animator>();
+            if (animator != null && pwdAnimationController != null)
+                animator.runtimeAnimatorController = pwdAnimationController;
+
+            Vector3 goalPos = spawnPos;
+            if (goalObj != null)
+            {
+                Vector3 goalRaw = goalObj.transform.position;
+                if (UnityEngine.AI.NavMesh.SamplePosition(goalRaw, out navHit, 5f, UnityEngine.AI.NavMesh.AllAreas)
+                    && Mathf.Abs(navHit.position.y - goalRaw.y) < 1.5f)
+                    goalPos = navHit.position;
+                else
+                    goalPos = goalRaw;
+            }
+
+            var sfpwd = avatarObject.GetComponent<IVI.SFPWDAgent>();
+            if (sfpwd == null)
+                sfpwd = avatarObject.AddComponent<IVI.SFPWDAgent>();
+            sfpwd.useWaypoints = true;
+            sfpwd.waypointStart = spawnPos;
+            sfpwd.waypointGoal = goalPos;
+
+            var manualCtrl = avatarObject.GetComponent<IVI.ManualWheelchairController>();
+            if (manualCtrl != null)
+                manualCtrl.enabled = false;
+
+            gameObject.SetActive(false);
+
+            Debug.Log($"[PWD] Spawned autonomous PWD at ({spawnPos.x:F1},{spawnPos.y:F1},{spawnPos.z:F1}), " +
+                      $"goal=({goalPos.x:F1},{goalPos.y:F1},{goalPos.z:F1})");
         }
 
         private static GameObject FindByName(string objectName)
@@ -386,19 +533,7 @@ namespace SEAN.Scenario.Agents
             {
                 if (avatarsList is null || avatarsList.Count == 0)
                 {
-                    avatarsList = new List<GameObject>(avatars);
-                    if (pwdAvatarPrefab != null && avatarsList.Contains(pwdAvatarPrefab))
-                    {
-                        avatarsList.Remove(pwdAvatarPrefab);
-                    }
-                    if (pwdAvatarPrefabMale != null && avatarsList.Contains(pwdAvatarPrefabMale))
-                    {
-                        avatarsList.Remove(pwdAvatarPrefabMale);
-                    }
-                    if (pwdAvatarPrefabFemale != null && avatarsList.Contains(pwdAvatarPrefabFemale))
-                    {
-                        avatarsList.Remove(pwdAvatarPrefabFemale);
-                    }
+                    RebuildAvatarPoolIfNeeded();
                 }
 
                 if (avatarPrefab is null && avatarsList.Count > 0)
@@ -407,14 +542,32 @@ namespace SEAN.Scenario.Agents
                     avatarPrefab = avatarsList[randomIndex];
                     avatarsList.RemoveAt(randomIndex);
                 }
+
+                if (avatarPrefab == null)
+                {
+                    avatarPrefab = GetFallbackAvatarPrefab();
+                    if (avatarPrefab != null)
+                    {
+                        Debug.LogWarning($"[RandomAvatar] Avatar pool was empty on '{name}'. Falling back to '{avatarPrefab.name}'.", this);
+                    }
+                }
             }
 
             if (avatarPrefab != null)
             {
-                avatarObject = Instantiate(avatarPrefab, transform.position, transform.rotation);
-                Animator animator = avatarObject.GetComponent<Animator>();
+                if (!TrySpawnAvatarInstance(avatarPrefab, transform.position, transform.rotation, out avatarObject))
+                {
+                    Debug.LogError($"[RandomAvatar] Failed to instantiate avatar prefab '{avatarPrefab.name}' on '{name}'.", this);
+                    return;
+                }
 
-                if (assignedController == LowLevelControl.PWDSF && pwdAnimationController != null)
+                Animator animator = GetAvatarAnimator(avatarObject);
+
+                if (animator == null)
+                {
+                    Debug.LogWarning($"[RandomAvatar] No Animator found on spawned avatar '{avatarPrefab.name}' for '{name}'.", this);
+                }
+                else if (assignedController == LowLevelControl.PWDSF && pwdAnimationController != null)
                 {
                     animator.runtimeAnimatorController = pwdAnimationController;
                 }

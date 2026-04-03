@@ -25,6 +25,15 @@ namespace SEAN.Control
         public bool ManualControlActive => manualControlActive;
         public float manualLinearSpeed = 0.01f;
         public float manualAngularSpeed = 0.01f;
+
+        [Header("Manual Joystick")]
+        public bool enableJoystickManualControl = true;
+        public string joystickLinearAxis = "Vertical";
+        public string joystickAngularAxis = "RHorizontal";
+        public float joystickLinearDeadzone = 0.08f;
+        public float joystickAngularDeadzone = 0.2f;
+        public bool invertJoystickLinear = true;
+        public bool invertJoystickAngular = false;
         
         [Header("Manual Brake/Reverse Behavior")]
         public float brakeStopThreshold = 0.02f;
@@ -51,6 +60,19 @@ namespace SEAN.Control
         public float DebugAppliedAngSpeed;
         public float DebugActualPlanarForwardSpeed;
         public float DebugActualTotalSpeed;
+
+        [Header("Debug Joystick (Read-Only)")]
+        public bool DebugJoystickPresent;
+        public float DebugJoystickRawLinear;
+        public float DebugJoystickRawAngular;
+        public float DebugJoystickProcessedLinear;
+        public float DebugJoystickProcessedAngular;
+        public float DebugJoystickLinearCenter;
+        public float DebugJoystickAngularCenter;
+        public float DebugAxisHorizontal;
+        public float DebugAxisVertical;
+        public float DebugAxisRHorizontal;
+        public float DebugAxisRVertical;
 
         [Header("Debug Stream Health (Read-Only)")]
         public float DebugCmdHz;
@@ -84,19 +106,30 @@ namespace SEAN.Control
         public Vector2 debugOverlayPosition = new Vector2(15f, 15f);
         public Vector2 debugOverlaySize = new Vector2(430f, 90f);
 
+        [Header("Upright Stabilization")]
+        public bool keepRobotUpright = true;
+
         private float lastCmdReceiptRealtime = -1f;
         private float stuckAccumulatedSeconds = 0f;
         private float lastSBrakePressRealtime = -1f;
+        private bool JoystickPresent => enableJoystickManualControl && UnityEngine.Input.GetJoystickNames().Length > 0;
+        private float joystickLinearCenter;
+        private float joystickAngularCenter;
+        private bool joystickCenterCaptured;
 
         protected void Start()
         {
             base.Start();
             rb = sean.robot.base_link.GetComponent<Rigidbody>();
+            ApplyUprightConstraints();
             // ROSConnection.instance.Subscribe<RosMessageTypes.Geometry.MTwist>(Topic, CmdVelMessage);
         }
 
         private void Update()
         {
+            DebugJoystickPresent = JoystickPresent;
+            UpdateNamedAxisDebug();
+
             // Toggle manual control with left shift
             if (UnityEngine.Input.GetKeyDown(KeyCode.LeftShift))
             {
@@ -104,6 +137,7 @@ namespace SEAN.Control
                 if (manualControlActive)
                 {
                     Debug.Log("Manual control activated");
+                    CaptureJoystickCenter();
                     // When switching to manual, ensure prevVelocities are current target velocities
                     // to avoid momentary hiccup if Update runs before a new manual input processes.
                     // This helps if switching while robot was moving under ROS.
@@ -115,6 +149,7 @@ namespace SEAN.Control
                 else
                 {
                     Debug.Log("ROS control activated");
+                    joystickCenterCaptured = false;
                     // When switching to ROS, ensure prevVelocities are current target velocities
                     // to avoid momentary hiccup if Update runs before a new ROS message processes.
                     // This helps if switching while robot was moving under manual control.
@@ -141,6 +176,40 @@ namespace SEAN.Control
             // Initialize desired angular velocity to 0 by default.
             // This means if A/D is not pressed, the robot will try to stop turning.
             float manualDesiredAng = 0f; 
+
+            float joystickLinearInput = 0f;
+            float joystickAngularInput = 0f;
+            if (JoystickPresent)
+            {
+                if (!joystickCenterCaptured)
+                    CaptureJoystickCenter();
+
+                float rawLinearInput = ReadJoystickRawAxis(joystickLinearAxis, invertJoystickLinear);
+                float rawAngularInput = ReadJoystickRawAxis(joystickAngularAxis, invertJoystickAngular);
+                float centeredLinearInput = rawLinearInput - joystickLinearCenter;
+                float centeredAngularInput = rawAngularInput - joystickAngularCenter;
+                joystickLinearInput = ApplyJoystickDeadzone(centeredLinearInput, joystickLinearDeadzone);
+                joystickAngularInput = ApplyJoystickDeadzone(centeredAngularInput, joystickAngularDeadzone);
+
+                DebugJoystickRawLinear = rawLinearInput;
+                DebugJoystickRawAngular = rawAngularInput;
+                DebugJoystickProcessedLinear = joystickLinearInput;
+                DebugJoystickProcessedAngular = joystickAngularInput;
+                DebugJoystickLinearCenter = joystickLinearCenter;
+                DebugJoystickAngularCenter = joystickAngularCenter;
+
+                manualDesiredLin = manualLinearSpeed * joystickLinearInput;
+                manualDesiredAng = manualAngularSpeed * joystickAngularInput;
+            }
+            else
+            {
+                DebugJoystickRawLinear = 0f;
+                DebugJoystickRawAngular = 0f;
+                DebugJoystickProcessedLinear = 0f;
+                DebugJoystickProcessedAngular = 0f;
+                DebugJoystickLinearCenter = 0f;
+                DebugJoystickAngularCenter = 0f;
+            }
 
             bool wHeld = UnityEngine.Input.GetKey(KeyCode.W);
             bool sHeld = UnityEngine.Input.GetKey(KeyCode.S);
@@ -255,6 +324,12 @@ namespace SEAN.Control
             }
 
             if (rb == null) return;
+
+            if (keepRobotUpright)
+            {
+                ApplyUprightConstraints();
+                ForceUprightPose();
+            }
 
             // Motion diagnostics: command vs actual robot motion on ground plane.
             DebugActualTotalSpeed = rb.velocity.magnitude;
@@ -382,7 +457,10 @@ namespace SEAN.Control
 
             string overlayText =
                 $"[{statusText}] cmd_fresh={DebugCmdIsFresh} cmd_hz={DebugCmdHz:F1} dt_last_cmd={DebugSecondsSinceLastCmd:F2}s\n" +
-                $"cmd_lin={DebugCommandedLinSpeed:F3} app_lin={DebugAppliedLinSpeed:F3} app_ang={DebugAppliedAngSpeed:F3} act_planar={DebugActualPlanarForwardSpeed:F3}";
+                $"cmd_lin={DebugCommandedLinSpeed:F3} app_lin={DebugAppliedLinSpeed:F3} app_ang={DebugAppliedAngSpeed:F3} act_planar={DebugActualPlanarForwardSpeed:F3}" +
+                (manualControlActive ? $"\nmanual={(JoystickPresent ? "joystick" : "keyboard")}" : string.Empty) +
+                $"\njoy_present={DebugJoystickPresent} raw_lin={DebugJoystickRawLinear:F3} raw_ang={DebugJoystickRawAngular:F3} proc_lin={DebugJoystickProcessedLinear:F3} proc_ang={DebugJoystickProcessedAngular:F3}" +
+                $"\naxes H={DebugAxisHorizontal:F3} V={DebugAxisVertical:F3} RH={DebugAxisRHorizontal:F3} RV={DebugAxisRVertical:F3}";
 
             Rect rect = new Rect(debugOverlayPosition.x, debugOverlayPosition.y, debugOverlaySize.x, debugOverlaySize.y);
             Color previousColor = GUI.color;
@@ -399,6 +477,72 @@ namespace SEAN.Control
             float deriv = (present - lastError) / timeFrame;
             lastError = present;
             return present * P + integral * I + deriv * D;
+        }
+
+        private float ReadJoystickRawAxis(string axisName, bool invert)
+        {
+            if (!JoystickPresent || string.IsNullOrWhiteSpace(axisName))
+                return 0f;
+
+            float value = UnityEngine.Input.GetAxis(axisName);
+            if (invert)
+                value = -value;
+            return value;
+        }
+
+        private float ApplyJoystickDeadzone(float value, float deadzone)
+        {
+            return Mathf.Abs(value) >= deadzone ? value : 0f;
+        }
+
+        private void UpdateNamedAxisDebug()
+        {
+            DebugAxisHorizontal = UnityEngine.Input.GetAxis("Horizontal");
+            DebugAxisVertical = UnityEngine.Input.GetAxis("Vertical");
+            DebugAxisRHorizontal = UnityEngine.Input.GetAxis("RHorizontal");
+            DebugAxisRVertical = UnityEngine.Input.GetAxis("RVertical");
+        }
+
+        private void CaptureJoystickCenter()
+        {
+            if (!JoystickPresent)
+            {
+                joystickLinearCenter = 0f;
+                joystickAngularCenter = 0f;
+                joystickCenterCaptured = false;
+                return;
+            }
+
+            joystickLinearCenter = ReadJoystickRawAxis(joystickLinearAxis, invertJoystickLinear);
+            joystickAngularCenter = ReadJoystickRawAxis(joystickAngularAxis, invertJoystickAngular);
+            DebugJoystickLinearCenter = joystickLinearCenter;
+            DebugJoystickAngularCenter = joystickAngularCenter;
+            joystickCenterCaptured = true;
+        }
+
+        private void ApplyUprightConstraints()
+        {
+            if (rb == null || !keepRobotUpright) { return; }
+
+            rb.constraints |= RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
+        }
+
+        private void ForceUprightPose()
+        {
+            if (rb == null) { return; }
+
+            Vector3 euler = rb.rotation.eulerAngles;
+            Quaternion uprightRotation = Quaternion.Euler(0f, euler.y, 0f);
+            if (Quaternion.Angle(rb.rotation, uprightRotation) > 0.01f)
+            {
+                rb.MoveRotation(uprightRotation);
+            }
+
+            Vector3 angularVelocity = rb.angularVelocity;
+            if (!Mathf.Approximately(angularVelocity.x, 0f) || !Mathf.Approximately(angularVelocity.z, 0f))
+            {
+                rb.angularVelocity = new Vector3(0f, angularVelocity.y, 0f);
+            }
         }
     }
 }

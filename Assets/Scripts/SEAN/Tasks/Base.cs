@@ -6,6 +6,7 @@
 
 using UnityEngine;
 using Unity.Robotics.ROSTCPConnector;
+using SessionReview;
 
 namespace SEAN.Tasks
 {
@@ -43,6 +44,7 @@ namespace SEAN.Tasks
 
         private float debounceTime = 0f;
         public float debounceTimeoutSec = 5f;
+        public float postTrialPromptDelaySec = 0.15f;
         private float debounceStartupTime = 0f;
         protected float debounceStartupTimeoutSec = 3f;
         private static RosMessageTypes.Geometry.MPoseStamped nextGoal;
@@ -141,14 +143,22 @@ namespace SEAN.Tasks
 
         public bool isRunning { get; private set; }
         public ushort number { get; private set; }
+        public bool isAwaitingPostTrialAction { get; private set; }
+        public bool hasPreparedTaskPreview { get; private set; }
 
         // implementers should override this method
         protected abstract bool NewTask();
 
         private void OnNewTask()
         {
-            UpdatePositions();
-            UpdateCameras();
+            isAwaitingPostTrialAction = false;
+            if (!hasPreparedTaskPreview)
+            {
+                UpdatePositions();
+                UpdateCameras();
+            }
+
+            hasPreparedTaskPreview = false;
             isRunning = true;
             number++;
             taskStartTime = Time.time;
@@ -230,6 +240,21 @@ namespace SEAN.Tasks
         }
 
         public void StartNewTask() {
+            if (SessionReviewManager.Instance != null && SessionReviewManager.Instance.BlocksAutomaticTrialStart)
+            {
+                return;
+            }
+
+            if (hasPreparedTaskPreview)
+            {
+                if (PublishGoal)
+                {
+                    Publish(interactiveGoal);
+                }
+                onNewTask.Invoke();
+                return;
+            }
+
             if (NewTask())
             {
                 if (PublishGoal)
@@ -240,8 +265,44 @@ namespace SEAN.Tasks
             }
         }
 
+        public bool PrepareTaskPreview()
+        {
+            if (hasPreparedTaskPreview)
+            {
+                return true;
+            }
+
+            if (!NewTask())
+            {
+                return false;
+            }
+
+            if (PublishGoal)
+            {
+                Publish(interactiveGoal);
+            }
+
+            UpdatePositions();
+            UpdateCameras();
+            hasPreparedTaskPreview = true;
+            debounceTime = 0f;
+            debounceStartupTime = Time.time;
+            return true;
+        }
+
         protected virtual void CheckNewTask()
         {
+            if (SessionReviewManager.Instance != null && SessionReviewManager.Instance.BlocksAutomaticTrialStart)
+            {
+                return;
+            }
+
+            if (isAwaitingPostTrialAction)
+            {
+                return;
+            }
+
+            bool wasRunning = isRunning;
             if (debouce())
             {
                 if (maximumNumberOfTasks > 0 && number >= maximumNumberOfTasks)
@@ -253,14 +314,21 @@ namespace SEAN.Tasks
                     Application.Quit();
 #endif
                 }
-                StartNewTask();
+                if (wasRunning && ShouldPauseBeforeStartingNextTask())
+                {
+                    PauseAfterTaskEnd();
+                }
+                else
+                {
+                    StartNewTask();
+                }
             }
         }
 
-        // disable mesh on the start object
-        private void disableMesh(GameObject go)
+        public void StartPendingOrNewTask()
         {
-            go.GetComponent<MeshRenderer>().enabled = false;
+            isAwaitingPostTrialAction = false;
+            StartNewTask();
         }
 
         private bool debouce()
@@ -300,7 +368,12 @@ namespace SEAN.Tasks
                 debounceTime = Time.time;
                 return false;
             }
-            if (Time.time - debounceTime > debounceTimeoutSec)
+
+            float requiredDelay = ShouldPauseBeforeStartingNextTask()
+                ? Mathf.Max(0f, postTrialPromptDelaySec)
+                : debounceTimeoutSec;
+
+            if (Time.time - debounceTime > requiredDelay)
             {
                 debounceTime = 0;
                 return true;
@@ -340,6 +413,20 @@ namespace SEAN.Tasks
                 return true;
             }
             return false;
+        }
+
+        private bool ShouldPauseBeforeStartingNextTask()
+        {
+            return SessionReviewManager.Instance != null &&
+                   SessionReviewManager.Instance.UsePostTrialPrompt;
+        }
+
+        private void PauseAfterTaskEnd()
+        {
+            isRunning = false;
+            isAwaitingPostTrialAction = true;
+            debounceTime = 0f;
+            taskStartTime = 0f;
         }
 
         private void UpdateCameras()
@@ -394,6 +481,11 @@ namespace SEAN.Tasks
 
         void OnGUI()
         {
+            if (!isRunning)
+            {
+                return;
+            }
+
             int w = Screen.width, h = Screen.height;
             GUIStyle style = new GUIStyle();
             Rect rect = new Rect(45, 0, w, h * 2 / 100);

@@ -40,6 +40,8 @@ namespace IVI
         public float SPAWN_HEIGHT = 0;
 
         public GameObject agentPrefab;
+        private bool runStarted;
+        private bool runCompleted;
 
         void Awake()
         {
@@ -51,8 +53,7 @@ namespace IVI
             if (Application.isPlaying)
             {
                 VISUALIZE = false;
-
-                StartCoroutine(Run());
+                EnsureInitialized();
             }
             else
             {
@@ -65,17 +66,43 @@ namespace IVI
             inst = this;
         }
 
+        public void EnsureInitialized()
+        {
+            if (!Application.isPlaying || runStarted || runCompleted)
+                return;
+
+            ResolveReferences();
+            runStarted = true;
+            StartCoroutine(Run());
+        }
+
         IEnumerator Run()
         {
             yield return null;
 
+            ResolveReferences();
+
             allNavNodes = GameObject.FindObjectsOfType<NavNode>();
+
+            if (agentPrefab == null)
+            {
+                Debug.LogError("[NavManager] agentPrefab is null. Cannot spawn agents.", this);
+                yield break;
+            }
+
+            if (agentsGO == null)
+            {
+                Debug.LogError("[NavManager] agentsGO is null. Cannot parent spawned agents.", this);
+                yield break;
+            }
 
             #region Spawn Agents
 
             int j = 0;
+            int plannedSpawnCount = 0;
             foreach (var node in allNavNodes)
             {
+                plannedSpawnCount += node.spawnCount;
                 for (int i = 0; i < node.spawnCount; i++)
                 {
                     var theta = Mathf.PI * 2 * Random.value;
@@ -97,6 +124,7 @@ namespace IVI
 
             foreach (GroupNavNode node in allGroupNodes)
             {
+                plannedSpawnCount += node.spawnCount;
                 for (int i = 0; i < node.spawnCount; i++)
                 {
                     if (!node.CanAddMember)
@@ -125,7 +153,7 @@ namespace IVI
             #endregion
 
             allEdges = GameObject.FindObjectsOfType<NavEdge>();
-            allAgents = GameObject.FindObjectsOfType<INavigable>();
+            allAgents = agentsGO.GetComponentsInChildren<INavigable>(true);
             node2Index = new Dictionary<NavNode, int>();
             groupNode2Index = new Dictionary<NavNode, int>();
             adjMatrix = new bool[allNavNodes.Length, allNavNodes.Length];
@@ -192,7 +220,39 @@ namespace IVI
 
             #endregion
 
+            runCompleted = true;
             yield break;
+        }
+
+        private void ResolveReferences()
+        {
+            if (agentsGO == null)
+            {
+                Transform agentsTransform = transform.Find("Agents");
+                if (agentsTransform != null)
+                {
+                    agentsGO = agentsTransform.gameObject;
+                }
+                else
+                {
+                    agentsGO = new GameObject("Agents");
+                    agentsGO.transform.SetParent(transform, false);
+                }
+            }
+
+            if (nodesGO == null)
+            {
+                Transform nodesTransform = transform.Find("Nodes");
+                if (nodesTransform != null)
+                    nodesGO = nodesTransform.gameObject;
+            }
+
+            if (edgesGO == null)
+            {
+                Transform edgesTransform = transform.Find("Edges");
+                if (edgesTransform != null)
+                    edgesGO = edgesTransform.gameObject;
+            }
         }
 
         #region Public Functions

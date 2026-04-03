@@ -36,6 +36,13 @@ namespace SessionReview
         [SerializeField] private bool showOnboardingOnStart = true;
         [SerializeField] private KeyCode onboardingToggleKey = KeyCode.O;
 
+        [Header("Post-Trial Prompt")]
+        [SerializeField] private bool usePostTrialPrompt = true;
+        [SerializeField] private KeyCode replayTrialKey = KeyCode.R;
+
+        [Header("Pre-Trial Ready Prompt")]
+        [SerializeField] private KeyCode startTrialKey = KeyCode.Return;
+
         private SessionTracker sessionTracker;
         private ControlModeLog controlModeLog;
         private TrialDataArchive trialArchive;
@@ -46,6 +53,17 @@ namespace SessionReview
 
         private int reviewTrialIndex = -1;
         private bool inRewindMode;
+        private bool showPostTrialPrompt;
+        private bool showTrialStartPrompt;
+        private bool trialStartReady;
+        private bool postTrialPromptPausedTime;
+        private bool trialStartPromptPausedTime;
+        private bool trialWarmupPending;
+        private int trialWarmupDelayFrames;
+        private TrialEndInfo latestTrialEndInfo;
+
+        public bool UsePostTrialPrompt => usePostTrialPrompt;
+        public bool BlocksAutomaticTrialStart => showTrialStartPrompt || trialWarmupPending;
 
         private static readonly float[] speedSteps = { 0.25f, 0.5f, 1f, 2f, 4f };
         private int currentSpeedIndex = 2;
@@ -61,6 +79,7 @@ namespace SessionReview
 
         private GUIStyle onboardingPanelStyle;
         private GUIStyle onboardingTitleStyle;
+        private GUIStyle onboardingSectionStyle;
         private GUIStyle onboardingBodyStyle;
         private GUIStyle onboardingHintStyle;
         private GUIStyle onboardingPrimaryButtonStyle;
@@ -69,6 +88,7 @@ namespace SessionReview
         private GUIStyle onboardingChipActiveStyle;
         private GUIStyle onboardingSceneButtonStyle;
         private GUIStyle onboardingSceneActiveButtonStyle;
+        private GUIStyle onboardingPreviewLabelStyle;
         private bool onboardingStylesBuilt;
         private Texture2D femaleWheelchairPreview;
         private Texture2D maleWheelchairPreview;
@@ -128,6 +148,8 @@ namespace SessionReview
 
             if (showOnboardingOnStart && !SessionOnboardingSettings.HasCompletedOnboarding)
                 SetOnboardingVisible(true);
+            else if (SessionOnboardingSettings.HasCompletedOnboarding && SessionOnboardingSettings.PendingTrialStart)
+                ShowTrialStartPrompt();
         }
 
         void OnDestroy()
@@ -144,12 +166,17 @@ namespace SessionReview
         private void OnTrialEnded(TrialEndInfo info)
         {
             reviewTrialIndex = trialArchive.TrialCount - 1;
+            latestTrialEndInfo = info;
+            showPostTrialPrompt = usePostTrialPrompt;
+            if (showPostTrialPrompt)
+                PauseForPostTrialPrompt();
             Debug.Log($"[SessionReview] Trial #{info.trialNumber} ended ({info.reason}). " +
                       $"Press [{reviewToggleKey}] to review.");
         }
 
         void Update()
         {
+            ProcessTrialWarmup();
             HandleInput();
         }
 
@@ -161,6 +188,18 @@ namespace SessionReview
             if (showOnboarding)
                 return;
 
+            if (showTrialStartPrompt)
+            {
+                HandleTrialStartPromptInput();
+                return;
+            }
+
+            if (showPostTrialPrompt)
+            {
+                HandlePostTrialPromptInput();
+                return;
+            }
+
             if (inRewindMode)
             {
                 HandleRewindInput();
@@ -170,6 +209,27 @@ namespace SessionReview
             // Tab only works when there are completed trials
             if (Input.GetKeyDown(reviewToggleKey) && trialArchive.TrialCount > 0)
                 EnterRewindMode(trialArchive.TrialCount - 1);
+        }
+
+        private void HandleTrialStartPromptInput()
+        {
+            if (Input.GetKeyDown(startTrialKey) || Input.GetKeyDown(KeyCode.KeypadEnter))
+                StartTrialFromPrompt();
+        }
+
+        private void HandlePostTrialPromptInput()
+        {
+            if (Input.GetKeyDown(reviewToggleKey))
+            {
+                HidePostTrialPrompt();
+                EnterRewindMode(trialArchive.TrialCount - 1);
+                return;
+            }
+
+            if (Input.GetKeyDown(replayTrialKey))
+            {
+                StartNextTrialFromPrompt();
+            }
         }
 
         private void HandleRewindInput()
@@ -264,6 +324,39 @@ namespace SessionReview
             Time.timeScale = savedTimeScale;
         }
 
+        public void StartNextTrialFromPrompt()
+        {
+            HidePostTrialPrompt();
+            latestTrialEndInfo = null;
+
+            var sean = SEAN.SEAN.instance;
+            if (sean == null || sean.robotTask == null)
+                return;
+
+            sean.robotTask.StartPendingOrNewTask();
+        }
+
+        public void StartTrialFromPrompt()
+        {
+            if (!trialStartReady)
+                return;
+
+            var sean = SEAN.SEAN.instance;
+            if (sean == null || sean.robotTask == null)
+                return;
+
+            SessionOnboardingSettings.MarkTrialStarted();
+            showTrialStartPrompt = false;
+
+            sean.robotTask.StartPendingOrNewTask();
+
+            if (trialStartPromptPausedTime)
+            {
+                Time.timeScale = savedTimeScale;
+                trialStartPromptPausedTime = false;
+            }
+        }
+
         /// <summary>
         /// Call this from VLM capture button onClick (or any script) to record a VLM annotation.
         /// Can also be called via SessionReviewManager.Instance.RecordVLMCapture() from code.
@@ -314,6 +407,12 @@ namespace SessionReview
 
             DrawStatusBadge();
 
+            if (showTrialStartPrompt)
+                DrawTrialStartPrompt();
+
+            if (showPostTrialPrompt)
+                DrawPostTrialPrompt();
+
             if (inRewindMode)
             {
                 string perspective = rewindController.CurrentPerspective.ToString();
@@ -328,7 +427,7 @@ namespace SessionReview
 
         private void DrawStatusBadge()
         {
-            if (inRewindMode || showOnboarding) return;
+            if (inRewindMode || showOnboarding || showPostTrialPrompt || showTrialStartPrompt) return;
 
             var sean = SEAN.SEAN.instance;
             bool running = sean != null && sean.robotTask != null && sean.robotTask.isRunning;
@@ -366,6 +465,131 @@ namespace SessionReview
             GUI.backgroundColor = bgColor;
             GUI.Box(new Rect(Screen.width - w - 15, 10, w, 30), text, style);
             GUI.backgroundColor = Color.white;
+        }
+
+        private void DrawPostTrialPrompt()
+        {
+            string reasonText = latestTrialEndInfo != null ? latestTrialEndInfo.reason.ToString() : "Completion";
+
+            float width = 420f;
+            float height = 150f;
+            Rect rect = new Rect((Screen.width - width) * 0.5f, 24f, width, height);
+
+            GUI.Box(rect, "");
+            GUI.Label(new Rect(rect.x + 18f, rect.y + 16f, rect.width - 36f, 24f),
+                $"SESSION ENDED ({reasonText})");
+            GUI.Label(new Rect(rect.x + 18f, rect.y + 46f, rect.width - 36f, 40f),
+                $"[{replayTrialKey}] Run again    [{reviewToggleKey}] Review panel");
+
+            if (GUI.Button(new Rect(rect.x + 18f, rect.y + 98f, 168f, 34f), $"Run Again [{replayTrialKey}]"))
+                StartNextTrialFromPrompt();
+
+            if (GUI.Button(new Rect(rect.x + 234f, rect.y + 98f, 168f, 34f), $"Review [{reviewToggleKey}]"))
+            {
+                HidePostTrialPrompt();
+                EnterRewindMode(trialArchive.TrialCount - 1);
+            }
+        }
+
+        private void DrawTrialStartPrompt()
+        {
+            float width = 460f;
+            float height = 170f;
+            Rect rect = new Rect((Screen.width - width) * 0.5f, 24f, width, height);
+
+            GUI.Box(rect, "");
+            GUI.Label(new Rect(rect.x + 18f, rect.y + 16f, rect.width - 36f, 28f),
+                trialStartReady ? "SESSION READY" : "LOADING SESSION");
+            GUI.Label(new Rect(rect.x + 18f, rect.y + 50f, rect.width - 36f, 48f),
+                trialStartReady
+                    ? "Robot, PWD, and cameras are loaded. Start when you are ready."
+                    : "Preparing robot, pedestrians, and camera view...");
+
+            GUI.enabled = trialStartReady;
+            if (GUI.Button(new Rect(rect.x + 116f, rect.y + 108f, 228f, 38f),
+                trialStartReady ? $"Start Trial [{startTrialKey}]" : "Loading..."))
+                StartTrialFromPrompt();
+            GUI.enabled = true;
+        }
+
+        private void PauseForPostTrialPrompt()
+        {
+            if (postTrialPromptPausedTime)
+                return;
+
+            savedTimeScale = Time.timeScale;
+            Time.timeScale = 0f;
+            postTrialPromptPausedTime = true;
+        }
+
+        private void HidePostTrialPrompt()
+        {
+            showPostTrialPrompt = false;
+
+            if (!postTrialPromptPausedTime)
+                return;
+
+            Time.timeScale = savedTimeScale;
+            postTrialPromptPausedTime = false;
+        }
+
+        private void ShowTrialStartPrompt()
+        {
+            showTrialStartPrompt = true;
+            trialStartReady = false;
+            trialWarmupPending = true;
+            trialWarmupDelayFrames = 2;
+        }
+
+        private void ProcessTrialWarmup()
+        {
+            if (!showTrialStartPrompt || !trialWarmupPending)
+                return;
+
+            if (trialWarmupDelayFrames > 0)
+            {
+                trialWarmupDelayFrames--;
+                return;
+            }
+
+            var sean = SEAN.SEAN.instance;
+            if (sean == null || sean.robotTask == null)
+                return;
+
+            if (!sean.robotTask.hasPreparedTaskPreview)
+            {
+                sean.robotTask.PrepareTaskPreview();
+            }
+
+            if (IsTrialPreviewReady())
+            {
+                trialStartReady = true;
+                trialWarmupPending = false;
+
+                if (!trialStartPromptPausedTime)
+                {
+                    savedTimeScale = Time.timeScale;
+                    Time.timeScale = 0f;
+                    trialStartPromptPausedTime = true;
+                }
+            }
+        }
+
+        private bool IsTrialPreviewReady()
+        {
+            var sean = SEAN.SEAN.instance;
+            if (sean == null || sean.robotTask == null || !sean.robotTask.hasPreparedTaskPreview)
+                return false;
+
+            var navManager = FindObjectOfType<IVI.NavManager>();
+            if (navManager != null && navManager.gameObject.activeInHierarchy)
+            {
+                navManager.EnsureInitialized();
+                if (navManager.allAgents == null || navManager.allAgents.Length == 0)
+                    return false;
+            }
+
+            return true;
         }
 
         private void InitializeOnboardingSelection()
@@ -412,8 +636,8 @@ namespace SessionReview
         {
             EnsureOnboardingStyles();
 
-            const float panelWidth = 720f;
-            const float panelHeight = 520f;
+            float panelWidth = Mathf.Min(Screen.width * 0.78f, 1100f);
+            float panelHeight = Mathf.Min(Screen.height * 0.8f, 780f);
             float panelX = (Screen.width - panelWidth) * 0.5f;
             float panelY = (Screen.height - panelHeight) * 0.5f;
             Rect panelRect = new Rect(panelX, panelY, panelWidth, panelHeight);
@@ -424,54 +648,59 @@ namespace SessionReview
 
             GUI.Box(panelRect, GUIContent.none, onboardingPanelStyle);
 
-            float x = panelRect.x + 24f;
-            float y = panelRect.y + 22f;
-            float innerWidth = panelRect.width - 48f;
+            float x = panelRect.x + 36f;
+            float y = panelRect.y + 30f;
+            float innerWidth = panelRect.width - 72f;
 
-            GUI.Label(new Rect(x, y, innerWidth, 30f), "Session Onboarding", onboardingTitleStyle);
-            y += 36f;
+            GUI.Label(new Rect(x, y, innerWidth, 42f), "Session Onboarding", onboardingTitleStyle);
+            y += 50f;
 
-            GUI.Label(new Rect(x, y, innerWidth, 42f),
+            GUI.Label(new Rect(x, y, innerWidth, 56f),
                 "Choose who is playing, pick the PWD player gender when human control is enabled, and select the session scene to launch.",
                 onboardingBodyStyle);
-            y += 54f;
+            y += 72f;
 
-            GUI.Label(new Rect(x, y, 220f, 24f), "Who is playing?", onboardingTitleStyle);
-            y += 34f;
+            GUI.Label(new Rect(x, y, 260f, 30f), "Who Is Playing?", onboardingSectionStyle);
+            y += 42f;
 
-            if (DrawChipButton(new Rect(x, y, 140f, 34f), "Robot", selectedPlayerMode == OnboardingPlayerMode.Robot))
+            if (DrawChipButton(new Rect(x, y, 180f, 46f), "Robot", selectedPlayerMode == OnboardingPlayerMode.Robot))
                 selectedPlayerMode = OnboardingPlayerMode.Robot;
-            if (DrawChipButton(new Rect(x + 152f, y, 140f, 34f), "Human", selectedPlayerMode == OnboardingPlayerMode.Human))
+            if (DrawChipButton(new Rect(x + 196f, y, 180f, 46f), "Human", selectedPlayerMode == OnboardingPlayerMode.Human))
                 selectedPlayerMode = OnboardingPlayerMode.Human;
-            y += 50f;
+            y += 66f;
 
             if (selectedPlayerMode == OnboardingPlayerMode.Human)
             {
-                GUI.Label(new Rect(x, y, innerWidth, 24f), "PWD player gender", onboardingTitleStyle);
-                y += 34f;
+                GUI.Label(new Rect(x, y, innerWidth, 30f), "PWD Player Gender", onboardingSectionStyle);
+                y += 42f;
 
-                DrawGenderPreviewCard(new Rect(x, y, 184f, 162f), "Male", maleWheelchairPreview,
+                DrawGenderPreviewCard(new Rect(x, y, 220f, 196f), "Male", maleWheelchairPreview,
                     selectedPwdGender == SEAN.Scenario.Agents.PwdGender.Male,
                     () => selectedPwdGender = SEAN.Scenario.Agents.PwdGender.Male);
 
-                DrawGenderPreviewCard(new Rect(x + 200f, y, 184f, 162f), "Female", femaleWheelchairPreview,
+                DrawGenderPreviewCard(new Rect(x + 236f, y, 220f, 196f), "Female", femaleWheelchairPreview,
                     selectedPwdGender == SEAN.Scenario.Agents.PwdGender.Female,
                     () => selectedPwdGender = SEAN.Scenario.Agents.PwdGender.Female);
 
-                if (DrawChipButton(new Rect(x, y + 172f, 140f, 34f), "Male", selectedPwdGender == SEAN.Scenario.Agents.PwdGender.Male))
+                if (DrawChipButton(new Rect(x, y + 208f, 160f, 40f), "Male", selectedPwdGender == SEAN.Scenario.Agents.PwdGender.Male))
                     selectedPwdGender = SEAN.Scenario.Agents.PwdGender.Male;
-                if (DrawChipButton(new Rect(x + 152f, y + 172f, 140f, 34f), "Female", selectedPwdGender == SEAN.Scenario.Agents.PwdGender.Female))
+                if (DrawChipButton(new Rect(x + 176f, y + 208f, 160f, 40f), "Female", selectedPwdGender == SEAN.Scenario.Agents.PwdGender.Female))
                     selectedPwdGender = SEAN.Scenario.Agents.PwdGender.Female;
-                y += 224f;
+                y += 266f;
             }
 
-            GUI.Label(new Rect(x, y, innerWidth, 24f), "Session to play", onboardingTitleStyle);
-            y += 30f;
+            GUI.Label(new Rect(x, y, innerWidth, 30f), "Session To Play", onboardingSectionStyle);
+            y += 40f;
 
-            DrawSceneSelection(new Rect(x, y, innerWidth, 260f));
+            var sceneChange = FindObjectOfType<SceneChange>();
+            float footerTop = panelRect.y + panelRect.height - 86f;
+            float sceneHeight = sceneChange != null && sceneChange.SceneCount > 0
+                ? Mathf.Max(220f, footerTop - y - 12f)
+                : 160f;
+            DrawSceneSelection(new Rect(x, y, innerWidth, sceneHeight));
 
             string actionLabel = SessionOnboardingSettings.HasCompletedOnboarding ? "Apply and Reload" : "Start Session";
-            if (GUI.Button(new Rect(panelRect.x + panelRect.width - 184f, panelRect.y + panelRect.height - 58f, 160f, 36f),
+            if (GUI.Button(new Rect(panelRect.x + panelRect.width - 264f, panelRect.y + panelRect.height - 74f, 228f, 50f),
                 actionLabel, onboardingPrimaryButtonStyle))
             {
                 ApplyOnboardingSelection();
@@ -479,7 +708,7 @@ namespace SessionReview
 
             if (SessionOnboardingSettings.HasCompletedOnboarding)
             {
-                if (GUI.Button(new Rect(panelRect.x + 24f, panelRect.y + panelRect.height - 58f, 120f, 36f),
+                if (GUI.Button(new Rect(panelRect.x + 36f, panelRect.y + panelRect.height - 74f, 144f, 50f),
                     "Close", onboardingSecondaryButtonStyle))
                 {
                     SetOnboardingVisible(false);
@@ -487,7 +716,7 @@ namespace SessionReview
             }
             else
             {
-                GUI.Label(new Rect(panelRect.x + 24f, panelRect.y + panelRect.height - 52f, 260f, 24f),
+                GUI.Label(new Rect(panelRect.x + 36f, panelRect.y + panelRect.height - 60f, 340f, 24f),
                     $"[{onboardingToggleKey}] opens this panel later.",
                     onboardingHintStyle);
             }
@@ -498,19 +727,22 @@ namespace SessionReview
             var sceneChange = FindObjectOfType<SceneChange>();
             if (sceneChange == null || sceneChange.SceneCount == 0)
             {
-                GUI.Box(rect, "No SceneChange component with configured scenes was found.", onboardingSceneButtonStyle);
+                GUI.Box(rect, GUIContent.none, onboardingSceneButtonStyle);
+                GUI.Label(new Rect(rect.x + 20f, rect.y + 20f, rect.width - 40f, 32f),
+                    "No SceneChange component with configured scenes was found.",
+                    onboardingBodyStyle);
                 return;
             }
 
             if (selectedSceneIndex < 0 || selectedSceneIndex >= sceneChange.SceneCount)
                 selectedSceneIndex = sceneChange.CurrentSceneIndex;
 
-            Rect viewRect = new Rect(0f, 0f, rect.width - 18f, sceneChange.SceneCount * 36f);
+            Rect viewRect = new Rect(0f, 0f, rect.width - 18f, sceneChange.SceneCount * 48f);
             onboardingSceneScroll = GUI.BeginScrollView(rect, onboardingSceneScroll, viewRect);
 
             for (int i = 0; i < sceneChange.SceneCount; i++)
             {
-                Rect rowRect = new Rect(0f, i * 36f, viewRect.width, 30f);
+                Rect rowRect = new Rect(0f, i * 48f, viewRect.width, 40f);
                 bool isActive = i == selectedSceneIndex;
                 string label = $"{i + 1}. {sceneChange.SceneNames[i]}";
                 if (GUI.Button(rowRect, label, isActive ? onboardingSceneActiveButtonStyle : onboardingSceneButtonStyle))
@@ -529,7 +761,7 @@ namespace SessionReview
         {
             GUI.Box(rect, GUIContent.none, active ? onboardingSceneActiveButtonStyle : onboardingSceneButtonStyle);
 
-            Rect imageRect = new Rect(rect.x + 10f, rect.y + 10f, rect.width - 20f, rect.height - 42f);
+            Rect imageRect = new Rect(rect.x + 12f, rect.y + 12f, rect.width - 24f, rect.height - 58f);
             if (preview != null)
             {
                 GUI.DrawTexture(imageRect, preview, ScaleMode.ScaleToFit, true);
@@ -539,7 +771,7 @@ namespace SessionReview
                 GUI.Label(imageRect, "Preview not found", onboardingHintStyle);
             }
 
-            GUI.Label(new Rect(rect.x + 10f, rect.yMax - 28f, rect.width - 20f, 20f), label, onboardingBodyStyle);
+            GUI.Label(new Rect(rect.x + 12f, rect.yMax - 36f, rect.width - 24f, 24f), label, onboardingPreviewLabelStyle);
 
             if (GUI.Button(rect, GUIContent.none, GUIStyle.none))
                 onClick?.Invoke();
@@ -548,6 +780,7 @@ namespace SessionReview
         private void ApplyOnboardingSelection()
         {
             var sceneChange = FindObjectOfType<SceneChange>();
+            string currentSceneName = SceneManager.GetActiveScene().name;
             string targetSceneName = SceneManager.GetActiveScene().name;
             int targetSceneIndex = selectedSceneIndex;
 
@@ -567,6 +800,12 @@ namespace SessionReview
             if (sceneChange != null && sceneChange.SceneCount > 0)
             {
                 sceneChange.LoadSceneAtIndex(targetSceneIndex);
+                return;
+            }
+
+            if (targetSceneName == currentSceneName)
+            {
+                ShowTrialStartPrompt();
                 return;
             }
 
@@ -596,27 +835,34 @@ namespace SessionReview
 
             onboardingTitleStyle = new GUIStyle(GUI.skin.label)
             {
-                fontSize = 18,
+                fontSize = 28,
+                fontStyle = FontStyle.Bold,
+                normal = { textColor = Color.white }
+            };
+
+            onboardingSectionStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 20,
                 fontStyle = FontStyle.Bold,
                 normal = { textColor = Color.white }
             };
 
             onboardingBodyStyle = new GUIStyle(GUI.skin.label)
             {
-                fontSize = 12,
+                fontSize = 16,
                 wordWrap = true,
                 normal = { textColor = new Color(0.82f, 0.86f, 0.9f) }
             };
 
             onboardingHintStyle = new GUIStyle(GUI.skin.label)
             {
-                fontSize = 11,
+                fontSize = 13,
                 normal = { textColor = new Color(0.62f, 0.67f, 0.72f) }
             };
 
             onboardingPrimaryButtonStyle = new GUIStyle(GUI.skin.button)
             {
-                fontSize = 13,
+                fontSize = 17,
                 fontStyle = FontStyle.Bold,
                 normal = { background = MakeTex(new Color(0.17f, 0.45f, 0.29f)), textColor = Color.white },
                 hover = { background = MakeTex(new Color(0.22f, 0.56f, 0.35f)), textColor = Color.white },
@@ -625,14 +871,14 @@ namespace SessionReview
 
             onboardingSecondaryButtonStyle = new GUIStyle(GUI.skin.button)
             {
-                fontSize = 12,
+                fontSize = 15,
                 normal = { background = MakeTex(new Color(0.19f, 0.22f, 0.27f)), textColor = Color.white },
                 hover = { background = MakeTex(new Color(0.26f, 0.3f, 0.36f)), textColor = Color.white }
             };
 
             onboardingChipStyle = new GUIStyle(GUI.skin.button)
             {
-                fontSize = 12,
+                fontSize = 15,
                 fontStyle = FontStyle.Bold,
                 normal = { background = MakeTex(new Color(0.17f, 0.19f, 0.24f)), textColor = new Color(0.85f, 0.87f, 0.9f) },
                 hover = { background = MakeTex(new Color(0.23f, 0.26f, 0.31f)), textColor = Color.white }
@@ -647,7 +893,7 @@ namespace SessionReview
             onboardingSceneButtonStyle = new GUIStyle(GUI.skin.button)
             {
                 alignment = TextAnchor.MiddleLeft,
-                fontSize = 12,
+                fontSize = 15,
                 normal = { background = MakeTex(new Color(0.14f, 0.16f, 0.2f)), textColor = new Color(0.84f, 0.87f, 0.9f) },
                 hover = { background = MakeTex(new Color(0.21f, 0.24f, 0.3f)), textColor = Color.white }
             };
@@ -657,6 +903,14 @@ namespace SessionReview
                 fontStyle = FontStyle.Bold,
                 normal = { background = MakeTex(new Color(0.16f, 0.37f, 0.49f)), textColor = Color.white },
                 hover = { background = MakeTex(new Color(0.2f, 0.45f, 0.6f)), textColor = Color.white }
+            };
+
+            onboardingPreviewLabelStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 16,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleCenter,
+                normal = { textColor = Color.white }
             };
         }
 
