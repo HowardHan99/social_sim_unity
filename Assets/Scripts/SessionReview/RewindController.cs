@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 using Rerun;
+using System;
 
 namespace SessionReview
 {
@@ -15,6 +16,8 @@ namespace SessionReview
 
     public class RewindController : MonoBehaviour
     {
+        public event Action PlaybackReachedEnd;
+
         [Header("References")]
         [SerializeField] private float topDownHeight = 50f;
 
@@ -149,6 +152,7 @@ namespace SessionReview
                 {
                     currentTime = RecEndTime;
                     isPlaying = false;
+                    PlaybackReachedEnd?.Invoke();
                 }
                 else if (currentTime < RecStartTime)
                 {
@@ -326,6 +330,28 @@ namespace SessionReview
                 transformCache[objectId] = go.transform;
                 return go.transform;
             }
+
+            return null;
+        }
+
+        public Transform ResolveTransformForObjectId(string objectId)
+        {
+            return FindTransformForId(objectId);
+        }
+
+        public Camera GetActiveReviewCamera()
+        {
+            if (robotFirstPersonCam != null && robotFirstPersonCam.enabled)
+                return robotFirstPersonCam;
+
+            if (pwdFirstPersonCam != null && pwdFirstPersonCam.enabled)
+                return pwdFirstPersonCam;
+
+            if (rewindCamera != null && rewindCamera.enabled)
+                return rewindCamera;
+
+            if (savedMainCamera != null && savedMainCamera.enabled)
+                return savedMainCamera;
 
             return null;
         }

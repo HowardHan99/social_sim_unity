@@ -68,6 +68,10 @@ namespace SessionReview
         public float startTime;
         public float endTime;
         public TrialEndReason endReason;
+        public Vector3 robotGoalPosition;
+        public bool hasRobotGoalPosition;
+        public Vector3 playerGoalPosition;
+        public bool hasPlayerGoalPosition;
 
         public List<AgentRoleEntry> agentRoles = new List<AgentRoleEntry>();
         public List<AgentArrivalInfo> agentArrivals = new List<AgentArrivalInfo>();
@@ -119,6 +123,10 @@ namespace SessionReview
                 startTime = info.startTime,
                 endTime = info.endTime,
                 endReason = info.reason,
+                robotGoalPosition = info.robotGoalPosition,
+                hasRobotGoalPosition = info.hasRobotGoalPosition,
+                playerGoalPosition = info.playerGoalPosition,
+                hasPlayerGoalPosition = info.hasPlayerGoalPosition,
                 metrics = CaptureMetrics()
             };
 
@@ -231,7 +239,7 @@ namespace SessionReview
             return summaries;
         }
 
-        private static string LogFolder
+        public static string LogFolder
         {
             get
             {
@@ -241,6 +249,27 @@ namespace SessionReview
                 return Application.persistentDataPath + "/SessionLogs/";
 #endif
             }
+        }
+
+        public static string CreateReviewExportFolder(TrialRecord record)
+        {
+            string root = Path.Combine(LogFolder, "ReviewExports");
+            if (!Directory.Exists(root))
+                Directory.CreateDirectory(root);
+
+            string stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss_fff");
+            string baseFolderName = $"trial_{record.trialNumber:D3}_roi_{stamp}";
+            string path = Path.Combine(root, baseFolderName);
+            int suffix = 1;
+
+            while (Directory.Exists(path))
+            {
+                path = Path.Combine(root, $"{baseFolderName}_{suffix:D2}");
+                suffix++;
+            }
+
+            Directory.CreateDirectory(path);
+            return path;
         }
 
         private string CreateTrialFolder(TrialRecord record)

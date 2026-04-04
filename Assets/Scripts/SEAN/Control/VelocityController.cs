@@ -544,5 +544,23 @@ namespace SEAN.Control
                 rb.angularVelocity = new Vector3(0f, angularVelocity.y, 0f);
             }
         }
+
+        public void ResetMotionState()
+        {
+            targetLinVelocity = 0f;
+            targetAngVelocity = 0f;
+            prevLinVelocity = 0f;
+            prevAngVelocity = 0f;
+            integral = 0f;
+            lastError = 0f;
+            DebugSBrakePressCount = 0;
+            lastSBrakePressRealtime = -1f;
+
+            if (rb != null)
+            {
+                rb.velocity = new Vector3(0f, rb.velocity.y, 0f);
+                rb.angularVelocity = Vector3.zero;
+            }
+        }
     }
 }

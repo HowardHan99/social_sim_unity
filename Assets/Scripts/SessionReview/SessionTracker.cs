@@ -36,6 +36,10 @@ namespace SessionReview
         public float startTime;
         public float endTime;
         public TrialEndReason reason;
+        public Vector3 robotGoalPosition;
+        public bool hasRobotGoalPosition;
+        public Vector3 playerGoalPosition;
+        public bool hasPlayerGoalPosition;
         public Dictionary<string, AgentArrivalInfo> agentArrivals = new Dictionary<string, AgentArrivalInfo>();
         public Dictionary<string, AgentRole> agentRoles = new Dictionary<string, AgentRole>();
     }
@@ -233,6 +237,9 @@ namespace SessionReview
             if (!tracking) return;
             tracking = false;
 
+            Vector3 robotGoalPosition = GetGoalPosition(sean != null && sean.robotTask != null ? sean.robotTask.robotGoal : null, out bool hasRobotGoalPosition);
+            Vector3 playerGoalPosition = GetGoalPosition(sean != null && sean.robotTask != null ? sean.robotTask.playerGoal : null, out bool hasPlayerGoalPosition);
+
             var info = new TrialEndInfo
             {
                 trialName = trialName,
@@ -240,6 +247,10 @@ namespace SessionReview
                 startTime = trialStartTime,
                 endTime = Time.time,
                 reason = reason,
+                robotGoalPosition = robotGoalPosition,
+                hasRobotGoalPosition = hasRobotGoalPosition,
+                playerGoalPosition = playerGoalPosition,
+                hasPlayerGoalPosition = hasPlayerGoalPosition,
                 agentArrivals = new Dictionary<string, AgentArrivalInfo>(agentArrivals),
                 agentRoles = new Dictionary<string, AgentRole>(agentRoles)
             };
@@ -261,6 +272,18 @@ namespace SessionReview
             if (tracked != null && !string.IsNullOrEmpty(tracked.objectId))
                 return tracked.objectId;
             return go.name;
+        }
+
+        private static Vector3 GetGoalPosition(GameObject goal, out bool hasGoal)
+        {
+            if (goal != null)
+            {
+                hasGoal = true;
+                return goal.transform.position;
+            }
+
+            hasGoal = false;
+            return Vector3.zero;
         }
     }
 }
