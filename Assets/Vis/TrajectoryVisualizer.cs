@@ -69,6 +69,13 @@ public class TrajectoryVisualizer : MonoBehaviour
         {
             lineRenderer.enabled = false;
         }
+
+        RefreshButtonVisibility();
+    }
+
+    void Update()
+    {
+        RefreshButtonVisibility();
     }
 
     void SetupLineRenderer()
@@ -333,6 +340,9 @@ public class TrajectoryVisualizer : MonoBehaviour
 
     public void ToggleTrajectory()
     {
+        if (!IsReviewActive())
+            return;
+
         isTrajectoryVisible = !isTrajectoryVisible;
         
         if (lineRenderer != null)
@@ -362,6 +372,35 @@ public class TrajectoryVisualizer : MonoBehaviour
         }
         
         Debug.Log($"Trajectory visibility: {isTrajectoryVisible}");
+    }
+
+    void RefreshButtonVisibility()
+    {
+        if (toggleButton == null)
+            return;
+
+        bool shouldShow = IsReviewActive();
+        if (toggleButton.gameObject.activeSelf != shouldShow)
+            toggleButton.gameObject.SetActive(shouldShow);
+
+        if (!shouldShow && isTrajectoryVisible)
+        {
+            isTrajectoryVisible = false;
+            if (lineRenderer != null)
+                lineRenderer.enabled = false;
+
+            foreach (var arrow in directionArrows)
+            {
+                if (arrow != null)
+                    arrow.enabled = false;
+            }
+        }
+    }
+
+    bool IsReviewActive()
+    {
+        var reviewManager = SessionReview.SessionReviewManager.Instance;
+        return reviewManager != null && reviewManager.IsReviewUiActive;
     }
 
     void SwitchToTopDownView()

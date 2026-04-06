@@ -52,12 +52,19 @@ public class TrajectoryUI : MonoBehaviour
     {
         if (manager == null) return;
 
+        bool reviewActive = IsReviewActive();
         bool drawMode = manager.IsDrawMode;
 
         if (normalButtonsGroup != null)
-            normalButtonsGroup.SetActive(!drawMode);
+            normalButtonsGroup.SetActive(reviewActive && !drawMode);
 
         if (drawModeOverlay != null)
-            drawModeOverlay.SetActive(drawMode);
+            drawModeOverlay.SetActive(reviewActive && drawMode);
+    }
+
+    private static bool IsReviewActive()
+    {
+        var reviewManager = SessionReview.SessionReviewManager.Instance;
+        return reviewManager != null && reviewManager.IsReviewUiActive;
     }
 }

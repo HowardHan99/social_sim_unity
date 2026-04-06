@@ -15,6 +15,7 @@ public class CamCapture : MonoBehaviour
     private string savedFilePath;
     private string customPrompt;
     public UIManager uiManager;
+    private bool captureButtonOverride;
 
     private string openAI_API_Key;
 
@@ -37,10 +38,23 @@ public class CamCapture : MonoBehaviour
         {
             cam = GetComponent<Camera>();
         }
+
+        RefreshCaptureButtonVisibility();
+    }
+
+    void Update()
+    {
+        RefreshCaptureButtonVisibility();
     }
 
     public void CaptureAndProcessImage()
     {
+        if (!CanShowCaptureButton())
+            return;
+
+        captureButtonOverride = false;
+        RefreshCaptureButtonVisibility();
+
         Texture2D image = CaptureImage();
         string filePath = SaveImage(image);
         Debug.Log("Image captured and saved at: " + filePath);
@@ -50,6 +64,12 @@ public class CamCapture : MonoBehaviour
 
     public void CaptureAndSaveImage()
     {
+        if (!CanShowCaptureButton())
+            return;
+
+        captureButtonOverride = false;
+        RefreshCaptureButtonVisibility();
+
         Texture2D image = CaptureImage();
         savedFilePath = SaveImage(image); // Save the image and store the file path
         Debug.Log("Image captured and saved at: " + savedFilePath);
@@ -293,6 +313,37 @@ public class CamCapture : MonoBehaviour
         }
 
         Debug.Log("Response saved to log file: " + logFilePath);
+    }
+
+    void RefreshCaptureButtonVisibility()
+    {
+        if (captureButton == null)
+            return;
+
+        bool shouldShow = CanShowCaptureButton();
+        if (captureButton.gameObject.activeSelf != shouldShow)
+            captureButton.gameObject.SetActive(shouldShow);
+    }
+
+    bool CanShowCaptureButton()
+    {
+        if (captureButtonOverride)
+            return true;
+
+        if (uiManager != null && !uiManager.IsVlmSignalFlowActive)
+            return false;
+
+        var reviewManager = SessionReview.SessionReviewManager.Instance;
+        if (reviewManager != null)
+            return reviewManager.IsLiveTrialRunning;
+
+        return true;
+    }
+
+    public void SetCaptureButtonOverride(bool isVisible)
+    {
+        captureButtonOverride = isVisible;
+        RefreshCaptureButtonVisibility();
     }
 }
 

@@ -4,9 +4,12 @@ using System.Collections.Generic;
 using UnityEngine.UI;
 using System.Collections;
 using Rerun;
+using System;
 
 public class UIManager : MonoBehaviour
 {
+    public event Action ResponseWindowClosed;
+
     public GameObject popUpWindow; // Reference to the pop-up panel for the response content selection
     public GameObject responseWindow;
 
@@ -36,11 +39,19 @@ public class UIManager : MonoBehaviour
     public GameObject instructionPanel; // Reference to InstructionPanel
     public TMP_InputField instructionInputField; // Reference to InputField (TMP) for showing instructions
     public Button confirmBN; // Reference to ConfirmBN button
+    public Button vlmCaptureButton; // Dedicated VLM entry button shown only during VLM flow
+
+    public bool SuppressSignalButtons { get; set; }
+    public bool UnpauseOnExitResponseWindow { get; set; } = true;
+    public bool IsVlmSignalFlowActive { get; private set; }
 
     float elapsedTime = 0f;
 
     void Start()
     {
+        HideAllVlmWindows();
+        SetVlmCaptureButtonVisible(false);
+
         // Setup confirm button listener
         if (confirmResponseButton != null)
         {
@@ -53,16 +64,10 @@ public class UIManager : MonoBehaviour
         elapsedTime += Time.unscaledDeltaTime; // Ensures the UI works even when the game is paused
 
         // Show signal buttons only when the game is paused
-        if (PauseManager.Instance != null)
+        if (PauseManager.Instance != null && !IsVlmSignalFlowActive)
         {
-            bool shouldShow = PauseManager.Instance.isPaused;
-            foreach (GameObject item in signalButtons)
-            {
-                if (item.activeSelf != shouldShow)
-                {
-                    item.SetActive(shouldShow);
-                }
-            }
+            bool shouldShow = PauseManager.Instance.isPaused && !SuppressSignalButtons;
+            SetManagedSignalButtonsVisible(shouldShow);
         }
 
         // Handle temp camera movement when positioning
@@ -140,6 +145,11 @@ public class UIManager : MonoBehaviour
             responseInputField.Select();
             responseInputField.ActivateInputField();
         }
+
+        if (confirmResponseButton != null)
+        {
+            confirmResponseButton.interactable = true;
+        }
     }
 
     void OnConfirmResponseButtonPressed()
@@ -160,8 +170,11 @@ public class UIManager : MonoBehaviour
 
     IEnumerator ReEnableConfirmButton()
     {
-        yield return new WaitForSeconds(2f);
-        confirmResponseButton.interactable = true;
+        yield return new WaitForSecondsRealtime(2f);
+        if (confirmResponseButton != null)
+        {
+            confirmResponseButton.interactable = true;
+        }
     }
 
     public void OnConfirmButtonPressed()
@@ -207,17 +220,51 @@ public class UIManager : MonoBehaviour
 
     public void OnCamCapButtonPressed()
     {
-        PauseManager.Instance.PauseGame();
+        if (PauseManager.Instance != null)
+        {
+            PauseManager.Instance.PauseGame();
+        }
+
         ShowPopUp();
+    }
+
+    public void BeginVlmSignalFlow()
+    {
+        HideAllVlmWindows();
+        IsVlmSignalFlowActive = true;
+        SuppressSignalButtons = true;
+        SetManagedSignalButtonsVisible(false);
+        SetVlmCaptureButtonVisible(true);
+
+        if (confirmResponseButton != null)
+        {
+            confirmResponseButton.interactable = true;
+        }
+
+        if (PauseManager.Instance != null && !PauseManager.Instance.IsGamePaused())
+        {
+            PauseManager.Instance.PauseGame();
+        }
+    }
+
+    public void ResetVlmUiToIdle()
+    {
+        HideAllVlmWindows();
+        HideAllSignalButtons();
+        SuppressSignalButtons = true;
+        SetVlmCaptureButtonVisible(false);
     }
 
     public void ShowPopUp()
     {
         popUpWindow.SetActive(true); // Show the pop-up window
-        //hide previous buttons
-        foreach (GameObject item in signalButtons)
+        responseWindow.SetActive(false);
+        SetManagedSignalButtonsVisible(false);
+        SetVlmCaptureButtonVisible(false);
+
+        if (confirmResponseButton != null)
         {
-            item.SetActive(false);
+            confirmResponseButton.interactable = true;
         }
     }
 
@@ -227,12 +274,8 @@ public class UIManager : MonoBehaviour
         yield return null;
         popUpWindow.SetActive(false); // Hide the pop-up window
         responseWindow.SetActive(true);
+        SetVlmCaptureButtonVisible(false);
 
-        //show previous buttons
-        foreach (GameObject item in signalButtons)
-        {
-            item.SetActive(true);
-        }
         //reset toggle to off
         foreach (Toggle toggle in optionToggles)
         {
@@ -243,7 +286,16 @@ public class UIManager : MonoBehaviour
     public void ExitResponseWindow()
     {
         responseWindow.SetActive(false);
-        PauseManager.Instance.UnpauseGame();
+        popUpWindow.SetActive(false);
+        IsVlmSignalFlowActive = false;
+        HideAllSignalButtons();
+        SetVlmCaptureButtonVisible(false);
+        ResponseWindowClosed?.Invoke();
+
+        if (UnpauseOnExitResponseWindow && PauseManager.Instance != null)
+        {
+            PauseManager.Instance.UnpauseGame();
+        }
     }
 
     /// <summary>
@@ -344,6 +396,47 @@ public class UIManager : MonoBehaviour
         if (instructionPanel != null)
         {
             instructionPanel.SetActive(false);
+        }
+    }
+
+    void HideAllVlmWindows()
+    {
+        IsVlmSignalFlowActive = false;
+
+        if (popUpWindow != null)
+        {
+            popUpWindow.SetActive(false);
+        }
+
+        if (responseWindow != null)
+        {
+            responseWindow.SetActive(false);
+        }
+
+        SetVlmCaptureButtonVisible(false);
+    }
+
+    void HideAllSignalButtons()
+    {
+        SetManagedSignalButtonsVisible(false);
+    }
+
+    void SetManagedSignalButtonsVisible(bool isVisible)
+    {
+        foreach (GameObject item in signalButtons)
+        {
+            if (item != null)
+            {
+                item.SetActive(isVisible);
+            }
+        }
+    }
+
+    void SetVlmCaptureButtonVisible(bool isVisible)
+    {
+        if (vlmCaptureButton != null)
+        {
+            vlmCaptureButton.gameObject.SetActive(isVisible);
         }
     }
 

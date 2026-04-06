@@ -83,6 +83,12 @@ public class TrajectoryManager : MonoBehaviour
 
     private void Update()
     {
+        if (IsDrawMode && !IsReviewActive())
+        {
+            ExitDrawMode();
+            return;
+        }
+
         if (!IsDrawMode) return;
 
         // Block input until camera has finished flying in
@@ -98,6 +104,7 @@ public class TrajectoryManager : MonoBehaviour
     /// <summary>Enter draw mode: switch camera, fly to target, start a fresh session.</summary>
     public void EnterDrawMode()
     {
+        if (!IsReviewActive()) return;
         if (IsDrawMode) return;
         IsDrawMode = true;
         _cameraReady = false;
@@ -131,6 +138,7 @@ public class TrajectoryManager : MonoBehaviour
     /// <summary>Toggle visibility of all currently displayed trajectories.</summary>
     public void ToggleVisibility()
     {
+        if (!IsReviewActive()) return;
         SetVisibility(!_trajectoriesVisible);
     }
 
@@ -360,6 +368,12 @@ public class TrajectoryManager : MonoBehaviour
     {
         mainCamera?.gameObject.SetActive(!topDown);
         topDownCamera?.gameObject.SetActive(topDown);
+    }
+
+    private static bool IsReviewActive()
+    {
+        var reviewManager = SessionReview.SessionReviewManager.Instance;
+        return reviewManager != null && reviewManager.IsReviewUiActive;
     }
 }
 

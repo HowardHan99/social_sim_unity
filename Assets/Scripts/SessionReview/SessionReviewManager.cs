@@ -95,6 +95,20 @@ namespace SessionReview
 
         public bool UsePostTrialPrompt => usePostTrialPrompt;
         public bool BlocksAutomaticTrialStart => showTrialStartPrompt || trialWarmupPending;
+        public bool IsReviewModeActive => inRewindMode;
+        public bool IsWorldBuildingModeActive => inWorldBuildingMode;
+        public bool IsPostTrialPromptActive => showPostTrialPrompt;
+        public bool IsTrialStartPromptActive => showTrialStartPrompt;
+        public bool IsOnboardingActive => showOnboarding;
+        public bool IsReviewUiActive => inRewindMode && !inWorldBuildingMode;
+        public bool IsLiveTrialRunning
+        {
+            get
+            {
+                var sean = SEAN.SEAN.instance;
+                return sean != null && sean.robotTask != null && sean.robotTask.isRunning;
+            }
+        }
 
         private static readonly float[] speedSteps = { 0.25f, 0.5f, 1f, 2f, 4f };
         private int currentSpeedIndex = 2;
