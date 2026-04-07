@@ -35,11 +35,13 @@ public class UIManager : MonoBehaviour
     private bool isUsingTempCamera = false;
     private bool isPositioningCamera = false; // True when user is finding a spot
     private bool isReplaying = false; // True when replay is active
+    private bool isAwaitingVlmResponse;
     
     public GameObject instructionPanel; // Reference to InstructionPanel
     public TMP_InputField instructionInputField; // Reference to InputField (TMP) for showing instructions
     public Button confirmBN; // Reference to ConfirmBN button
     public Button vlmCaptureButton; // Dedicated VLM entry button shown only during VLM flow
+    public CamCapture vlmCamCapture; // Optional direct hook so prompt confirmation can trigger capture
 
     public bool SuppressSignalButtons { get; set; }
     public bool UnpauseOnExitResponseWindow { get; set; } = true;
@@ -136,6 +138,18 @@ public class UIManager : MonoBehaviour
 
     public void DisplayLLMResponse(string response)
     {
+        isAwaitingVlmResponse = false;
+
+        if (responseWindow != null && !responseWindow.activeSelf)
+        {
+            responseWindow.SetActive(true);
+        }
+
+        if (popUpWindow != null && popUpWindow.activeSelf)
+        {
+            popUpWindow.SetActive(false);
+        }
+
         if (responseInputField != null)
         {
             responseInputField.text = response;
@@ -179,6 +193,12 @@ public class UIManager : MonoBehaviour
 
     public void OnConfirmButtonPressed()
     {
+        if (isAwaitingVlmResponse)
+        {
+            Debug.LogWarning("[UIManager] Ignoring duplicate VLM prompt confirmation while waiting for a response.");
+            return;
+        }
+
         List<string> selectedOptions = new List<string>();
 
         // Check each toggle and get its text if it's turned on
@@ -199,8 +219,10 @@ public class UIManager : MonoBehaviour
 
         prompt = GeneratePromptString(selectedOptions); // Store the prompt
         Debug.Log(prompt);
+        isAwaitingVlmResponse = true;
 
         StartCoroutine(HidePopUp());
+        StartCoroutine(CaptureAfterPromptConfirmation());
     }
 
     string GeneratePromptString(List<string> options)
@@ -283,8 +305,28 @@ public class UIManager : MonoBehaviour
         }
     }
 
+    private IEnumerator CaptureAfterPromptConfirmation()
+    {
+        yield return null;
+
+        if (vlmCamCapture == null)
+        {
+            vlmCamCapture = FindObjectOfType<CamCapture>();
+        }
+
+        if (vlmCamCapture == null)
+        {
+            Debug.LogError("[UIManager] Unable to find CamCapture for VLM flow.");
+            yield break;
+        }
+
+        Debug.Log("[UIManager] Prompt confirmed. Triggering VLM capture.");
+        vlmCamCapture.CaptureAndProcessImage();
+    }
+
     public void ExitResponseWindow()
     {
+        isAwaitingVlmResponse = false;
         responseWindow.SetActive(false);
         popUpWindow.SetActive(false);
         IsVlmSignalFlowActive = false;

@@ -1,65 +1,77 @@
+using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.IO;
+using System.Text;
 using UnityEngine;
 using UnityEngine.Networking;
 using UnityEngine.UI;
 
 public class CamCapture : MonoBehaviour
 {
+    private const string GeminiVisionModel = "gemini-2.0-flash";
+    private const string GeminiApiBaseUrl = "https://generativelanguage.googleapis.com/v1beta/models/";
+
     public Camera cam;
     public Button captureButton;
-    public FreeCamera freeCamera; // Reference to movement data
+    public FreeCamera freeCamera;
 
-    private int imageIndex = 0; // Counter for naming images
-
+    private int imageIndex;
     private string savedFilePath;
     private string customPrompt;
     public UIManager uiManager;
     private bool captureButtonOverride;
+    private bool isVlmRequestInFlight;
+    private float lastCaptureRequestTime = -10f;
 
-    private string openAI_API_Key;
+    private const float DuplicateCaptureCooldownSeconds = 1f;
+
+    private string geminiApiKey;
 
     private void Awake()
     {
-        // Reads the API key from a file called "openai_key.txt" in the persistent data path
-        string keyPath = Path.Combine(Application.persistentDataPath, "openaiapikey.txt");
-        if (File.Exists(keyPath))
-        {
-            openAI_API_Key = File.ReadAllText(keyPath).Trim();
-        }
-        else
-        {
-            openAI_API_Key = "";
-        }
-    } 
-    void Start()
+        geminiApiKey = GeminiApiKeyLoader.Load();
+    }
+
+    private void Start()
     {
         if (cam == null)
-        {
             cam = GetComponent<Camera>();
-        }
 
         RefreshCaptureButtonVisibility();
     }
 
-    void Update()
+    private void Update()
     {
         RefreshCaptureButtonVisibility();
     }
 
     public void CaptureAndProcessImage()
     {
+        if (Time.unscaledTime - lastCaptureRequestTime < DuplicateCaptureCooldownSeconds)
+        {
+            Debug.LogWarning("[CamCapture] Ignoring duplicate VLM capture triggered too quickly.");
+            return;
+        }
+
+        if (isVlmRequestInFlight)
+        {
+            Debug.LogWarning("[CamCapture] Ignoring duplicate VLM capture while a request is already in flight.");
+            return;
+        }
+
         if (!CanShowCaptureButton())
             return;
 
         captureButtonOverride = false;
         RefreshCaptureButtonVisibility();
+        lastCaptureRequestTime = Time.unscaledTime;
 
         Texture2D image = CaptureImage();
         string filePath = SaveImage(image);
-        Debug.Log("Image captured and saved at: " + filePath);
+        Debug.Log("[CamCapture] Image captured and saved at: " + filePath);
 
-        StartCoroutine(UploadImageToOpenAI(filePath)); // Upload image after capturing
+        StartCoroutine(SendImageToGemini(filePath));
     }
 
     public void CaptureAndSaveImage()
@@ -71,23 +83,32 @@ public class CamCapture : MonoBehaviour
         RefreshCaptureButtonVisibility();
 
         Texture2D image = CaptureImage();
-        savedFilePath = SaveImage(image); // Save the image and store the file path
-        Debug.Log("Image captured and saved at: " + savedFilePath);
+        savedFilePath = SaveImage(image);
+        Debug.Log("[CamCapture] Image captured and saved at: " + savedFilePath);
     }
 
     public void SendToOpenAI()
     {
+        if (isVlmRequestInFlight)
+        {
+            Debug.LogWarning("[CamCapture] Ignoring duplicate VLM send while a request is already in flight.");
+            return;
+        }
+
+        if (uiManager != null)
+            customPrompt = uiManager.GetPrompt();
+
         if (!string.IsNullOrEmpty(savedFilePath) && !string.IsNullOrEmpty(customPrompt))
         {
-            StartCoroutine(UploadImageToOpenAI(savedFilePath));
+            StartCoroutine(SendImageToGemini(savedFilePath));
         }
         else
         {
-            Debug.LogError("No image or prompt available.");
+            Debug.LogError("[CamCapture] No image or prompt available.");
         }
     }
 
-    Texture2D CaptureImage()
+    private Texture2D CaptureImage()
     {
         RenderTexture renderTexture = new RenderTexture(cam.pixelWidth, cam.pixelHeight, 24);
         cam.targetTexture = renderTexture;
@@ -105,217 +126,178 @@ public class CamCapture : MonoBehaviour
         return image;
     }
 
-    string SaveImage(Texture2D image)
+    private string SaveImage(Texture2D image)
     {
-        string folderPath = Application.persistentDataPath + "/CapturedImages";
-
-        // Ensure directory exists
+        string folderPath = Path.Combine(Application.persistentDataPath, "CapturedImages");
         if (!Directory.Exists(folderPath))
-        {
             Directory.CreateDirectory(folderPath);
-        }
 
-        // Generate unique filename
-        string dateTime = System.DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
+        string dateTime = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
         string fileName = $"image_{dateTime}_{imageIndex}.png";
         string fullPath = Path.Combine(folderPath, fileName);
 
-
-        // Save image as PNG
         byte[] bytes = image.EncodeToPNG();
         File.WriteAllBytes(fullPath, bytes);
-        Debug.Log("Saved image: " + fullPath);
+        Destroy(image);
 
-        imageIndex++; // Increment image index for next save
+        Debug.Log("[CamCapture] Saved image: " + fullPath);
+        imageIndex++;
 
         return fullPath;
     }
 
-    // Upload the image to OpenAI file API
-    IEnumerator UploadImageToOpenAI(string filePath)
+    private IEnumerator SendImageToGemini(string filePath)
     {
-        Debug.Log("Uploading image to OpenAI...");
-
-        // Read image as bytes
-        byte[] imageBytes = File.ReadAllBytes(filePath);
-
-        // Create a multipart form data request
-        WWWForm form = new WWWForm();
-        form.AddBinaryData("file", imageBytes, "image.png", "image/png");
-
-        // Set the 'purpose' field to 'vision' for image analysis
-        form.AddField("purpose", "vision");  // This is for analyzing images
-
-        using (UnityWebRequest request = UnityWebRequest.Post("https://api.openai.com/v1/files", form))
+        if (isVlmRequestInFlight)
         {
-            request.SetRequestHeader("Authorization", "Bearer " + openAI_API_Key);
-
-            yield return request.SendWebRequest();
-
-            if (request.result == UnityWebRequest.Result.Success)
-            {
-                Debug.Log("Image uploaded successfully. Response: " + request.downloadHandler.text);
-                // Parse the file ID from the response to use in the next step
-                var jsonResponse = JsonUtility.FromJson<UploadResponse>(request.downloadHandler.text);
-                string fileId = jsonResponse.id;
-                // Now send the fileId to use in the analysis task
-                StartCoroutine(SendImageFileToOpenAI(fileId, Path.GetFileName(filePath))); // Analyze the image using the fileId
-            }
-            else
-            {
-                Debug.LogError("Error uploading image: " + request.error + "\nResponse: " + request.downloadHandler.text);
-            }
+            Debug.LogWarning("[CamCapture] Duplicate Gemini VLM request suppressed.");
+            yield break;
         }
-    }
 
+        isVlmRequestInFlight = true;
 
-    // Analyze the uploaded image using the file ID
-    IEnumerator SendImageFileToOpenAI(string fileId, string imageName)
-    {
-        Debug.Log("Sending image file to OpenAI...");
-
-        string movementStatus = freeCamera.GetMovementStatus();
-        Debug.Log(movementStatus);
-        customPrompt = uiManager.GetPrompt();
-
-        string jsonData = "{\"model\": \"gpt-4o-mini\", \"messages\": [{\"role\": \"user\", \"content\": \"" + customPrompt + " Movement Status: " + movementStatus + "\", \"type\": \"file\", \"file\": \"file:" + fileId + "\"}]}";
-
-        using (UnityWebRequest request = new UnityWebRequest("https://api.openai.com/v1/chat/completions", "POST"))
+        if (string.IsNullOrWhiteSpace(geminiApiKey))
         {
-            byte[] bodyRaw = System.Text.Encoding.UTF8.GetBytes(jsonData);
+            Debug.LogError("[CamCapture] Gemini API key is missing.");
+            isVlmRequestInFlight = false;
+            yield break;
+        }
+
+        if (!File.Exists(filePath))
+        {
+            Debug.LogError("[CamCapture] Image file not found: " + filePath);
+            isVlmRequestInFlight = false;
+            yield break;
+        }
+
+        string movementStatus = freeCamera != null ? freeCamera.GetMovementStatus() : "Movement status unavailable.";
+        customPrompt = uiManager != null ? uiManager.GetPrompt() : string.Empty;
+
+        byte[] imageBytes = File.ReadAllBytes(filePath);
+        string mimeType = GetMimeType(filePath);
+        string requestJson = BuildGeminiVisionRequest(customPrompt, movementStatus, imageBytes, mimeType);
+        string imageName = Path.GetFileName(filePath);
+        string url = GeminiApiBaseUrl + GeminiVisionModel + ":generateContent?key=" + geminiApiKey;
+
+        using (UnityWebRequest request = new UnityWebRequest(url, UnityWebRequest.kHttpVerbPOST))
+        {
+            byte[] bodyRaw = Encoding.UTF8.GetBytes(requestJson);
             request.uploadHandler = new UploadHandlerRaw(bodyRaw);
             request.downloadHandler = new DownloadHandlerBuffer();
-
-            request.SetRequestHeader("Authorization", "Bearer " + openAI_API_Key);
             request.SetRequestHeader("Content-Type", "application/json");
 
             yield return request.SendWebRequest();
 
-            if (request.result == UnityWebRequest.Result.Success)
+            string rawResponse = request.downloadHandler != null ? request.downloadHandler.text : string.Empty;
+            if (request.result != UnityWebRequest.Result.Success)
             {
-                string response = request.downloadHandler.text;
-                Debug.Log("OpenAI Response: " + request.downloadHandler.text);
-
-                // NEW: Parse and extract the actual message content
-                string messageContent = ParseOpenAIResponse(response);
-
-                // NEW: Display the response in the editable UI field
-                if (uiManager != null)
-                {
-                    uiManager.DisplayLLMResponse(messageContent);
-                }
-
-                // Save the response to a log file
-                SaveResponseToLog(response, imageName, movementStatus);
+                Debug.LogError("[CamCapture] Gemini VLM request failed: " + request.error + "\nResponse: " + rawResponse);
+                SaveResponseToLog(rawResponse, string.Empty, imageName, movementStatus, false);
+                isVlmRequestInFlight = false;
+                yield break;
             }
-            else
-            {
-                Debug.LogError("Error sending image: " + request.error + "\nResponse: " + request.downloadHandler.text);
-            }
+
+            string parsedResponse = ParseGeminiResponse(rawResponse);
+            Debug.Log("[CamCapture] Gemini VLM response: " + parsedResponse);
+
+            if (uiManager != null)
+                uiManager.DisplayLLMResponse(parsedResponse);
+
+            SaveResponseToLog(rawResponse, parsedResponse, imageName, movementStatus, true);
         }
+
+        isVlmRequestInFlight = false;
     }
 
-    string ParseOpenAIResponse(string jsonResponse)
+    private string BuildGeminiVisionRequest(string prompt, string movementStatus, byte[] imageBytes, string mimeType)
+    {
+        string escapedPrompt = EscapeJson(BuildPrompt(prompt, movementStatus));
+        string base64Image = Convert.ToBase64String(imageBytes);
+
+        return "{"
+            + "\"contents\":[{"
+            + "\"parts\":["
+            + "{"
+            + "\"text\":\"" + escapedPrompt + "\""
+            + "},"
+            + "{"
+            + "\"inline_data\":{"
+            + "\"mime_type\":\"" + mimeType + "\","
+            + "\"data\":\"" + base64Image + "\""
+            + "}"
+            + "}"
+            + "]"
+            + "}]"
+            + "}";
+    }
+
+    private string BuildPrompt(string prompt, string movementStatus)
+    {
+        string effectivePrompt = string.IsNullOrWhiteSpace(prompt)
+            ? "Describe the scene briefly and generate a natural spoken safety message for nearby pedestrians."
+            : prompt.Trim();
+
+        return effectivePrompt + "\nMovement Status: " + movementStatus;
+    }
+
+    private string ParseGeminiResponse(string jsonResponse)
     {
         try
         {
-            Debug.Log("Attempting to parse response...");
-
-            // Find the `"content":` key (allowing spaces after colon)
-            int keyIndex = jsonResponse.IndexOf("\"content\":");
-            if (keyIndex == -1)
+            GeminiGenerateContentResponse response = JsonUtility.FromJson<GeminiGenerateContentResponse>(jsonResponse);
+            if (response != null && response.candidates != null)
             {
-                Debug.LogError("Could not find 'content' field in response");
-                return jsonResponse; // Fallback: return whole JSON
-            }
-
-            // Move to the character after `"content":`
-            int i = keyIndex + "\"content\":".Length;
-
-            // Skip whitespace
-            while (i < jsonResponse.Length && char.IsWhiteSpace(jsonResponse[i]))
-            {
-                i++;
-            }
-
-            // Expect starting quote for the string
-            if (i >= jsonResponse.Length || jsonResponse[i] != '\"')
-            {
-                Debug.LogError("Content field is not a JSON string");
-                return jsonResponse;
-            }
-
-            int contentStart = i + 1;
-
-            // Find the closing quote, handling escape sequences
-            int contentEnd = contentStart;
-            bool isEscaped = false;
-
-            for (int j = contentStart; j < jsonResponse.Length; j++)
-            {
-                char c = jsonResponse[j];
-
-                if (c == '\\' && !isEscaped)
+                foreach (GeminiCandidate candidate in response.candidates)
                 {
-                    isEscaped = true;
-                    continue;
-                }
+                    if (candidate == null || candidate.content == null || candidate.content.parts == null)
+                        continue;
 
-                if (c == '\"' && !isEscaped)
-                {
-                    contentEnd = j;
-                    break;
-                }
+                    List<string> textParts = new List<string>();
+                    foreach (GeminiPart part in candidate.content.parts)
+                    {
+                        if (!string.IsNullOrWhiteSpace(part.text))
+                            textParts.Add(part.text.Trim());
+                    }
 
-                isEscaped = false;
+                    if (textParts.Count > 0)
+                        return string.Join("\n", textParts).Trim();
+                }
             }
 
-            if (contentEnd <= contentStart)
-            {
-                Debug.LogError("Failed to locate end of content string");
-                return jsonResponse;
-            }
-
-            string content = jsonResponse.Substring(contentStart, contentEnd - contentStart);
-
-            // Unescape common sequences
-            content = content
-                .Replace("\\n", "\n")
-                .Replace("\\r", "\r")
-                .Replace("\\\"", "\"")
-                .Replace("\\\\", "\\");
-
-            Debug.Log("Successfully parsed content: " + content);
-            return content;
+            GeminiErrorEnvelope errorEnvelope = JsonUtility.FromJson<GeminiErrorEnvelope>(jsonResponse);
+            if (errorEnvelope != null && errorEnvelope.error != null && !string.IsNullOrWhiteSpace(errorEnvelope.error.message))
+                return "Gemini error: " + errorEnvelope.error.message;
         }
-        catch (System.Exception e)
+        catch (Exception exception)
         {
-            Debug.LogError("Error parsing OpenAI response: " + e.Message);
-            Debug.LogError("Full response: " + jsonResponse);
-            return "Error parsing response. Check console for details.";
+            Debug.LogError("[CamCapture] Error parsing Gemini response: " + exception.Message);
         }
+
+        return "Unable to parse Gemini response.";
     }
 
-    // Save responses to a log file
-    void SaveResponseToLog(string response, string imageName, string movementStatus)
+    private void SaveResponseToLog(string rawResponse, string parsedResponse, string imageName, string movementStatus, bool isSuccess)
     {
-        string logFilePath = Application.persistentDataPath + "/ResponseLog.txt";
+        string logFilePath = Path.Combine(Application.persistentDataPath, "ResponseLog.txt");
 
-        // Append the response to the log file
         using (StreamWriter writer = new StreamWriter(logFilePath, true))
         {
-            writer.WriteLine("Timestamp: " + System.DateTime.Now);
+            writer.WriteLine("Timestamp: " + DateTime.Now.ToString("o"));
+            writer.WriteLine("Provider: Google Gemini");
+            writer.WriteLine("Model: " + GeminiVisionModel);
+            writer.WriteLine("Success: " + isSuccess);
             writer.WriteLine("Image Name: " + imageName);
             writer.WriteLine("Movement Status: " + movementStatus);
             writer.WriteLine("User Prompt: " + customPrompt);
-            writer.WriteLine("Response: " + response);
+            writer.WriteLine("Parsed Response: " + parsedResponse);
+            writer.WriteLine("Raw Response: " + rawResponse);
             writer.WriteLine("----------");
         }
 
-        Debug.Log("Response saved to log file: " + logFilePath);
+        Debug.Log("[CamCapture] Response saved to log file: " + logFilePath);
     }
 
-    void RefreshCaptureButtonVisibility()
+    private void RefreshCaptureButtonVisibility()
     {
         if (captureButton == null)
             return;
@@ -325,13 +307,18 @@ public class CamCapture : MonoBehaviour
             captureButton.gameObject.SetActive(shouldShow);
     }
 
-    bool CanShowCaptureButton()
+    private bool CanShowCaptureButton()
     {
         if (captureButtonOverride)
             return true;
 
-        if (uiManager != null && !uiManager.IsVlmSignalFlowActive)
+        if (uiManager != null)
+        {
+            if (uiManager.IsVlmSignalFlowActive)
+                return true;
+
             return false;
+        }
 
         var reviewManager = SessionReview.SessionReviewManager.Instance;
         if (reviewManager != null)
@@ -345,14 +332,108 @@ public class CamCapture : MonoBehaviour
         captureButtonOverride = isVisible;
         RefreshCaptureButtonVisibility();
     }
+
+    private string GetMimeType(string filePath)
+    {
+        string extension = Path.GetExtension(filePath).ToLowerInvariant();
+        switch (extension)
+        {
+            case ".jpg":
+            case ".jpeg":
+                return "image/jpeg";
+            case ".png":
+                return "image/png";
+            case ".webp":
+                return "image/webp";
+            default:
+                return "application/octet-stream";
+        }
+    }
+
+    private string EscapeJson(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return string.Empty;
+
+        return value
+            .Replace("\\", "\\\\")
+            .Replace("\"", "\\\"")
+            .Replace("\n", "\\n")
+            .Replace("\r", "\\r")
+            .Replace("\t", "\\t");
+    }
 }
 
-
-// Create a class to parse the response (JSON) from the file upload API
-[System.Serializable]
-public class UploadResponse
+[Serializable]
+public class GeminiGenerateContentResponse
 {
-    public string id;
-    public string objectType;
-    public string created;
+    public GeminiCandidate[] candidates;
+}
+
+[Serializable]
+public class GeminiCandidate
+{
+    public GeminiContent content;
+}
+
+[Serializable]
+public class GeminiContent
+{
+    public GeminiPart[] parts;
+}
+
+[Serializable]
+public class GeminiPart
+{
+    public string text;
+    public GeminiInlineData inline_data;
+    public GeminiInlineData inlineData;
+}
+
+[Serializable]
+public class GeminiInlineData
+{
+    public string mime_type;
+    public string data;
+}
+
+[Serializable]
+public class GeminiErrorEnvelope
+{
+    public GeminiError error;
+}
+
+[Serializable]
+public class GeminiError
+{
+    public int code;
+    public string message;
+    public string status;
+}
+
+public static class GeminiApiKeyLoader
+{
+    private const string KeyFileName = "geminiapikey.txt";
+
+    public static string Load()
+    {
+        string[] candidatePaths =
+        {
+            Path.Combine(Application.persistentDataPath, KeyFileName),
+            Path.Combine(Application.dataPath, "Scripts", "VLMscripts", KeyFileName),
+            Path.Combine(Application.dataPath, "Resources", KeyFileName)
+        };
+
+        foreach (string path in candidatePaths)
+        {
+            if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
+            {
+                string key = File.ReadAllText(path).Trim();
+                if (!string.IsNullOrWhiteSpace(key))
+                    return key;
+            }
+        }
+
+        return string.Empty;
+    }
 }

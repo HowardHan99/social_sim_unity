@@ -1,126 +1,224 @@
-using UnityEngine;
+using System;
 using System.Collections;
-using UnityEngine.Networking;
 using System.IO;
+using System.Text;
+using UnityEngine;
+using UnityEngine.Networking;
 
 public class TTSManager : MonoBehaviour
 {
-    private string openAI_API_Key;
+    private const string GeminiTtsModel = "gemini-2.5-flash-preview-tts";
+    private const string GeminiApiBaseUrl = "https://generativelanguage.googleapis.com/v1beta/models/";
+    private const int AudioSampleRate = 24000;
+    private const int AudioChannels = 1;
+    private const string DefaultVoiceName = "Kore";
+
+    private string geminiApiKey;
+    private AudioClip savedAudioClip;
 
     private void Awake()
     {
-        // Reads the API key from a file called "openai_key.txt" in the persistent data path
-        string keyPath = Path.Combine(Application.persistentDataPath, "openaiapikey.txt");
-        if (File.Exists(keyPath))
-        {
-            openAI_API_Key = File.ReadAllText(keyPath).Trim();
-        }
-        else
-        {
-            openAI_API_Key = "";
-        }
+        geminiApiKey = GeminiApiKeyLoader.Load();
     }
 
-    private AudioClip savedAudioClip;
-
-    // Call this method to convert text to speech
     public void ConvertTextToSpeech(string text)
     {
         StartCoroutine(GenerateTTS(text));
     }
 
-    IEnumerator GenerateTTS(string text)
+    private IEnumerator GenerateTTS(string text)
     {
-        Debug.Log("Converting text to speech: " + text);
-
-        // OpenAI TTS API endpoint
-        string url = "https://api.openai.com/v1/audio/speech";
-
-        // Create JSON request body
-        string jsonData = "{\"model\": \"tts-1\", \"input\": \"" + EscapeJSON(text) + "\", \"voice\": \"alloy\"}";
-
-        using (UnityWebRequest request = new UnityWebRequest(url, "POST"))
+        if (string.IsNullOrWhiteSpace(text))
         {
-            byte[] bodyRaw = System.Text.Encoding.UTF8.GetBytes(jsonData);
+            Debug.LogWarning("[TTSManager] Ignoring empty TTS request.");
+            yield break;
+        }
+
+        if (string.IsNullOrWhiteSpace(geminiApiKey))
+        {
+            Debug.LogError("[TTSManager] Gemini API key is missing.");
+            yield break;
+        }
+
+        Debug.Log("[TTSManager] Converting text to speech with Gemini.");
+
+        string url = GeminiApiBaseUrl + GeminiTtsModel + ":generateContent?key=" + geminiApiKey;
+        string jsonData = BuildTtsRequest(text);
+
+        using (UnityWebRequest request = new UnityWebRequest(url, UnityWebRequest.kHttpVerbPOST))
+        {
+            byte[] bodyRaw = Encoding.UTF8.GetBytes(jsonData);
             request.uploadHandler = new UploadHandlerRaw(bodyRaw);
             request.downloadHandler = new DownloadHandlerBuffer();
-
-            request.SetRequestHeader("Authorization", "Bearer " + openAI_API_Key);
             request.SetRequestHeader("Content-Type", "application/json");
 
             yield return request.SendWebRequest();
 
-            if (request.result == UnityWebRequest.Result.Success)
+            string rawResponse = request.downloadHandler != null ? request.downloadHandler.text : string.Empty;
+            if (request.result != UnityWebRequest.Result.Success)
             {
-                Debug.Log("TTS audio received successfully!");
-
-                // Save the audio data
-                byte[] audioData = request.downloadHandler.data;
-                string audioPath = SaveAudioFile(audioData);
-
-                // Load as AudioClip
-                StartCoroutine(LoadAudioClip(audioPath));
+                Debug.LogError("[TTSManager] Error generating TTS: " + request.error + "\nResponse: " + rawResponse);
+                yield break;
             }
-            else
+
+            string base64Audio = ParseAudioData(rawResponse);
+            if (string.IsNullOrWhiteSpace(base64Audio))
             {
-                Debug.LogError("Error generating TTS: " + request.error);
+                Debug.LogError("[TTSManager] Gemini TTS response did not include audio data.\nResponse: " + rawResponse);
+                yield break;
             }
-        }
-    }
 
-    string SaveAudioFile(byte[] audioData)
-    {
-        string folderPath = Application.persistentDataPath + "/TTSAudio";
+            byte[] pcmData = Convert.FromBase64String(base64Audio);
+            savedAudioClip = CreateAudioClipFromPcm(pcmData);
+            SaveAudioFile(pcmData);
 
-        if (!Directory.Exists(folderPath))
-        {
-            Directory.CreateDirectory(folderPath);
-        }
-
-        string dateTime = System.DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
-        string fileName = $"tts_audio_{dateTime}.mp3";
-        string fullPath = Path.Combine(folderPath, fileName);
-
-        File.WriteAllBytes(fullPath, audioData);
-        Debug.Log("Audio saved at: " + fullPath);
-
-        return fullPath;
-    }
-
-    IEnumerator LoadAudioClip(string path)
-    {
-        using (UnityWebRequest www = UnityWebRequestMultimedia.GetAudioClip("file://" + path, AudioType.MPEG))
-        {
-            yield return www.SendWebRequest();
-
-            if (www.result == UnityWebRequest.Result.Success)
+            if (savedAudioClip != null)
             {
-                savedAudioClip = DownloadHandlerAudioClip.GetContent(www);
-                Debug.Log("AudioClip loaded successfully! Duration: " + savedAudioClip.length + " seconds");
-            }
-            else
-            {
-                Debug.LogError("Error loading audio clip: " + www.error);
+                Debug.Log("[TTSManager] AudioClip created successfully. Duration: " + savedAudioClip.length + " seconds");
             }
         }
     }
 
-    // Get the saved audio clip
     public AudioClip GetSavedAudioClip()
     {
         return savedAudioClip;
     }
 
-    // Helper method to escape JSON strings
-    string EscapeJSON(string str)
-    {
-        return str.Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "\\r");
-    }
-
-    // TEST METHOD - Add a button in your scene to call this
     public void TestTTS()
     {
-        Debug.Log("Test TTS");
+        Debug.Log("[TTSManager] Test TTS");
         ConvertTextToSpeech("Hello! This is a test of the text to speech system.");
+    }
+
+    private string BuildTtsRequest(string text)
+    {
+        string escapedText = EscapeJson(text);
+
+        return "{"
+            + "\"contents\":[{"
+            + "\"parts\":[{"
+            + "\"text\":\"" + escapedText + "\""
+            + "}]"
+            + "}],"
+            + "\"generationConfig\":{"
+            + "\"responseModalities\":[\"AUDIO\"],"
+            + "\"speechConfig\":{"
+            + "\"voiceConfig\":{"
+            + "\"prebuiltVoiceConfig\":{"
+            + "\"voiceName\":\"" + DefaultVoiceName + "\""
+            + "}"
+            + "}"
+            + "}"
+            + "},"
+            + "\"model\":\"" + GeminiTtsModel + "\""
+            + "}";
+    }
+
+    private string ParseAudioData(string jsonResponse)
+    {
+        try
+        {
+            GeminiGenerateContentResponse response = JsonUtility.FromJson<GeminiGenerateContentResponse>(jsonResponse);
+            if (response == null || response.candidates == null)
+                return string.Empty;
+
+            foreach (GeminiCandidate candidate in response.candidates)
+            {
+                if (candidate == null || candidate.content == null || candidate.content.parts == null)
+                    continue;
+
+                foreach (GeminiPart part in candidate.content.parts)
+                {
+                    if (part == null)
+                        continue;
+
+                    GeminiInlineData audioData = part.inlineData ?? part.inline_data;
+                    if (audioData != null && !string.IsNullOrWhiteSpace(audioData.data))
+                        return audioData.data;
+                }
+            }
+        }
+        catch (Exception exception)
+        {
+            Debug.LogError("[TTSManager] Error parsing Gemini TTS response: " + exception.Message);
+        }
+
+        return string.Empty;
+    }
+
+    private string SaveAudioFile(byte[] pcmData)
+    {
+        string folderPath = Path.Combine(Application.persistentDataPath, "TTSAudio");
+        if (!Directory.Exists(folderPath))
+            Directory.CreateDirectory(folderPath);
+
+        string dateTime = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
+        string fileName = $"tts_audio_{dateTime}.wav";
+        string fullPath = Path.Combine(folderPath, fileName);
+
+        byte[] wavBytes = ConvertPcmToWav(pcmData, AudioSampleRate, AudioChannels, 16);
+        File.WriteAllBytes(fullPath, wavBytes);
+        Debug.Log("[TTSManager] Audio saved at: " + fullPath);
+
+        return fullPath;
+    }
+
+    private AudioClip CreateAudioClipFromPcm(byte[] pcmData)
+    {
+        if (pcmData == null || pcmData.Length < 2)
+            return null;
+
+        int sampleCount = pcmData.Length / 2;
+        float[] audioSamples = new float[sampleCount];
+
+        for (int i = 0; i < sampleCount; i++)
+        {
+            short sample = BitConverter.ToInt16(pcmData, i * 2);
+            audioSamples[i] = sample / 32768f;
+        }
+
+        AudioClip clip = AudioClip.Create("GeminiTTS", sampleCount, AudioChannels, AudioSampleRate, false);
+        clip.SetData(audioSamples, 0);
+        return clip;
+    }
+
+    private byte[] ConvertPcmToWav(byte[] pcmData, int sampleRate, short channels, short bitsPerSample)
+    {
+        int byteRate = sampleRate * channels * bitsPerSample / 8;
+        short blockAlign = (short)(channels * bitsPerSample / 8);
+
+        using (MemoryStream stream = new MemoryStream())
+        using (BinaryWriter writer = new BinaryWriter(stream))
+        {
+            writer.Write(Encoding.ASCII.GetBytes("RIFF"));
+            writer.Write(36 + pcmData.Length);
+            writer.Write(Encoding.ASCII.GetBytes("WAVE"));
+            writer.Write(Encoding.ASCII.GetBytes("fmt "));
+            writer.Write(16);
+            writer.Write((short)1);
+            writer.Write(channels);
+            writer.Write(sampleRate);
+            writer.Write(byteRate);
+            writer.Write(blockAlign);
+            writer.Write(bitsPerSample);
+            writer.Write(Encoding.ASCII.GetBytes("data"));
+            writer.Write(pcmData.Length);
+            writer.Write(pcmData);
+            writer.Flush();
+            return stream.ToArray();
+        }
+    }
+
+    private string EscapeJson(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return string.Empty;
+
+        return value
+            .Replace("\\", "\\\\")
+            .Replace("\"", "\\\"")
+            .Replace("\n", "\\n")
+            .Replace("\r", "\\r")
+            .Replace("\t", "\\t");
     }
 }
