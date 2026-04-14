@@ -75,6 +75,10 @@ Assets/ExternalAssets/UMA/InternalDataStore/InEditor.meta
 *.DS_Store
 
 .vsconfig
+.env
+.env.local
+.env.*
+!.env.example
 
 # docfx
 _site/*
