@@ -6,23 +6,19 @@ public class ComfortMotionBlur : MonoBehaviour
 {
     [Header("Comfort Blur")]
     [SerializeField] private Shader blurShader;
-    [SerializeField] [Range(0f, 1f)] private float maxBlurStrength = 0.9f;
-    [Tooltip("Pixel radius of the blur kernel at maximum strength. "
-           + "Increase for a stronger/wider blur. 20 = subtle, 40 = strong.")]
-    [SerializeField] [Min(1f)] private float blurRadiusPixels = 10f;
-    [Tooltip("Rotation speed (°/s) that produces maximum blur. "
-           + "Lower = blur kicks in sooner and stronger.")]
-    [SerializeField] private float rotationForMaxBlurDegreesPerSecond = 200f;
-    [SerializeField] private float blurRiseSpeed = 5f;
-    [SerializeField] private float blurFallSpeed = 12f;
+    [SerializeField] [Range(0f, 1f)] private float maxBlurStrength = 0.55f;
+    [Tooltip("Pixel radius of the blur kernel at maximum strength. 8 = subtle, 20 = strong.")]
+    [SerializeField] [Min(1f)] private float blurRadiusPixels = 8f;
+    [Tooltip("Rotation speed (°/s) that produces maximum blur. Lower = kicks in sooner.")]
+    [SerializeField] private float rotationForMaxBlurDegreesPerSecond = 220f;
+    [SerializeField] private float blurRiseSpeed = 10f;
+    [SerializeField] private float blurFallSpeed = 8f;
     [SerializeField] private float transitionBoostStrength = 0.55f;
     [SerializeField] private float transitionBoostDuration = 0.22f;
 
     [Header("Angular Speed Smoothing")]
-    [Tooltip("Low-pass filter time constant for angular velocity (seconds). "
-           + "Higher = slower blur onset — prevents single-frame rotation spikes "
-           + "(e.g. playback teleports) from flashing the vignette.")]
-    [SerializeField] private float angularSpeedSmoothTime = 0.15f;
+    [Tooltip("Low-pass filter time constant (seconds). Keep very low (0.02-0.04) to avoid lag during rotation.")]
+    [SerializeField] private float angularSpeedSmoothTime = 0.03f;
 
     [Header("Comfort Vignette")]
     [Tooltip("How dark the peripheral vignette gets at peak blur (0 = off). "
@@ -73,6 +69,9 @@ public class ComfortMotionBlur : MonoBehaviour
             float blendFactor = 1f - Mathf.Exp(-deltaTime / smoothTime);
             smoothedAngularSpeed = Mathf.Lerp(smoothedAngularSpeed, rawAngularSpeed, blendFactor);
 
+            // Speed-based blur with a very short smooth time (0.02-0.04s) so the
+            // blur tracks rotation almost instantly — present during rotation but
+            // with no perceptible lag between camera movement and blur onset.
             rotationBlur = Mathf.Clamp01(smoothedAngularSpeed / Mathf.Max(1f, rotationForMaxBlurDegreesPerSecond));
         }
 
@@ -87,8 +86,12 @@ public class ComfortMotionBlur : MonoBehaviour
             : 0f;
 
         float targetBlur = Mathf.Clamp01(Mathf.Max(rotationBlur, transitionBlur));
-        float lerpSpeed = targetBlur > currentBlurStrength ? blurRiseSpeed : blurFallSpeed;
-        currentBlurStrength = Mathf.MoveTowards(currentBlurStrength, targetBlur, lerpSpeed * Time.unscaledDeltaTime);
+        // Exponential smoothing instead of MoveTowards — gives a natural ease-in/out
+        // curve (fast start, gradual settle) rather than a mechanical linear ramp
+        // that the brain notices as a distinct "event" and interprets as stuttering.
+        float smoothSpeed = targetBlur > currentBlurStrength ? blurRiseSpeed : blurFallSpeed;
+        float t = 1f - Mathf.Exp(-smoothSpeed * Time.unscaledDeltaTime);
+        currentBlurStrength = Mathf.Lerp(currentBlurStrength, targetBlur, t);
     }
 
     void OnRenderImage(RenderTexture source, RenderTexture destination)
