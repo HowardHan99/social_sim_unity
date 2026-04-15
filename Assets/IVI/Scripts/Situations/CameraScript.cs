@@ -4,6 +4,8 @@ namespace IVI
 {
     public class CameraScript : MonoBehaviour
     {
+        private ComfortMotionBlur comfortMotionBlur;
+
         /// <summary>
         /// Normal speed of camera movement.
         /// </summary>
@@ -63,6 +65,13 @@ namespace IVI
         [Header("Position Lock")]
         [Tooltip("When true, all positional movement is disabled; only rotation (free-look) remains active.")]
         public bool lockPosition = false;
+
+        void Awake()
+        {
+            comfortMotionBlur = GetComponent<ComfortMotionBlur>();
+            if (comfortMotionBlur == null)
+                comfortMotionBlur = gameObject.AddComponent<ComfortMotionBlur>();
+        }
 
         void Update()
         {
@@ -174,6 +183,8 @@ namespace IVI
         public void StartLooking()
         {
             looking = true;
+            if (comfortMotionBlur != null)
+                comfortMotionBlur.TriggerTransitionBlur();
             Cursor.visible = false;
             Cursor.lockState = CursorLockMode.Locked;
         }

@@ -9,6 +9,7 @@ namespace IVI
     public class SFPWDAgent : SEAN.Scenario.Agents.Base
     {
         private const int OBSTACLE_ANGLE_BINS = 6;
+        private const float PwdColliderCenterY = 0.78f;
 
         private SphereCollider perceptionSphere;
 
@@ -31,6 +32,13 @@ namespace IVI
         protected override void Start()
         {
             base.Start();
+
+            if (collisionCapsule != null)
+            {
+                Vector3 center = collisionCapsule.center;
+                center.y = PwdColliderCenterY;
+                collisionCapsule.center = center;
+            }
 
             if (SEAN.SEAN.instance != null)
             {

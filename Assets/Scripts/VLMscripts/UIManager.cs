@@ -3,7 +3,6 @@ using TMPro;
 using System.Collections.Generic;
 using UnityEngine.UI;
 using System.Collections;
-using Rerun;
 using System;
 
 public class UIManager : MonoBehaviour
@@ -21,8 +20,6 @@ public class UIManager : MonoBehaviour
     public TMP_InputField responseInputField; // Editable text field for LLM response
     public Button confirmResponseButton; // Button to confirm the edited response
     public TTSManager ttsManager; // Reference to TTSManager
-
-    public RerunManager rerunManager; // Reference to RerunManager
 
     private string prompt; // Store the generated prompt string
     private string finalResponse; // Store the confirmed response text
@@ -345,17 +342,6 @@ public class UIManager : MonoBehaviour
     /// </summary>
     public void OnReplayButtonPressed()
     {
-        // Find RerunManager if not assigned
-        if (rerunManager == null)
-        {
-            rerunManager = FindObjectOfType<RerunManager>();
-            if (rerunManager == null)
-            {
-                Debug.LogError("RerunManager not found in scene!");
-                return;
-            }
-        }
-
         // Get the main camera
         mainCamera = Camera.main;
         if (mainCamera == null)
@@ -387,24 +373,20 @@ public class UIManager : MonoBehaviour
     void StartReplayFromCurrentPosition()
     {
         isPositioningCamera = false;
-        isReplaying = true;
+        isReplaying = false;
 
-        // Update instructions
-        ShowReplayInstructions("Replaying past 10 seconds...");
+        // The old Ultimate Replay-backed rerun system has been retired.
+        // Keep the camera positioning flow only as a temporary inspection view.
+        ShowReplayInstructions("Legacy replay is disabled.\n\nPress SPACE to return to the main camera");
 
-        // Unpause the game for replay
         if (PauseManager.Instance != null)
         {
-            PauseManager.Instance.UnpauseGame();
+            PauseManager.Instance.PauseGame();
         }
 
-        // Call the replay function
-        rerunManager.ReplayPast10Seconds();
-        
-        // Start coroutine to handle end of replay
-        StartCoroutine(SwitchBackToMainCamera(5f));
-        
-        Debug.Log("Starting replay from current camera position.");
+        StartCoroutine(SwitchBackToMainCamera(0f));
+
+        Debug.LogWarning("Replay requested, but the legacy RerunManager path is disabled.");
     }
 
     /// <summary>

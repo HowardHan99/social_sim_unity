@@ -414,9 +414,28 @@ public class GeminiError
 public static class GeminiApiKeyLoader
 {
     private const string KeyFileName = "geminiapikey.txt";
+    private const string GeminiApiEnvVar = "GEMINI_API_KEY";
+    private const string DotEnvFileName = ".env";
 
     public static string Load()
     {
+        string envKey = Environment.GetEnvironmentVariable(GeminiApiEnvVar);
+        if (!string.IsNullOrWhiteSpace(envKey))
+            return envKey.Trim();
+
+        string[] dotEnvPaths =
+        {
+            Path.Combine(Application.dataPath, "Scripts", DotEnvFileName),
+            Path.Combine(Application.dataPath, DotEnvFileName)
+        };
+
+        foreach (string dotEnvPath in dotEnvPaths)
+        {
+            string dotEnvKey = LoadFromDotEnv(dotEnvPath, GeminiApiEnvVar);
+            if (!string.IsNullOrWhiteSpace(dotEnvKey))
+                return dotEnvKey;
+        }
+
         string[] candidatePaths =
         {
             Path.Combine(Application.persistentDataPath, KeyFileName),
@@ -432,6 +451,42 @@ public static class GeminiApiKeyLoader
                 if (!string.IsNullOrWhiteSpace(key))
                     return key;
             }
+        }
+
+        return string.Empty;
+    }
+
+    private static string LoadFromDotEnv(string path, string variableName)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            return string.Empty;
+
+        foreach (string rawLine in File.ReadAllLines(path))
+        {
+            if (string.IsNullOrWhiteSpace(rawLine))
+                continue;
+
+            string line = rawLine.Trim();
+            if (line.StartsWith("#"))
+                continue;
+
+            int separatorIndex = line.IndexOf('=');
+            if (separatorIndex <= 0)
+                continue;
+
+            string key = line.Substring(0, separatorIndex).Trim();
+            if (!string.Equals(key, variableName, StringComparison.Ordinal))
+                continue;
+
+            string value = line.Substring(separatorIndex + 1).Trim();
+            if (value.Length >= 2 &&
+                ((value.StartsWith("\"") && value.EndsWith("\"")) ||
+                 (value.StartsWith("'") && value.EndsWith("'"))))
+            {
+                value = value.Substring(1, value.Length - 2);
+            }
+
+            return value;
         }
 
         return string.Empty;

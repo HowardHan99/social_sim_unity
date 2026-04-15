@@ -5,6 +5,7 @@ using UnityEngine;
 public class Cameramovement : MonoBehaviour
 {
     private Camera cameraComponent;
+    private ComfortMotionBlur comfortMotionBlur;
     private Vector3 initialPosition;
     private Quaternion initialRotation;
 
@@ -45,6 +46,12 @@ public class Cameramovement : MonoBehaviour
         public bool useArrowKeys = false;
 
         /// <summary>
+        /// When enabled, movement continues even if the simulation is paused.
+        /// Useful for review/world-building camera control while Time.timeScale is 0.
+        /// </summary>
+        public bool useUnscaledTime = false;
+
+        /// <summary>
         /// Set to true when free looking (on right mouse button).
         /// </summary>
         private bool looking = false;
@@ -63,6 +70,9 @@ public class Cameramovement : MonoBehaviour
     {
         // Get the camera component and set its target display
         cameraComponent = GetComponent<Camera>();
+        comfortMotionBlur = GetComponent<ComfortMotionBlur>();
+        if (comfortMotionBlur == null)
+            comfortMotionBlur = gameObject.AddComponent<ComfortMotionBlur>();
         if (cameraComponent != null)
         {
             cameraComponent.targetDisplay = targetDisplay;
@@ -80,47 +90,48 @@ public class Cameramovement : MonoBehaviour
     }
         void Update()
         {
+            float frameDeltaTime = useUnscaledTime ? Time.unscaledDeltaTime : Time.deltaTime;
             var fastMode = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
             var movementSpeed = fastMode ? this.fastMovementSpeed : this.movementSpeed;
 
             if (Input.GetKey(KeyCode.A) || (useArrowKeys && Input.GetKey(KeyCode.LeftArrow)))
             {
-                transform.position = transform.position + (-transform.right * movementSpeed * Time.deltaTime);
+                transform.position = transform.position + (-transform.right * movementSpeed * frameDeltaTime);
             }
 
             if (Input.GetKey(KeyCode.D) || (useArrowKeys && Input.GetKey(KeyCode.RightArrow)))
             {
-                transform.position = transform.position + (transform.right * movementSpeed * Time.deltaTime);
+                transform.position = transform.position + (transform.right * movementSpeed * frameDeltaTime);
             }
 
             if (Input.GetKey(KeyCode.W) || (useArrowKeys && Input.GetKey(KeyCode.UpArrow)))
             {
-                transform.position = transform.position + (transform.forward * movementSpeed * Time.deltaTime);
+                transform.position = transform.position + (transform.forward * movementSpeed * frameDeltaTime);
             }
 
             if (Input.GetKey(KeyCode.S) || (useArrowKeys && Input.GetKey(KeyCode.DownArrow)))
             {
-                transform.position = transform.position + (-transform.forward * movementSpeed * Time.deltaTime);
+                transform.position = transform.position + (-transform.forward * movementSpeed * frameDeltaTime);
             }
 
             if (Input.GetKey(KeyCode.Q))
             {
-                transform.position = transform.position + (-transform.up * movementSpeed * Time.deltaTime);
+                transform.position = transform.position + (-transform.up * movementSpeed * frameDeltaTime);
             }
 
             if (Input.GetKey(KeyCode.E))
             {
-                transform.position = transform.position + (transform.up * movementSpeed * Time.deltaTime);
+                transform.position = transform.position + (transform.up * movementSpeed * frameDeltaTime);
             }
 
             if (Input.GetKey(KeyCode.R) || (useArrowKeys && Input.GetKey(KeyCode.PageUp)))
             {
-                transform.position = transform.position + (Vector3.up * movementSpeed * Time.deltaTime);
+                transform.position = transform.position + (Vector3.up * movementSpeed * frameDeltaTime);
             }
 
             if (Input.GetKey(KeyCode.F) || (useArrowKeys && Input.GetKey(KeyCode.PageDown)))
             {
-                transform.position = transform.position + (-Vector3.up * movementSpeed * Time.deltaTime);
+                transform.position = transform.position + (-Vector3.up * movementSpeed * frameDeltaTime);
             }
 
             if (looking)
@@ -163,6 +174,8 @@ public class Cameramovement : MonoBehaviour
         public void StartLooking()
         {
             looking = true;
+            if (comfortMotionBlur != null)
+                comfortMotionBlur.TriggerTransitionBlur();
             Cursor.visible = false;
             Cursor.lockState = CursorLockMode.Locked;
         }

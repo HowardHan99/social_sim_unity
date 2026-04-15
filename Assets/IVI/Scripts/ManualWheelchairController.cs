@@ -215,6 +215,22 @@ namespace IVI
             Debug.Log("[PWD] AUTO mode");
         }
 
+        public void ApplyStartupControlMode(bool startManual)
+        {
+            startInManualMode = startManual;
+
+            if (!initialized)
+                return;
+
+            if (waitingForStart)
+                return;
+
+            if (startManual)
+                SetManualMode();
+            else
+                SetAutomaticMode();
+        }
+
         void OnGUI()
         {
             if (!initialized) return;

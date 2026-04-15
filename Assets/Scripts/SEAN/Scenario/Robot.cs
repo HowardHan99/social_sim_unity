@@ -30,6 +30,9 @@ namespace SEAN.Scenario
         public void Start()
         {
             GetOrAttachTrajectory();
+            AttachComfortBlur(camera_first);
+            AttachComfortBlur(camera_third);
+            AttachComfortBlur(camera_overhead);
             if (camera_first == null)
             {
                 throw new System.ArgumentException("A first person camera must be assigned to the robot " + name);
@@ -67,6 +70,15 @@ namespace SEAN.Scenario
         public override string ToString()
         {
             return gameObject.name;
+        }
+
+        private static void AttachComfortBlur(Camera camera)
+        {
+            if (camera == null)
+                return;
+
+            if (camera.GetComponent<ComfortMotionBlur>() == null)
+                camera.gameObject.AddComponent<ComfortMotionBlur>();
         }
     }
 }

@@ -193,20 +193,8 @@ namespace SEAN.Scenario.Agents
         {
             if (!isPwdPlayer)
                 return;
-
-            if (SessionReview.SessionOnboardingSettings.PlayerMode == SessionReview.OnboardingPlayerMode.Human)
-            {
-                pwdGender = SessionReview.SessionOnboardingSettings.SelectedPwdGender;
-                spawnAutonomousPwdFromOnboarding = false;
-                return;
-            }
-
-            isPwdPlayer = false;
-            bgPwdGender = SessionReview.SessionOnboardingSettings.SelectedPwdGender;
-            spawnAutonomousPwdFromOnboarding = true;
-
-            if (SEAN.instance != null)
-                numPWDSFAgentsInstantiated = SEAN.instance.numPwDSFAgents;
+            pwdGender = SessionReview.SessionOnboardingSettings.SelectedPwdGender;
+            spawnAutonomousPwdFromOnboarding = false;
         }
 
         private void SpawnPwdPlayer()
@@ -271,7 +259,7 @@ namespace SEAN.Scenario.Agents
             if (manualCtrl == null)
                 manualCtrl = avatarObject.AddComponent<IVI.ManualWheelchairController>();
             manualCtrl.enabled = true;
-            manualCtrl.startInManualMode = false;
+            manualCtrl.startInManualMode = SessionReview.SessionOnboardingSettings.PwdStartupControl == SessionReview.StartupControlMode.Manual;
 
             AttachCameraToHead(avatarObject);
             ActivatePwdPlayerView(avatarObject);
@@ -455,7 +443,7 @@ namespace SEAN.Scenario.Agents
         private void ActivatePwdPlayerView(GameObject avatar)
         {
             if (!SessionReview.SessionOnboardingSettings.HasCompletedOnboarding ||
-                SessionReview.SessionOnboardingSettings.PlayerMode != SessionReview.OnboardingPlayerMode.Human)
+                SessionReview.SessionOnboardingSettings.PwdStartupControl != SessionReview.StartupControlMode.Manual)
                 return;
 
             Camera pwdCamera = null;

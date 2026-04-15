@@ -27,6 +27,14 @@ public class RobotSignalLightController : MonoBehaviour
     [SerializeField] private Light[] leftLights;
     [SerializeField] private Light[] rightLights;
 
+    [Header("Optional Named Child Discovery")]
+    [SerializeField] private Transform[] leftDiscoveryRoots;
+    [SerializeField] private Transform[] rightDiscoveryRoots;
+    [SerializeField] private string[] supportedLightObjectNames = { "light", "light-front", "light-back" };
+    [SerializeField] private string[] leftBranchObjectNames = { "left", "Left" };
+    [SerializeField] private string[] rightBranchObjectNames = { "right", "Right" };
+    [SerializeField] private bool includeAllChildRenderersUnderMatchedObjects = true;
+
     [Header("Legacy Emission Renderers")]
     [SerializeField] private Renderer[] leftSignalRenderers;
     [SerializeField] private Renderer[] rightSignalRenderers;
@@ -55,10 +63,15 @@ public class RobotSignalLightController : MonoBehaviour
 
     private Coroutine activeFlashRoutine;
     private MaterialPropertyBlock propertyBlock;
+    private Light[] discoveredLeftLights;
+    private Light[] discoveredRightLights;
+    private Renderer[] discoveredLeftRenderers;
+    private Renderer[] discoveredRightRenderers;
 
     private void Awake()
     {
         propertyBlock = new MaterialPropertyBlock();
+        RefreshDiscoveredTargets();
 
         if (autoEnableEmissionKeyword)
         {
@@ -66,6 +79,11 @@ public class RobotSignalLightController : MonoBehaviour
         }
 
         SetAllSignals(false);
+    }
+
+    private void OnValidate()
+    {
+        RefreshDiscoveredTargets();
     }
 
     public void FlashLeft()
@@ -156,14 +174,18 @@ public class RobotSignalLightController : MonoBehaviour
     private void SetLeftSignals(bool isOn)
     {
         SetLights(leftLights, isOn);
+        SetLights(discoveredLeftLights, isOn);
         SetLegacyRenderersEmission(leftSignalRenderers, isOn);
+        SetLegacyRenderersEmission(discoveredLeftRenderers, isOn);
         SetFlexibleTargets(leftEmissionTargets, isOn);
     }
 
     private void SetRightSignals(bool isOn)
     {
         SetLights(rightLights, isOn);
+        SetLights(discoveredRightLights, isOn);
         SetLegacyRenderersEmission(rightSignalRenderers, isOn);
+        SetLegacyRenderersEmission(discoveredRightRenderers, isOn);
         SetFlexibleTargets(rightEmissionTargets, isOn);
     }
 
@@ -268,8 +290,171 @@ public class RobotSignalLightController : MonoBehaviour
     {
         ConfigureLegacyRenderers(leftSignalRenderers);
         ConfigureLegacyRenderers(rightSignalRenderers);
+        ConfigureLegacyRenderers(discoveredLeftRenderers);
+        ConfigureLegacyRenderers(discoveredRightRenderers);
         ConfigureFlexibleRenderers(leftEmissionTargets);
         ConfigureFlexibleRenderers(rightEmissionTargets);
+    }
+
+    private void RefreshDiscoveredTargets()
+    {
+        Transform[] effectiveLeftRoots = GetEffectiveRoots(leftDiscoveryRoots);
+        Transform[] effectiveRightRoots = GetEffectiveRoots(rightDiscoveryRoots);
+
+        discoveredLeftLights = CollectComponentsForSide<Light>(effectiveLeftRoots, leftBranchObjectNames);
+        discoveredRightLights = CollectComponentsForSide<Light>(effectiveRightRoots, rightBranchObjectNames);
+        discoveredLeftRenderers = CollectComponentsForSide<Renderer>(effectiveLeftRoots, leftBranchObjectNames);
+        discoveredRightRenderers = CollectComponentsForSide<Renderer>(effectiveRightRoots, rightBranchObjectNames);
+    }
+
+    private Transform[] GetEffectiveRoots(Transform[] configuredRoots)
+    {
+        if (configuredRoots != null && configuredRoots.Length > 0)
+        {
+            return configuredRoots;
+        }
+
+        return new[] { transform };
+    }
+
+    private T[] CollectComponentsForSide<T>(Transform[] roots, string[] sideBranchNames) where T : Component
+    {
+        if (roots == null || roots.Length == 0 || supportedLightObjectNames == null || supportedLightObjectNames.Length == 0)
+        {
+            return Array.Empty<T>();
+        }
+
+        var results = new System.Collections.Generic.List<T>();
+
+        for (int i = 0; i < roots.Length; i++)
+        {
+            Transform root = roots[i];
+            if (root == null)
+            {
+                continue;
+            }
+
+            CollectComponentsRecursive(root, sideBranchNames, results);
+        }
+
+        return results.ToArray();
+    }
+
+    private void CollectComponentsRecursive<T>(Transform current, string[] sideBranchNames, System.Collections.Generic.List<T> results) where T : Component
+    {
+        if (current == null)
+        {
+            return;
+        }
+
+        if (IsSupportedLightObjectName(current.name))
+        {
+            CollectSideComponentsFromMatchedLightObject(current, sideBranchNames, results);
+        }
+
+        for (int i = 0; i < current.childCount; i++)
+        {
+            CollectComponentsRecursive(current.GetChild(i), sideBranchNames, results);
+        }
+    }
+
+    private void CollectSideComponentsFromMatchedLightObject<T>(Transform lightObjectRoot, string[] sideBranchNames, System.Collections.Generic.List<T> results) where T : Component
+    {
+        if (lightObjectRoot == null)
+        {
+            return;
+        }
+
+        bool foundSideBranch = false;
+
+        for (int i = 0; i < lightObjectRoot.childCount; i++)
+        {
+            Transform child = lightObjectRoot.GetChild(i);
+            if (!IsSideBranchObjectName(child.name, sideBranchNames))
+            {
+                continue;
+            }
+
+            foundSideBranch = true;
+            AddComponentsFromTransform(child, results);
+        }
+
+        if (!foundSideBranch)
+        {
+            AddComponentsFromTransform(lightObjectRoot, results);
+        }
+    }
+
+    private void AddComponentsFromTransform<T>(Transform source, System.Collections.Generic.List<T> results) where T : Component
+    {
+        if (source == null)
+        {
+            return;
+        }
+
+        T[] components = includeAllChildRenderersUnderMatchedObjects
+            ? source.GetComponentsInChildren<T>(true)
+            : source.GetComponents<T>();
+
+        for (int i = 0; i < components.Length; i++)
+        {
+            T component = components[i];
+            if (component != null && !results.Contains(component))
+            {
+                results.Add(component);
+            }
+        }
+    }
+
+    private bool IsSupportedLightObjectName(string objectName)
+    {
+        if (string.IsNullOrWhiteSpace(objectName) || supportedLightObjectNames == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < supportedLightObjectNames.Length; i++)
+        {
+            string supportedName = supportedLightObjectNames[i];
+            if (string.IsNullOrWhiteSpace(supportedName))
+            {
+                continue;
+            }
+
+            if (string.Equals(objectName, supportedName, StringComparison.OrdinalIgnoreCase) ||
+                objectName.StartsWith(supportedName + " ", StringComparison.OrdinalIgnoreCase) ||
+                objectName.StartsWith(supportedName + "(", StringComparison.OrdinalIgnoreCase) ||
+                objectName.IndexOf(supportedName, StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool IsSideBranchObjectName(string objectName, string[] supportedSideNames)
+    {
+        if (string.IsNullOrWhiteSpace(objectName) || supportedSideNames == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < supportedSideNames.Length; i++)
+        {
+            string supportedName = supportedSideNames[i];
+            if (string.IsNullOrWhiteSpace(supportedName))
+            {
+                continue;
+            }
+
+            if (string.Equals(objectName, supportedName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void ConfigureLegacyRenderers(Renderer[] renderers)
