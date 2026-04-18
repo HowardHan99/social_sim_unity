@@ -63,6 +63,8 @@ namespace UnityTemplateProjects
         CameraState m_InitialCameraState = new CameraState(); // Store initial state before edit mode
         
         private bool m_WasEditorActive = false; // Track editor state changes
+        private Vector3 m_LastMousePosition;
+        private bool m_HasLastMousePosition;
 
         [Header("Movement Settings")]
         [Tooltip("Pan speed when dragging with middle mouse button.")]
@@ -70,6 +72,9 @@ namespace UnityTemplateProjects
         
         [Tooltip("Zoom speed when scrolling mouse wheel.")]
         public float zoomSpeed = 2.0f;
+
+        [Tooltip("Movement speed for keyboard navigation in free camera mode.")]
+        public float moveSpeed = 8.0f;
         
         [Tooltip("Exponential boost factor on translation, controllable by mouse wheel.")]
         public float boost = 3.5f;
@@ -89,6 +94,19 @@ namespace UnityTemplateProjects
 
         [Tooltip("Whether or not to invert our Y axis for mouse input to rotation.")]
         public bool invertY = false;
+
+        [Header("Top-Down View")]
+        [Tooltip("Key to snap the editor camera back to top-down map view.")]
+        public KeyCode topDownResetKey = KeyCode.F4;
+
+        [Tooltip("Pitch angle used for the top-down map view.")]
+        public float topDownPitch = 90f;
+
+        [Tooltip("Default height above the ground plane when snapping back to top-down.")]
+        public float topDownHeight = 35f;
+
+        [Tooltip("Minimum orthographic size used in top-down map view.")]
+        public float minTopDownSize = 8f;
 
 #if ENABLE_INPUT_SYSTEM
         InputAction movementAction;
@@ -134,9 +152,22 @@ namespace UnityTemplateProjects
 
         void OnEnable()
         {
+            if (mainCamera == null)
+                mainCamera = GetComponent<Camera>();
+
+            SyncToCurrentTransform();
+            m_InitialCameraState.SetFromTransform(transform); // Store initial state
+            m_LastMousePosition = Input.mousePosition;
+            m_HasLastMousePosition = true;
+        }
+
+        public void SyncToCurrentTransform()
+        {
+            if (mainCamera == null)
+                mainCamera = GetComponent<Camera>();
+
             m_TargetCameraState.SetFromTransform(transform);
             m_InterpolatingCameraState.SetFromTransform(transform);
-            m_InitialCameraState.SetFromTransform(transform); // Store initial state
         }
 
         Vector3 GetInputTranslationDirection()
@@ -178,16 +209,6 @@ namespace UnityTemplateProjects
         
         void Update()
         {
-            // Exit Sample  
-
-            if (IsEscapePressed())
-            {
-                Application.Quit();
-				#if UNITY_EDITOR
-				UnityEditor.EditorApplication.isPlaying = false; 
-				#endif
-            }
-
             // Check if editor is active - camera only moveable when editor is active
             if (RuntimeEditorManager.Instance != null)
             {
@@ -197,6 +218,8 @@ namespace UnityTemplateProjects
                 if (isEditorActive && !m_WasEditorActive)
                 {
                     m_InitialCameraState.SetFromTransform(transform);
+                    if (!IsTopDownView())
+                        SnapToTopDownView();
                 }
                 
                 // Detect when editor becomes inactive - restore initial state
@@ -224,14 +247,22 @@ namespace UnityTemplateProjects
                 
                 if (!isEditorActive)
                 {
+                    Cursor.visible = true;
+                    Cursor.lockState = CursorLockMode.None;
                     return; // Exit early if editor is not active
                 }
+            }
+
+            if (Input.GetKeyDown(topDownResetKey))
+            {
+                SnapToTopDownView();
             }
 
             // Hide and lock cursor when right mouse button or middle mouse button pressed
             if (IsRightMouseButtonDown() || IsMiddleMouseButtonPressed())
             {
-                Cursor.lockState = CursorLockMode.Locked;
+                Cursor.visible = true;
+                Cursor.lockState = CursorLockMode.None;
             }
 
             // Unlock and show cursor when both buttons released
@@ -244,6 +275,8 @@ namespace UnityTemplateProjects
             // Rotation with right mouse button
             if (IsCameraRotationAllowed())
             {
+                EnsurePerspectiveForFreeLook();
+
                 var mouseMovement = GetInputLookRotation() * k_MouseSensitivityMultiplier * mouseSensitivity;
                 if (invertY)
                     mouseMovement.y = -mouseMovement.y;
@@ -253,6 +286,13 @@ namespace UnityTemplateProjects
                 m_TargetCameraState.yaw += mouseMovement.x * mouseSensitivityFactor;
                 m_TargetCameraState.pitch += mouseMovement.y * mouseSensitivityFactor;
             }
+
+            Vector3 translation = GetInputTranslationDirection();
+            if (translation.sqrMagnitude > 0.0001f)
+            {
+                float boostMultiplier = IsBoostPressed() ? boost : 1f;
+                m_TargetCameraState.Translate(translation * moveSpeed * boostMultiplier * Time.unscaledDeltaTime);
+            }
             
             // Panning with middle mouse button
             if (IsMiddleMouseButtonPressed())
@@ -260,23 +300,30 @@ namespace UnityTemplateProjects
                 Vector2 mouseDelta = GetInputLookRotation();
                 
                 // Convert mouse delta to world space panning
-                Vector3 translation = Vector3.zero;
-                translation -= transform.right * mouseDelta.x * panSpeed;
-                translation += transform.up * mouseDelta.y * panSpeed;
+                Vector3 panTranslation = Vector3.zero;
+                panTranslation -= transform.right * mouseDelta.x * panSpeed;
+                panTranslation += transform.up * mouseDelta.y * panSpeed;
                 
-                m_TargetCameraState.x += translation.x;
-                m_TargetCameraState.y += translation.y;
-                m_TargetCameraState.z += translation.z;
+                m_TargetCameraState.x += panTranslation.x;
+                m_TargetCameraState.y += panTranslation.y;
+                m_TargetCameraState.z += panTranslation.z;
             }
 
             // Zoom with mouse scroll wheel
             float scrollDelta = GetScrollDelta();
             if (Mathf.Abs(scrollDelta) > 0.01f)
             {
-                Vector3 zoomTranslation = transform.forward * scrollDelta * zoomSpeed;
-                m_TargetCameraState.x += zoomTranslation.x;
-                m_TargetCameraState.y += zoomTranslation.y;
-                m_TargetCameraState.z += zoomTranslation.z;
+                if (mainCamera != null && mainCamera.orthographic)
+                {
+                    mainCamera.orthographicSize = Mathf.Max(minTopDownSize, mainCamera.orthographicSize - scrollDelta * zoomSpeed);
+                }
+                else
+                {
+                    Vector3 zoomTranslation = transform.forward * scrollDelta * zoomSpeed;
+                    m_TargetCameraState.x += zoomTranslation.x;
+                    m_TargetCameraState.y += zoomTranslation.y;
+                    m_TargetCameraState.z += zoomTranslation.z;
+                }
             }
 
             // Framerate-independent interpolation
@@ -287,6 +334,87 @@ namespace UnityTemplateProjects
             m_InterpolatingCameraState.LerpTowards(m_TargetCameraState, positionLerpPct, rotationLerpPct);
 
             m_InterpolatingCameraState.UpdateTransform(transform);
+        }
+
+        public bool IsTopDownView()
+        {
+            return mainCamera != null && mainCamera.orthographic;
+        }
+
+        public void SnapToTopDownView()
+        {
+            if (mainCamera == null)
+                mainCamera = GetComponent<Camera>();
+
+            Vector3 focusPoint = TryGetGroundFocusPoint(out Vector3 groundPoint)
+                ? groundPoint
+                : transform.position + Vector3.forward * 5f;
+
+            float size = mainCamera != null && mainCamera.orthographic
+                ? Mathf.Max(mainCamera.orthographicSize, minTopDownSize)
+                : minTopDownSize;
+
+            if (mainCamera != null)
+            {
+                mainCamera.orthographic = true;
+                mainCamera.orthographicSize = size;
+            }
+
+            m_TargetCameraState.yaw = 0f;
+            m_TargetCameraState.pitch = topDownPitch;
+            m_TargetCameraState.roll = 0f;
+            m_TargetCameraState.x = focusPoint.x;
+            m_TargetCameraState.y = Mathf.Max(focusPoint.y + topDownHeight, topDownHeight);
+            m_TargetCameraState.z = focusPoint.z;
+
+            m_InterpolatingCameraState.yaw = m_TargetCameraState.yaw;
+            m_InterpolatingCameraState.pitch = m_TargetCameraState.pitch;
+            m_InterpolatingCameraState.roll = m_TargetCameraState.roll;
+            m_InterpolatingCameraState.x = m_TargetCameraState.x;
+            m_InterpolatingCameraState.y = m_TargetCameraState.y;
+            m_InterpolatingCameraState.z = m_TargetCameraState.z;
+            m_InterpolatingCameraState.UpdateTransform(transform);
+        }
+
+        private void EnsurePerspectiveForFreeLook()
+        {
+            if (mainCamera == null || !mainCamera.orthographic)
+                return;
+
+            Vector3 focusPoint = TryGetGroundFocusPoint(out Vector3 groundPoint)
+                ? groundPoint
+                : transform.position + Vector3.down * Mathf.Max(transform.position.y, 1f);
+
+            float distance = Mathf.Max(mainCamera.orthographicSize * 2.5f, 12f);
+            Quaternion freeLookRotation = Quaternion.Euler(55f, m_TargetCameraState.yaw, 0f);
+            Vector3 cameraPosition = focusPoint - freeLookRotation * Vector3.forward * distance;
+
+            mainCamera.orthographic = false;
+            m_TargetCameraState.SetFromTransform(transform);
+            m_TargetCameraState.pitch = freeLookRotation.eulerAngles.x;
+            m_TargetCameraState.yaw = freeLookRotation.eulerAngles.y;
+            m_TargetCameraState.roll = 0f;
+            m_TargetCameraState.x = cameraPosition.x;
+            m_TargetCameraState.y = cameraPosition.y;
+            m_TargetCameraState.z = cameraPosition.z;
+
+            m_InterpolatingCameraState.SetFromTransform(transform);
+        }
+
+        private bool TryGetGroundFocusPoint(out Vector3 groundPoint)
+        {
+            groundPoint = Vector3.zero;
+
+            if (mainCamera == null)
+                return false;
+
+            Ray ray = mainCamera.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
+            Plane groundPlane = new Plane(Vector3.up, Vector3.zero);
+            if (!groundPlane.Raycast(ray, out float enter))
+                return false;
+
+            groundPoint = ray.GetPoint(enter);
+            return true;
         }
 
         float GetBoostFactor()
@@ -307,7 +435,17 @@ namespace UnityTemplateProjects
             delta *= 0.1f; // Account for sensitivity setting on old Mouse X and Y axes.
             return delta;
 #else
-            return new Vector2(Input.GetAxis("Mouse X"), Input.GetAxis("Mouse Y"));
+            Vector3 currentMousePosition = Input.mousePosition;
+            if (!m_HasLastMousePosition)
+            {
+                m_LastMousePosition = currentMousePosition;
+                m_HasLastMousePosition = true;
+                return Vector2.zero;
+            }
+
+            Vector3 delta = currentMousePosition - m_LastMousePosition;
+            m_LastMousePosition = currentMousePosition;
+            return new Vector2(delta.x, delta.y);
 #endif
         }
 
@@ -321,15 +459,6 @@ namespace UnityTemplateProjects
             return Input.GetKey(KeyCode.LeftShift);
 #endif
 
-        }
-
-        bool IsEscapePressed()
-        {
-#if ENABLE_INPUT_SYSTEM
-            return Keyboard.current != null ? Keyboard.current.escapeKey.isPressed : false; 
-#else
-            return Input.GetKey(KeyCode.Escape);
-#endif
         }
 
         bool IsCameraRotationAllowed()

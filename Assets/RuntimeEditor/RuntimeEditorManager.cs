@@ -14,6 +14,10 @@ public class SpawnableObject
 
 public class RuntimeEditorManager : MonoBehaviour
 {
+    private const string DefaultSphereId = "0";
+    private const string DefaultCylinderId = "1";
+    private const string DefaultCapsuleId = "2";
+
     // Singleton Instance
     public static RuntimeEditorManager Instance { get; private set; }
 
@@ -63,6 +67,9 @@ public class RuntimeEditorManager : MonoBehaviour
     private Camera mainCamera;
     private List<RuntimeEditor> allEditors = new List<RuntimeEditor>();
 
+    public GameObject CurrentSelectedObject => currentSelectedObject;
+    public Camera ActiveRaycastCamera => mainCamera;
+
     // Event that other systems can subscribe to
     public delegate void EditorModeChanged(bool isActive);
     public event EditorModeChanged OnEditorModeChanged;
@@ -111,6 +118,8 @@ public class RuntimeEditorManager : MonoBehaviour
         
         if (mainCamera != null)
         {
+            EnsureCameraCullingCoversSelectableLayers(mainCamera);
+            ExcludeGizmoLayerFromMainCamera();
             // Debug.Log($"[RuntimeEditor] Camera Details:");
             // Debug.Log($"  - Name: {mainCamera.name}, GameObject: {mainCamera.gameObject.name}");
             // Debug.Log($"  - Position: {mainCamera.transform.position}, Rotation: {mainCamera.transform.rotation.eulerAngles}");
@@ -123,7 +132,7 @@ public class RuntimeEditorManager : MonoBehaviour
             Debug.LogError("[RuntimeEditor] No camera found! Raycasting will not work.");
         }
 
-        SetupGizmoCamera();
+        RefreshGizmoCamera();
         SetupSpawnButtons();
 
         // Configure layer mask
@@ -143,12 +152,15 @@ public class RuntimeEditorManager : MonoBehaviour
             selectableLayers &= ~(1 << ignoreRaycastLayer);
         }
 
-        // Initially disable editor mode
-        SetEditorMode(false);
+        // Initialize editor state without clobbering a runtime activation
+        if (!isEditorActive)
+            SetEditorMode(false);
     }
 
     void Update()
     {
+        SyncGizmoCamera();
+
         // Toggle editor mode
         if (Input.GetKeyDown(toggleKey))
         {
@@ -182,6 +194,28 @@ public class RuntimeEditorManager : MonoBehaviour
 
         // Notify other systems
         OnEditorModeChanged?.Invoke(isEditorActive);
+    }
+
+    public void SetEditorCamera(Camera camera, MonoBehaviour controller = null)
+    {
+        if (camera == null)
+        {
+            Debug.LogWarning("[RuntimeEditor] Cannot assign a null editor camera.");
+            return;
+        }
+
+        raycastCamera = camera;
+        mainCamera = camera;
+        EnsureCameraCullingCoversSelectableLayers(mainCamera);
+        ExcludeGizmoLayerFromMainCamera();
+
+        if (controller != null)
+            cameraController = controller;
+
+        RefreshGizmoCamera();
+
+        if (currentEditor != null)
+            currentEditor.SetRaycastCamera(mainCamera);
     }
 
     void EnterEditorMode()
@@ -250,6 +284,15 @@ public class RuntimeEditorManager : MonoBehaviour
             editableObjects.AddRange(taggedObjects);
         }
 
+        foreach (var obstacle in FindObjectsOfType<SEAN.Scenario.Obstacles.TrackedObstacle>())
+        {
+            if (obstacle != null && !editableObjects.Contains(obstacle.gameObject))
+            {
+                editableObjects.Add(obstacle.gameObject);
+                EnsureObjectLayerIsSelectable(obstacle.gameObject);
+            }
+        }
+
         if (editableObjects.Count == 0)
         {
             // Debug.LogWarning("No editable objects found! Assign objects manually or set a tag.");
@@ -282,6 +325,7 @@ public class RuntimeEditorManager : MonoBehaviour
             if (Physics.Raycast(ray, out hit, maxRaycastDistance, selectableLayers))
             {
                 GameObject clickedObject = hit.collider.gameObject;
+                GameObject editableObject = ResolveEditableObject(clickedObject);
                 // Debug.Log($"[Raycast HIT] Object: {clickedObject.name}, Position: {hit.point}, Distance: {hit.distance:F2}m, Layer: {LayerMask.LayerToName(clickedObject.layer)}");
 
                 // To ignore if pointer is over UI
@@ -292,9 +336,9 @@ public class RuntimeEditorManager : MonoBehaviour
                 }
 
                 // Check if object is editable
-                if (IsObjectEditable(clickedObject))
+                if (editableObject != null)
                 {
-                    SelectObject(clickedObject);
+                    SelectObject(editableObject);
                 }
                 else
                 {
@@ -369,25 +413,35 @@ public class RuntimeEditorManager : MonoBehaviour
 
     bool IsObjectEditable(GameObject obj)
     {
+        return ResolveEditableObject(obj) != null;
+    }
+
+    GameObject ResolveEditableObject(GameObject obj)
+    {
+        if (obj == null)
+            return null;
+
         // If no restrictions, allow all objects
         if (editableObjects.Count == 0 && string.IsNullOrEmpty(editableTag))
         {
-            return true;
+            return obj;
         }
 
-        // Check if in manual list
-        if (editableObjects.Contains(obj))
+        Transform current = obj.transform;
+        while (current != null)
         {
-            return true;
+            GameObject candidate = current.gameObject;
+
+            if (editableObjects.Contains(candidate))
+                return candidate;
+
+            if (!string.IsNullOrEmpty(editableTag) && candidate.CompareTag(editableTag))
+                return candidate;
+
+            current = current.parent;
         }
 
-        // Check if has the correct tag
-        if (!string.IsNullOrEmpty(editableTag) && obj.CompareTag(editableTag))
-        {
-            return true;
-        }
-
-        return false;
+        return null;
     }
 
     public void SelectObject(GameObject obj)
@@ -595,6 +649,18 @@ public class RuntimeEditorManager : MonoBehaviour
         gizmoCamera.cullingMask = 1 << gizmoLayer;
         gizmoCamera.clearFlags = CameraClearFlags.Depth;
         gizmoCamera.depth = mainCamera.depth + 1;
+        ExcludeGizmoLayerFromMainCamera();
+    }
+
+    public void RefreshGizmoCamera()
+    {
+        if (gizmoCamera != null)
+        {
+            Destroy(gizmoCamera.gameObject);
+            gizmoCamera = null;
+        }
+
+        SetupGizmoCamera();
     }
 
     void SetupSpawnButtons()
@@ -645,7 +711,7 @@ public class RuntimeEditorManager : MonoBehaviour
         SpawnableObject spawnableObject = spawnableObjects.Find(s => s.id == id);
         if (spawnableObject == null || spawnableObject.prefab == null)
         {
-            Debug.LogWarning($"Spawnable object with id '{id}' not found!");
+            SpawnDefaultPrimitive(id);
             return;
         }
 
@@ -654,9 +720,53 @@ public class RuntimeEditorManager : MonoBehaviour
         GameObject spawnedObject = Instantiate(spawnableObject.prefab, spawnPosition, Quaternion.identity);
         Debug.Log($"Spawned object: {spawnedObject.name} at {spawnPosition}");
 
-        //SelectObject(spawnedObject);
         RegisterEditableObject(spawnedObject);
+        SelectObject(spawnedObject);
 
+    }
+
+    private void SpawnDefaultPrimitive(string id)
+    {
+        PrimitiveType primitiveType;
+        string objectName;
+        string obstacleType;
+
+        switch (id)
+        {
+            case DefaultSphereId:
+                primitiveType = PrimitiveType.Sphere;
+                objectName = "Sphere";
+                obstacleType = "sphere";
+                break;
+            case DefaultCylinderId:
+                primitiveType = PrimitiveType.Cylinder;
+                objectName = "Cylinder";
+                obstacleType = "cylinder";
+                break;
+            case DefaultCapsuleId:
+                primitiveType = PrimitiveType.Capsule;
+                objectName = "Capsule";
+                obstacleType = "capsule";
+                break;
+            default:
+                Debug.LogWarning($"Spawnable object with id '{id}' not found!");
+                return;
+        }
+
+        Vector3 spawnPosition = GetSpawnPosition();
+        GameObject spawnedObject = GameObject.CreatePrimitive(primitiveType);
+        spawnedObject.name = objectName;
+        spawnedObject.transform.position = spawnPosition;
+
+        if (spawnedObject.GetComponent<SEAN.Scenario.Obstacles.TrackedObstacle>() == null)
+        {
+            var obstacle = spawnedObject.AddComponent<SEAN.Scenario.Obstacles.TrackedObstacle>();
+            obstacle.type = obstacleType;
+        }
+
+        RegisterEditableObject(spawnedObject);
+        SelectObject(spawnedObject);
+        Debug.Log($"Spawned default {objectName} at {spawnPosition}");
     }
 
     Vector3 GetSpawnPosition()
@@ -683,7 +793,9 @@ public class RuntimeEditorManager : MonoBehaviour
             editableObjects.Add(obj);
         }
 
-        obj.layer = LayerMask.NameToLayer("Raycast");
+        EnsureObjectLayerIsSelectable(obj);
+        if (mainCamera != null)
+            EnsureCameraCanSeeLayer(mainCamera, obj.layer);
          
         // // Add RuntimeEditor component if not exists
         // RuntimeEditor editor = obj.GetComponent<RuntimeEditor>();
@@ -719,5 +831,62 @@ public class RuntimeEditorManager : MonoBehaviour
             Debug.Log("[Raycast] Pointer is over UI. Ignoring click.");
         }
         return hitUI;
+    }
+
+    void EnsureObjectLayerIsSelectable(GameObject obj)
+    {
+        if (obj == null)
+            return;
+
+        if (obj.layer >= 0 && obj.layer < 32)
+            selectableLayers |= 1 << obj.layer;
+    }
+
+    void EnsureCameraCullingCoversSelectableLayers(Camera camera)
+    {
+        if (camera == null)
+            return;
+
+        camera.cullingMask |= selectableLayers;
+
+        int raycastLayer = LayerMask.NameToLayer("Raycast");
+        if (raycastLayer != -1)
+            EnsureCameraCanSeeLayer(camera, raycastLayer);
+    }
+
+    void EnsureCameraCanSeeLayer(Camera camera, int layer)
+    {
+        if (camera == null || layer < 0 || layer >= 32)
+            return;
+
+        camera.cullingMask |= 1 << layer;
+    }
+
+    void ExcludeGizmoLayerFromMainCamera()
+    {
+        if (mainCamera == null)
+            return;
+
+        int gizmoLayer = LayerMask.NameToLayer(gizmoLayerName);
+        if (gizmoLayer == -1)
+            return;
+
+        mainCamera.cullingMask &= ~(1 << gizmoLayer);
+    }
+
+    void SyncGizmoCamera()
+    {
+        if (mainCamera == null || gizmoCamera == null)
+            return;
+
+        int gizmoLayer = LayerMask.NameToLayer(gizmoLayerName);
+        if (gizmoLayer == -1)
+            return;
+
+        gizmoCamera.CopyFrom(mainCamera);
+        gizmoCamera.cullingMask = 1 << gizmoLayer;
+        gizmoCamera.clearFlags = CameraClearFlags.Depth;
+        gizmoCamera.depth = mainCamera.depth + 1;
+        ExcludeGizmoLayerFromMainCamera();
     }
 }

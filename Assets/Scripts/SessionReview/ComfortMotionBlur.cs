@@ -6,19 +6,21 @@ public class ComfortMotionBlur : MonoBehaviour
 {
     [Header("Comfort Blur")]
     [SerializeField] private Shader blurShader;
-    [SerializeField] [Range(0f, 1f)] private float maxBlurStrength = 0.55f;
+    [SerializeField] [Range(0f, 1f)] private float maxBlurStrength = 0.85f;
     [Tooltip("Pixel radius of the blur kernel at maximum strength. 8 = subtle, 20 = strong.")]
-    [SerializeField] [Min(1f)] private float blurRadiusPixels = 8f;
+    [SerializeField] [Min(1f)] private float blurRadiusPixels = 15f;
     [Tooltip("Rotation speed (°/s) that produces maximum blur. Lower = kicks in sooner.")]
     [SerializeField] private float rotationForMaxBlurDegreesPerSecond = 220f;
     [SerializeField] private float blurRiseSpeed = 10f;
-    [SerializeField] private float blurFallSpeed = 8f;
+    [SerializeField] private float blurFallSpeed = 18f;
     [SerializeField] private float transitionBoostStrength = 0.55f;
-    [SerializeField] private float transitionBoostDuration = 0.22f;
+    [SerializeField] private float transitionBoostDuration = 0.15f;
 
     [Header("Angular Speed Smoothing")]
-    [Tooltip("Low-pass filter time constant (seconds). Keep very low (0.02-0.04) to avoid lag during rotation.")]
-    [SerializeField] private float angularSpeedSmoothTime = 0.03f;
+    [Tooltip("Low-pass filter time constant (seconds). "
+           + "For live rotation use 0.02-0.04 (fast response). "
+           + "For session-review playback at ~10 Hz use 0.08-0.12 to absorb per-snapshot jumps and prevent pulsing blur.")]
+    [SerializeField] private float angularSpeedSmoothTime = 0.10f;
 
     [Header("Comfort Vignette")]
     [Tooltip("How dark the peripheral vignette gets at peak blur (0 = off). "

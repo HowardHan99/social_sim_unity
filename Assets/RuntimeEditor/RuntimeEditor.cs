@@ -201,7 +201,7 @@ public class RuntimeEditor : MonoBehaviour
 
     void UpdateGizmoPositions()
     {
-        Vector3 pos = transform.position;
+        Vector3 pos = GetGizmoCenter();
         // // push gizmo slightly in front of the object
         // Vector3 camDir = (gizmoContainer.transform.position - mainCamera.transform.position).normalized;
         // gizmoContainer.transform.position += camDir * 0.02f;
@@ -337,7 +337,7 @@ public class RuntimeEditor : MonoBehaviour
 
     void CheckTranslateHandles(Ray ray)
     {
-        Vector3 gizmoCenter = transform.position;
+        Vector3 gizmoCenter = GetGizmoCenter();
 
         // Check X-axis handle (Red)
         if (IsHandleClicked(ray, gizmoCenter + Vector3.right * gizmoSize))
@@ -366,7 +366,7 @@ public class RuntimeEditor : MonoBehaviour
 
     void CheckRotateHandles(Ray ray)
     {
-        Vector3 center = transform.position;
+        Vector3 center = GetGizmoCenter();
 
         // Check X-axis rotation
         if (IsRotationHandleClicked(ray, center, Vector3.right))
@@ -413,8 +413,9 @@ public class RuntimeEditor : MonoBehaviour
         {
             Vector3 hitPoint = ray.GetPoint(enter);
             Vector3 newPos = hitPoint - dragOffset;
+            Vector3 gizmoCenter = GetGizmoCenter();
 
-            Vector3 axisLine = Vector3.Project(newPos - transform.position, currentAxis);
+            Vector3 axisLine = Vector3.Project(newPos - gizmoCenter, currentAxis);
             transform.position = transform.position + axisLine;
         }
     }
@@ -425,7 +426,8 @@ public class RuntimeEditor : MonoBehaviour
         if (dragPlane.Raycast(ray, out enter))
         {
             Vector3 hitPoint = ray.GetPoint(enter);
-            Vector3 direction = (hitPoint - transform.position).normalized;
+            Vector3 gizmoCenter = GetGizmoCenter();
+            Vector3 direction = (hitPoint - gizmoCenter).normalized;
 
             float angle = 0f;
 
@@ -465,14 +467,15 @@ public class RuntimeEditor : MonoBehaviour
     {
         isDragging = true;
         currentAxis = axis;
+        Vector3 gizmoCenter = GetGizmoCenter();
 
-        dragPlane = new Plane(mainCamera.transform.forward, transform.position);
+        dragPlane = new Plane(mainCamera.transform.forward, gizmoCenter);
 
         float enter;
         if (dragPlane.Raycast(ray, out enter))
         {
             Vector3 hitPoint = ray.GetPoint(enter);
-            dragOffset = hitPoint - transform.position;
+            dragOffset = hitPoint - gizmoCenter;
         }
     }
 
@@ -480,14 +483,15 @@ public class RuntimeEditor : MonoBehaviour
     {
         isDragging = true;
         currentAxis = axis;
+        Vector3 gizmoCenter = GetGizmoCenter();
 
-        dragPlane = new Plane(axis, transform.position);
+        dragPlane = new Plane(axis, gizmoCenter);
 
         float enter;
         if (dragPlane.Raycast(ray, out enter))
         {
             Vector3 hitPoint = ray.GetPoint(enter);
-            Vector3 direction = (hitPoint - transform.position).normalized;
+            Vector3 direction = (hitPoint - gizmoCenter).normalized;
 
             if (axis == Vector3.right)
             {
@@ -502,6 +506,57 @@ public class RuntimeEditor : MonoBehaviour
                 lastAngle = Mathf.Atan2(direction.y, direction.x) * Mathf.Rad2Deg;
             }
         }
+    }
+
+    Vector3 GetGizmoCenter()
+    {
+        Renderer[] renderers = GetComponentsInChildren<Renderer>();
+        bool hasBounds = false;
+        Bounds combined = default;
+
+        foreach (Renderer renderer in renderers)
+        {
+            if (renderer == null || !renderer.enabled)
+                continue;
+
+            if (gizmoContainer != null && renderer.transform.IsChildOf(gizmoContainer.transform))
+                continue;
+
+            if (!hasBounds)
+            {
+                combined = renderer.bounds;
+                hasBounds = true;
+            }
+            else
+            {
+                combined.Encapsulate(renderer.bounds);
+            }
+        }
+
+        if (hasBounds)
+            return combined.center;
+
+        Collider[] colliders = GetComponentsInChildren<Collider>();
+        foreach (Collider collider in colliders)
+        {
+            if (collider == null || !collider.enabled)
+                continue;
+
+            if (gizmoContainer != null && collider.transform.IsChildOf(gizmoContainer.transform))
+                continue;
+
+            if (!hasBounds)
+            {
+                combined = collider.bounds;
+                hasBounds = true;
+            }
+            else
+            {
+                combined.Encapsulate(collider.bounds);
+            }
+        }
+
+        return hasBounds ? combined.center : transform.position;
     }
 
     public void ShowGizmo(bool show)
