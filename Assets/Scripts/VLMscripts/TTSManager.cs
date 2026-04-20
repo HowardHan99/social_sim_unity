@@ -15,10 +15,18 @@ public class TTSManager : MonoBehaviour
 
     private string geminiApiKey;
     private AudioClip savedAudioClip;
+    private AudioSource audioSource;
+    private readonly System.Collections.Generic.Dictionary<string, AudioClip> clipCache =
+        new System.Collections.Generic.Dictionary<string, AudioClip>();
 
     private void Awake()
     {
         geminiApiKey = GeminiApiKeyLoader.Load();
+        audioSource = GetComponent<AudioSource>();
+        if (audioSource == null)
+            audioSource = gameObject.AddComponent<AudioSource>();
+
+        ConfigureAudioSource();
     }
 
     public void ConvertTextToSpeech(string text)
@@ -26,7 +34,29 @@ public class TTSManager : MonoBehaviour
         StartCoroutine(GenerateTTS(text));
     }
 
-    private IEnumerator GenerateTTS(string text)
+    public void PlaySpeech(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return;
+
+        if (audioSource == null)
+            audioSource = GetComponent<AudioSource>() ?? gameObject.AddComponent<AudioSource>();
+
+        ConfigureAudioSource();
+
+        if (clipCache.TryGetValue(text, out AudioClip cachedClip) && cachedClip != null)
+        {
+            audioSource.Stop();
+            audioSource.clip = cachedClip;
+            audioSource.Play();
+            Debug.Log($"[TTSManager] Replaying cached speech. ignoreListenerPause={audioSource.ignoreListenerPause}, AudioListener.pause={AudioListener.pause}");
+            return;
+        }
+
+        StartCoroutine(GenerateTTS(text, true));
+    }
+
+    private IEnumerator GenerateTTS(string text, bool playWhenReady = false)
     {
         if (string.IsNullOrWhiteSpace(text))
         {
@@ -74,9 +104,36 @@ public class TTSManager : MonoBehaviour
 
             if (savedAudioClip != null)
             {
+                clipCache[text] = savedAudioClip;
                 Debug.Log("[TTSManager] AudioClip created successfully. Duration: " + savedAudioClip.length + " seconds");
+                if (playWhenReady)
+                {
+                    ConfigureAudioSource();
+                    audioSource.Stop();
+                    audioSource.clip = savedAudioClip;
+                    audioSource.Play();
+                    Debug.Log($"[TTSManager] Playing generated speech. ignoreListenerPause={audioSource.ignoreListenerPause}, AudioListener.pause={AudioListener.pause}");
+                }
             }
         }
+    }
+
+    public void StopPlayback()
+    {
+        if (audioSource != null && audioSource.isPlaying)
+            audioSource.Stop();
+    }
+
+    private void ConfigureAudioSource()
+    {
+        if (audioSource == null)
+            return;
+
+        audioSource.playOnAwake = false;
+        audioSource.loop = false;
+        audioSource.spatialBlend = 0f;
+        audioSource.volume = 1f;
+        audioSource.ignoreListenerPause = true;
     }
 
     public AudioClip GetSavedAudioClip()

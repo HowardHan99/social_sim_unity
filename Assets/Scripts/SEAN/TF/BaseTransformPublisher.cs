@@ -12,7 +12,7 @@ namespace SEAN.TF
 {
     public class BaseTransformPublisher : MonoBehaviour
     {
-        private ROSConnection ros;
+        protected ROSConnection ros;
         private RosMessageTypes.Std.MTime LastHeader = new RosMessageTypes.Std.MTime();
 
         protected void Start()
@@ -41,13 +41,19 @@ namespace SEAN.TF
 
         protected void PublishIfNew(List<NamedTransform> transforms)
         {
+            // TEMPORARY NAVSTACK WORKAROUND:
+            // Force the ROS clock to publish immediately before stamping/sending
+            // transforms so pose updates do not trail behind the latest simulated time.
+            SEAN.instance.clock.Publish();
+
             foreach (NamedTransform transform in transforms)
             {
                 SEAN.instance.clock.UpdateMHeader(transform.pose.header);
-                if (LastHeader.secs >= transform.pose.header.stamp.secs && LastHeader.nsecs >= transform.pose.header.stamp.nsecs)
-                {
-                    return;
-                }
+                // TEMPORARY NAVSTACK WORKAROUND:
+                // Avoid dropping the entire transform batch when Unity/ROS clock stamps
+                // do not advance exactly as expected. We currently prefer continuous
+                // map/base_link updates over aggressive de-duplication while debugging
+                // local planner state lag.
                 string name = transform.name;
                 if (!name.StartsWith("/"))
                 {
@@ -57,6 +63,23 @@ namespace SEAN.TF
             }
             LastHeader.secs = transforms[0].pose.header.stamp.secs;
             LastHeader.nsecs = transforms[0].pose.header.stamp.nsecs;
+        }
+
+        protected void PublishDirect(NamedTransform transform)
+        {
+            // TEMPORARY NAVSTACK WORKAROUND:
+            // Direct-send the critical robot pose transform each physics step so
+            // nav stack state is driven by the freshest available base pose.
+            SEAN.instance.clock.Publish();
+            SEAN.instance.clock.UpdateMHeader(transform.pose.header);
+
+            string name = transform.name;
+            if (!name.StartsWith("/"))
+            {
+                name = "/" + name;
+            }
+
+            ros.Send(name, transform.pose);
         }
     }
 }

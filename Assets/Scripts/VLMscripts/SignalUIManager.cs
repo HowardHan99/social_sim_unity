@@ -1,6 +1,8 @@
 using System.Collections.Generic;
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
+using SessionReview;
 
 public class SignalUIManager : MonoBehaviour
 {
@@ -52,6 +54,29 @@ public class SignalUIManager : MonoBehaviour
         SetSendSignalButtonVisible(true);
         SetSignalSelectionVisible(false);
         SetLightingFlowVisible(false);
+        ApplyVoiceLabelToVlmSignalToggle();
+    }
+
+    private void Update()
+    {
+        if (isSignalSequenceActive)
+            return;
+
+        bool robotPlayer = !SessionOnboardingSettings.HasCompletedOnboarding ||
+                           SessionOnboardingSettings.PlayerMode == OnboardingPlayerMode.Robot;
+        if (sendSignalButton != null && sendSignalButton.gameObject.activeSelf != robotPlayer)
+            SetSendSignalButtonVisible(robotPlayer);
+    }
+
+    private void ApplyVoiceLabelToVlmSignalToggle()
+    {
+        if (vlmSignalToggle == null) return;
+        foreach (var tmp in vlmSignalToggle.GetComponentsInChildren<TextMeshProUGUI>(true))
+        {
+            if (tmp == null) continue;
+            if (string.Equals(tmp.text.Trim(), "VLM", System.StringComparison.OrdinalIgnoreCase))
+                tmp.text = "Voice";
+        }
     }
 
     private void OnDestroy()
@@ -128,6 +153,9 @@ public class SignalUIManager : MonoBehaviour
     {
         if (activeFlow != SignalFlowType.Lighting)
             return;
+
+        if (SessionReview.SessionReviewManager.Instance != null)
+            SessionReview.SessionReviewManager.Instance.RecordLightingAnnotation();
 
         SetLightingFlowVisible(false);
         StartNextFlow();

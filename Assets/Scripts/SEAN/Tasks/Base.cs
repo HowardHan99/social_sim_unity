@@ -290,6 +290,14 @@ namespace SEAN.Tasks
             return true;
         }
 
+        public void RepublishPreviewGoal()
+        {
+            if (!hasPreparedTaskPreview || !PublishGoal)
+                return;
+
+            Publish(interactiveGoal);
+        }
+
         protected virtual void CheckNewTask()
         {
             if (SessionReviewManager.Instance != null && SessionReviewManager.Instance.BlocksAutomaticTrialStart)
@@ -433,6 +441,13 @@ namespace SEAN.Tasks
         {
             if (SEAN.instance.TopDownViewOnly) { return; }
             SEAN.instance.environment.topViewCamera.enabled = false;
+
+            bool pwdManualDrivesMainCamera = SessionOnboardingSettings.HasCompletedOnboarding &&
+                SessionOnboardingSettings.PlayerMode == OnboardingPlayerMode.Human &&
+                SessionOnboardingSettings.PwdStartupControl == StartupControlMode.Manual;
+            if (pwdManualDrivesMainCamera)
+                return;
+
             if (!sean.PlayerControl)
             {
                 SEAN.instance.robot.camera_first.enabled = true;

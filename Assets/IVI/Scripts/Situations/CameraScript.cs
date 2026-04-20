@@ -66,6 +66,9 @@ namespace IVI
         [Tooltip("When true, all positional movement is disabled; only rotation (free-look) remains active.")]
         public bool lockPosition = false;
 
+        [Tooltip("When false, mouse wheel does not move the camera along its forward axis (dolly). Free-look rotation is unchanged.")]
+        public bool allowMouseScrollZoom = true;
+
         void Awake()
         {
             comfortMotionBlur = GetComponent<ComfortMotionBlur>();
@@ -151,7 +154,7 @@ namespace IVI
                 transform.localEulerAngles = new Vector3(newRotationY, newRotationX, 0f);
             }
 
-            if (!lockPosition)
+            if (!lockPosition && allowMouseScrollZoom)
             {
                 bool fastZoom = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
                 float axis = Input.GetAxis("Mouse ScrollWheel");

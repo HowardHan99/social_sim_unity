@@ -137,16 +137,16 @@ Camera:
   m_FocalLength: 20.784609
   m_NormalizedViewPortRect:
     serializedVersion: 2
-    x: 0
-    y: 0
-    width: 1
-    height: 1
+    x: 0.715
+    y: 0.72
+    width: 0.25
+    height: 0.25
   near clip plane: 0.01
   far clip plane: 1000
   field of view: 60.000004
   orthographic: 0
   orthographic size: 5
-  m_Depth: -1
+  m_Depth: 0
   m_CullingMask:
     serializedVersion: 2
     m_Bits: 4294967295
@@ -766,7 +766,7 @@ PrefabInstance:
     - target: {fileID: 6885732002872308062, guid: b6cbc012ebe44acf89f92c6fe93f6dbb,
         type: 3}
       propertyPath: m_LocalPosition.y
-      value: 0
+      value: 1.08
       objectReference: {fileID: 0}
     - target: {fileID: 6885732002872308062, guid: b6cbc012ebe44acf89f92c6fe93f6dbb,
         type: 3}
@@ -812,6 +812,66 @@ PrefabInstance:
         type: 3}
       propertyPath: m_Name
       value: ThirdPersonCameraParent
+      objectReference: {fileID: 0}
+    - target: {fileID: 6885732002790802484, guid: b6cbc012ebe44acf89f92c6fe93f6dbb,
+        type: 3}
+      propertyPath: m_LocalPosition.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 6885732002790802484, guid: b6cbc012ebe44acf89f92c6fe93f6dbb,
+        type: 3}
+      propertyPath: m_LocalPosition.y
+      value: 0.52
+      objectReference: {fileID: 0}
+    - target: {fileID: 6885732002790802484, guid: b6cbc012ebe44acf89f92c6fe93f6dbb,
+        type: 3}
+      propertyPath: m_LocalPosition.z
+      value: -0.92
+      objectReference: {fileID: 0}
+    - target: {fileID: 6885732002790802484, guid: b6cbc012ebe44acf89f92c6fe93f6dbb,
+        type: 3}
+      propertyPath: m_LocalRotation.w
+      value: 0.99939084
+      objectReference: {fileID: 0}
+    - target: {fileID: 6885732002790802484, guid: b6cbc012ebe44acf89f92c6fe93f6dbb,
+        type: 3}
+      propertyPath: m_LocalRotation.x
+      value: 0.03489949
+      objectReference: {fileID: 0}
+    - target: {fileID: 6885732002790802484, guid: b6cbc012ebe44acf89f92c6fe93f6dbb,
+        type: 3}
+      propertyPath: m_LocalRotation.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 6885732002790802484, guid: b6cbc012ebe44acf89f92c6fe93f6dbb,
+        type: 3}
+      propertyPath: m_LocalRotation.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 6885732002790802484, guid: b6cbc012ebe44acf89f92c6fe93f6dbb,
+        type: 3}
+      propertyPath: m_LocalEulerAnglesHint.x
+      value: 4
+      objectReference: {fileID: 0}
+    - target: {fileID: 6885732002790802484, guid: b6cbc012ebe44acf89f92c6fe93f6dbb,
+        type: 3}
+      propertyPath: m_LocalEulerAnglesHint.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 6885732002790802484, guid: b6cbc012ebe44acf89f92c6fe93f6dbb,
+        type: 3}
+      propertyPath: m_LocalEulerAnglesHint.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 6885732002790802483, guid: b6cbc012ebe44acf89f92c6fe93f6dbb,
+        type: 3}
+      propertyPath: minDistance
+      value: 1.05
+      objectReference: {fileID: 0}
+    - target: {fileID: 6885732002790802483, guid: b6cbc012ebe44acf89f92c6fe93f6dbb,
+        type: 3}
+      propertyPath: maxDistance
+      value: 2.4
       objectReference: {fileID: 0}
     m_RemovedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: b6cbc012ebe44acf89f92c6fe93f6dbb, type: 3}

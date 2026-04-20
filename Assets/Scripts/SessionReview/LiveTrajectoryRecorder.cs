@@ -27,6 +27,7 @@ namespace SessionReview
     public class LiveTrajectoryRecorder : MonoBehaviour
     {
         [SerializeField] private float sampleRate = 10f;
+        [SerializeField] private bool freezePlanUpdatesDuringRobotManual = true;
 
         private float sampleInterval;
         private float lastSampleTime;
@@ -37,10 +38,12 @@ namespace SessionReview
         private bool isRecording;
 
         private SEAN.Display.PlanVisualizer planVisualizer;
+        private SEAN.Control.VelocityController robotVelocityController;
         private List<PlanPathSnapshot> planSnapshots = new List<PlanPathSnapshot>();
         private Vector3[] lastRecordedPlan;
 
         private List<VLMCaptureEvent> vlmCaptures = new List<VLMCaptureEvent>();
+        private List<SignalAnnotation> signalAnnotations = new List<SignalAnnotation>();
 
         public float RecordingStartTime => recordingStartTime;
         public int TrackedCount => trackedTransforms.Count;
@@ -57,6 +60,7 @@ namespace SessionReview
             lastSampleTime = recordingStartTime;
             isRecording = true;
             planVisualizer = FindObjectOfType<SEAN.Display.PlanVisualizer>();
+            robotVelocityController = FindObjectOfType<SEAN.Control.VelocityController>();
         }
 
         void Update()
@@ -116,6 +120,13 @@ namespace SessionReview
             Vector3[] plan = planVisualizer.GetCurrentPlanPositions();
             if (plan == null || plan.Length == 0) return;
 
+            if (freezePlanUpdatesDuringRobotManual &&
+                planSnapshots.Count > 0 &&
+                IsRobotManualControlActive())
+            {
+                return;
+            }
+
             if (lastRecordedPlan != null && plan.Length == lastRecordedPlan.Length)
             {
                 bool same = true;
@@ -133,6 +144,18 @@ namespace SessionReview
                 timestamp = timestamp,
                 positions = plan
             });
+        }
+
+        private bool IsRobotManualControlActive()
+        {
+            if (robotVelocityController == null)
+                robotVelocityController = FindObjectOfType<SEAN.Control.VelocityController>();
+
+            if (robotVelocityController != null)
+                return robotVelocityController.ManualControlActive;
+
+            return SessionOnboardingSettings.HasCompletedOnboarding &&
+                   SessionOnboardingSettings.RobotStartupControl == StartupControlMode.Manual;
         }
 
         public StateRecording BuildSnapshot()
@@ -184,7 +207,68 @@ namespace SessionReview
                 rotation = rotation,
                 agentId = agentId
             });
-            Debug.Log($"[SessionReview] VLM capture recorded at t={timestamp:F2}, pos={position}, agent={agentId}");
+            RecordSignalAnnotation(new SignalAnnotation
+            {
+                timestamp = timestamp,
+                agentId = agentId,
+                type = SignalAnnotationType.VlmCapture,
+                position = position,
+                rotation = rotation,
+                label = "VLM Capture",
+                metadata = string.Empty
+            });
+            Debug.Log($"[SessionReview] VLMAnnotation recorded at t={timestamp:F2}, pos={position}, agent={agentId}");
+        }
+
+        public void RecordSignalAnnotation(SignalAnnotation annotation)
+        {
+            if (annotation == null)
+                return;
+
+            if (annotation.timestamp < 0f)
+                annotation.timestamp = Time.time - recordingStartTime;
+
+            signalAnnotations.Add(annotation);
+
+            string annotationName = GetAnnotationLogName(annotation.type);
+            Debug.Log($"[SessionReview] {annotationName} recorded at t={annotation.timestamp:F2}, pos={annotation.position}, agent={annotation.agentId}");
+        }
+
+        public void AttachMetadataToLatestVlmAnnotation(string agentId, string label, string metadata)
+        {
+            if (signalAnnotations == null || signalAnnotations.Count == 0)
+                return;
+
+            for (int i = signalAnnotations.Count - 1; i >= 0; i--)
+            {
+                SignalAnnotation annotation = signalAnnotations[i];
+                if (annotation == null || annotation.type != SignalAnnotationType.VlmCapture)
+                    continue;
+
+                if (!string.IsNullOrEmpty(agentId) && annotation.agentId != agentId)
+                    continue;
+
+                if (!string.IsNullOrWhiteSpace(label))
+                    annotation.label = label;
+                annotation.metadata = metadata ?? string.Empty;
+                Debug.Log($"[SessionReview] VLMAnnotation updated with replay metadata for agent={annotation.agentId}");
+                return;
+            }
+        }
+
+        private static string GetAnnotationLogName(SignalAnnotationType type)
+        {
+            switch (type)
+            {
+                case SignalAnnotationType.VlmCapture:
+                    return "VLMAnnotation";
+                case SignalAnnotationType.LightingLeft:
+                case SignalAnnotationType.LightingRight:
+                case SignalAnnotationType.LightingBoth:
+                    return "LightingAnnotation";
+                default:
+                    return "SignalAnnotation";
+            }
         }
 
         public List<VLMCaptureEvent> GetVLMCaptures(float recStart, float recEnd)
@@ -194,6 +278,17 @@ namespace SessionReview
             {
                 if (evt.timestamp >= recStart && evt.timestamp <= recEnd)
                     result.Add(evt);
+            }
+            return result;
+        }
+
+        public List<SignalAnnotation> GetSignalAnnotations(float recStart, float recEnd)
+        {
+            var result = new List<SignalAnnotation>();
+            foreach (var annotation in signalAnnotations)
+            {
+                if (annotation.timestamp >= recStart && annotation.timestamp <= recEnd)
+                    result.Add(annotation);
             }
             return result;
         }
@@ -320,6 +415,15 @@ namespace SessionReview
                 string vlmFile = Path.Combine(trialFolder, "vlm_captures.json");
                 File.WriteAllText(vlmFile, JsonUtility.ToJson(vlmData, true));
                 Debug.Log($"[SessionReview] Saved {trialVLM.Count} VLM capture events to: {vlmFile}");
+            }
+
+            var trialAnnotations = GetSignalAnnotations(recStart, recEnd);
+            if (trialAnnotations.Count > 0)
+            {
+                var annotationData = new SignalAnnotationRecording { annotations = trialAnnotations };
+                string annotationFile = Path.Combine(trialFolder, "signal_annotations.json");
+                File.WriteAllText(annotationFile, JsonUtility.ToJson(annotationData, true));
+                Debug.Log($"[SessionReview] Saved {trialAnnotations.Count} signal annotations to: {annotationFile}");
             }
         }
     }

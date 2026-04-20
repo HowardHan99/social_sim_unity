@@ -38,6 +38,9 @@ namespace SessionReview
         {
             if (!visible || currentTrial == null) return;
 
+            if (SessionReviewManager.Instance != null && SessionReviewManager.Instance.IsWorldBuildingModeActive)
+                return;
+
             var t = currentTrial;
             float lineH = 22f;
             float sectionGap = 8f;

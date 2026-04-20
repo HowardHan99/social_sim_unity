@@ -16,6 +16,8 @@ namespace SEAN.TF
         GameObject MapToRobot;
         GameObject MapToOdom;
         private bool initialized = false;
+        [Header("Temporary Navstack Workaround")]
+        public bool publishMapToOdom = false;
         RosMessageTypes.Geometry.MPoseStamped mapToRobotPoseStamped = new RosMessageTypes.Geometry.MPoseStamped();
         RosMessageTypes.Geometry.MPoseStamped mapToOdomPoseStamped = new RosMessageTypes.Geometry.MPoseStamped();
 
@@ -35,7 +37,10 @@ namespace SEAN.TF
             mapToOdomPoseStamped.header.frame_id = "map";
         }
 
-        private void Update()
+        // TEMPORARY NAVSTACK WORKAROUND:
+        // Publish world transforms from FixedUpdate so robot pose sampling stays
+        // aligned with physics/motion updates while debugging local planner lag.
+        private void FixedUpdate()
         {
 
             if (!initialized)
@@ -51,11 +56,15 @@ namespace SEAN.TF
             MapToRobot.transform.rotation = sean.robot.rotation;
             mapToRobotPoseStamped.pose.position = Util.Geometry.GetGeometryPoint(MapToRobot.transform.position.To<FLU>());
             mapToRobotPoseStamped.pose.orientation = Util.Geometry.GetGeometryQuaternion(MapToRobot.transform.rotation.To<FLU>());
-            List<NamedTransform> transforms = new List<NamedTransform>(){
-                new NamedTransform("/" + MapToOdom.name, mapToOdomPoseStamped),
-                new NamedTransform("/" + MapToRobot.name, mapToRobotPoseStamped)
-            };
-            PublishIfNew(transforms);
+
+            // TEMPORARY NAVSTACK WORKAROUND:
+            // Prefer a single direct map->base_link pose chain for navigation.
+            PublishDirect(new NamedTransform("/" + MapToRobot.name, mapToRobotPoseStamped));
+
+            if (publishMapToOdom)
+            {
+                PublishDirect(new NamedTransform("/" + MapToOdom.name, mapToOdomPoseStamped));
+            }
         }
     }
 }

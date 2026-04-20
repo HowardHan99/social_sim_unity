@@ -84,6 +84,8 @@ Assets/Scripts/SessionReview/
   MultiAgentTrajectoryRenderer.cs  <- Draws trajectory lines with per-agent colors
   RewindController.cs         <- Playback scrubbing, camera perspective management
   MetricsOverlayUI.cs         <- IMGUI panel showing trial metrics
+  ComfortMotionBlur.cs        <- Camera image-effect: rotation-driven motion blur + vignette
+  Shaders/ComfortMotionBlur.shader  <- Corresponding HLSL shader (two-ring Gaussian kernel)
 ```
 
 ### Data Flow
@@ -274,6 +276,99 @@ The robot is identified by `SessionTracker.GetObjectId(sean.robot.base_link)`. T
 - `ControlModeLog` entries (as `robotAgentId`)
 - `RewindController.FindTransformForId()` cache
 - Per-agent trajectory filename
+
+---
+
+## Comfort Motion Blur
+
+`ComfortMotionBlur` is an `OnRenderImage` image effect attached to the rewind camera. It applies a screen-space Gaussian blur that scales with camera rotation speed, reducing perceived motion sickness during fast pans in session review.
+
+The companion shader lives at `Shaders/ComfortMotionBlur.shader` (`Hidden/ComfortMotionBlur`). Attach `ComfortMotionBlur` to any camera — `RewindController` adds it automatically.
+
+### How It Works
+
+Each frame in `LateUpdate`, the script:
+
+1. Measures the angle between the camera's current and previous rotation.
+2. Divides by `deltaTime` to get a raw angular speed (°/s).
+3. Applies a low-pass exponential filter (`angularSpeedSmoothTime`) to avoid blur spikes from discrete playback snapshots.
+4. Maps the smoothed speed to a `[0, 1]` blur intensity using `rotationForMaxBlurDegreesPerSecond` as the ceiling.
+5. Raises or lowers `currentBlurStrength` toward the target using asymmetric exponential smoothing (`blurRiseSpeed` / `blurFallSpeed`).
+
+In `OnRenderImage`, the current strength is multiplied by `maxBlurStrength` and passed to the shader, which samples a 17-point two-ring Gaussian kernel with radius `blurRadiusPixels × texelSize × strength`.
+
+### Parameter Reference
+
+#### Blur Shape
+
+| Parameter | Default | Range | Effect |
+|-----------|---------|-------|--------|
+| `maxBlurStrength` | `0.85` | 0 – 1 | Overall blur intensity ceiling. Scales the final kernel radius. `0` = no blur ever. |
+| `blurRadiusPixels` | `15` | ≥ 1 | Kernel radius in pixels at full strength. `8` = subtle, `15` = medium, `20+` = strong. |
+
+#### Blur Trigger
+
+| Parameter | Default | Effect |
+|-----------|---------|--------|
+| `rotationForMaxBlurDegreesPerSecond` | `220` | Rotation speed (°/s) that produces 100% blur. **Lower = kicks in sooner.** At `220`, a slow pan barely triggers blur; a fast spin hits maximum. Set to `60–90` if you want blur to appear during gentle head turns. |
+
+#### Rise / Fall Speed
+
+| Parameter | Default | Effect |
+|-----------|---------|--------|
+| `blurRiseSpeed` | `10` | How fast blur ramps up when rotation accelerates. Higher = more responsive. |
+| `blurFallSpeed` | `18` | How fast blur fades after rotation slows. **Keep this higher than `blurRiseSpeed`** to avoid a pulsing/stuttering feel during 10 Hz playback snapshots. |
+
+#### Angular Speed Smoothing
+
+| Parameter | Default | Effect |
+|-----------|---------|--------|
+| `angularSpeedSmoothTime` | `0.10` | Low-pass filter time constant (seconds) for the raw angular speed signal. |
+
+> **Why this matters for session review**: `LiveTrajectoryRecorder` samples at ~10 Hz, so agent transforms jump in discrete steps. Without filtering, each jump reads as a huge instantaneous angular speed, slamming the blur to maximum and dropping it again — perceived as a flicker/stutter.
+>
+> - **Live rotation / VR headset**: use `0.02–0.04` s — fast enough that blur appears instantly with head movement.
+> - **Session review playback**: use `0.08–0.12` s — spreads each 100 ms snapshot impulse across the full inter-frame interval, preventing 10 Hz pulsing.
+
+#### Transition Boost
+
+Triggered by `TriggerTransitionBlur()` whenever the camera teleports (perspective switch, timeline scrub). Adds a brief full-blur flash independent of rotation speed.
+
+| Parameter | Default | Effect |
+|-----------|---------|--------|
+| `transitionBoostStrength` | `0.55` | Peak blur added on top of rotation blur during the boost window. |
+| `transitionBoostDuration` | `0.15` | Duration of the boost in seconds. Keep below the snapshot interval (0.1 s) to avoid overlap with the next playback frame. |
+
+#### Vignette (off by default)
+
+A peripheral darkening overlay that tracks blur intensity. Disabled by default — enabling it on scenes with auto-exposure causes perceived whole-scene brightness flicker.
+
+| Parameter | Default | Effect |
+|-----------|---------|--------|
+| `vignetteStrength` | `0` | Max darkness at the screen edge. `0` = off. Enable only if auto-exposure is disabled. |
+| `vignetteRadius` | `0.55` | Distance from center where darkening begins (normalized, aspect-corrected). Smaller = more tunnel-vision. |
+| `vignetteSoftness` | `0.45` | Width of the gradient falloff. Larger = softer edge. |
+
+### Quick Tuning Guide
+
+| Goal | What to change |
+|------|----------------|
+| More blur during rotation | Increase `blurRadiusPixels` (try 20–30) and/or `maxBlurStrength` |
+| Blur kicks in earlier | Lower `rotationForMaxBlurDegreesPerSecond` (try 80–120) |
+| Stutter/pulsing feel in review | Increase `angularSpeedSmoothTime` to `0.10–0.12`, increase `blurFallSpeed` to 18–25 |
+| Blur lags behind head movement | Lower `angularSpeedSmoothTime` to `0.02–0.04` |
+| Transition flash too long | Lower `transitionBoostDuration` |
+| No blur at all | Set `maxBlurStrength = 0` |
+
+### Public API
+
+```csharp
+// Call when the camera teleports (perspective switch, scrub jump) to suppress
+// the spurious angular-speed spike that would otherwise produce false blur.
+comfortMotionBlur.TriggerTransitionBlur();
+```
+
+`RewindController.SetPerspective()` calls this automatically on every perspective switch.
 
 ---
 

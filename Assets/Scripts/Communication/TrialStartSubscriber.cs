@@ -28,7 +28,6 @@ public class TrialStartSubscriber : MonoBehaviour
 
     void Start()
     {
-        throw new NotImplementedException("To implement");
         ROSConnection.instance.Subscribe<RosMessageTypes.SocialSimRos.MTrialStart>("/social_sim/start_trial", ReceiveMessage);
     }
 

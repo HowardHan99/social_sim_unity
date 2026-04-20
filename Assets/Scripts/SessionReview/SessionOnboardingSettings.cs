@@ -65,6 +65,19 @@ namespace SessionReview
             PendingTrialStart = true;
         }
 
+        /// <summary>
+        /// Updates PlayerMode and startup modes for camera/UI while the trial-start prompt or warmup runs.
+        /// Does not change PendingTrialStart or HasCompletedOnboarding.
+        /// </summary>
+        public static void SyncInFlightTrialControls(OnboardingPlayerMode playerMode,
+                                                     StartupControlMode robotStartupControl,
+                                                     StartupControlMode pwdStartupControl)
+        {
+            PlayerMode = playerMode;
+            RobotStartupControl = robotStartupControl;
+            PwdStartupControl = pwdStartupControl;
+        }
+
         public static void MarkTrialStarted()
         {
             PendingTrialStart = false;

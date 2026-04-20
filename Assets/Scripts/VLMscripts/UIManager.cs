@@ -62,10 +62,12 @@ public class UIManager : MonoBehaviour
     {
         elapsedTime += Time.unscaledDeltaTime; // Ensures the UI works even when the game is paused
 
-        // Show signal buttons only when the game is paused
+        // Show signal buttons only when the game is paused and the session is robot-focused
         if (PauseManager.Instance != null && !IsVlmSignalFlowActive)
         {
-            bool shouldShow = PauseManager.Instance.isPaused && !SuppressSignalButtons;
+            bool robotFocusedPlayer = !SessionReview.SessionOnboardingSettings.HasCompletedOnboarding ||
+                SessionReview.SessionOnboardingSettings.PlayerMode == SessionReview.OnboardingPlayerMode.Robot;
+            bool shouldShow = PauseManager.Instance.isPaused && !SuppressSignalButtons && robotFocusedPlayer;
             SetManagedSignalButtonsVisible(shouldShow);
         }
 
@@ -169,6 +171,9 @@ public class UIManager : MonoBehaviour
         {
             finalResponse = responseInputField.text;
             Debug.Log("User confirmed response: " + finalResponse);
+
+            if (SessionReview.SessionReviewManager.Instance != null)
+                SessionReview.SessionReviewManager.Instance.AttachVLMReplayResponse(finalResponse);
 
             // Convert to speech
             ttsManager.ConvertTextToSpeech(finalResponse);

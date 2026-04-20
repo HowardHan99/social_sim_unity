@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(///wsl.localhost/Ubuntu-20.04/home/adcs24/sim_ws/src/social_sim_ros/social_sim_ros/params/kuri/map_nav_params/**)",
+      "Read(///wsl.localhost/Ubuntu-20.04/home/adcs24/sim_ws/src/**)",
+      "Read(///wsl.localhost/Ubuntu-20.04/home/adcs24/sim_ws/src/social_sim_ros/social_sim_ros/src/**)",
+      "Read(///wsl.localhost/Ubuntu-20.04/home/adcs24/sim_ws/src/social_sim_ros/social_sim_ros/params/**)",
+      "Read(///wsl.localhost/Ubuntu-20.04/home/adcs24/sim_ws/src/social_sim_ros/social_sim_ros/params/kuri/**)",
+      "Read(///wsl.localhost/Ubuntu-20.04/home/adcs24/sim_ws/src/social_sim_ros/social_sim_ros/launch/**)",
+      "Read(///wsl.localhost/Ubuntu-20.04/home/adcs24/sim_ws/src/social_sim_ros/**)"
+    ],
+    "additionalDirectories": [
+      "\\\\wsl.localhost\\Ubuntu-20.04\\home\\adcs24\\sim_ws\\src\\social_sim_ros\\social_sim_ros\\params\\kuri\\map_nav_params",
+      "\\\\wsl.localhost\\Ubuntu-20.04\\home\\adcs24\\sim_ws\\src\\social_sim_ros\\social_sim_ros\\src",
+      "\\\\wsl.localhost\\Ubuntu-20.04\\home\\adcs24\\sim_ws\\src\\social_sim_ros\\social_sim_ros\\params\\kuri"
+    ]
+  }
+}

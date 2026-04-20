@@ -262,12 +262,6 @@ namespace SEAN.Scenario.Agents
             manualCtrl.startInManualMode = SessionReview.SessionOnboardingSettings.PwdStartupControl == SessionReview.StartupControlMode.Manual;
 
             AttachCameraToHead(avatarObject);
-            ActivatePwdPlayerView(avatarObject);
-
-            // Lock position on the camera's CameraScript so mouse/keyboard input
-            // cannot move the camera away from the avatar. Rotation (free-look) still works.
-            foreach (var camScript in avatarObject.GetComponentsInChildren<IVI.CameraScript>(true))
-                camScript.lockPosition = true;
 
             // Disable the Agent_X scene object since PWDPlayer is independent
             gameObject.SetActive(false);
@@ -385,8 +379,9 @@ namespace SEAN.Scenario.Agents
 
         private void AttachCameraToHead(GameObject avatar)
         {
-            // Parent camera to the AVATAR ROOT (not a bone) so it follows position
-            // and Y-rotation but is unaffected by animation bone movement.
+            // Third-person camera: temporarily parent to avatar so
+            // WheelchairCameraSmoothing.Start() can read the follow target,
+            // then the script un-parents itself to orbit freely.
             Transform wheelchairCam = avatar.transform.Find("wheelchairCamera");
             if (wheelchairCam == null)
             {
@@ -401,75 +396,44 @@ namespace SEAN.Scenario.Agents
                 }
             }
 
-            // Use head bone only to measure height, not as parent
-            Transform headBone = FindBoneRecursive(avatar.transform, "Head");
-            float camHeight = 1.2f;
-            if (headBone != null)
-                camHeight = headBone.position.y - avatar.transform.position.y + 0.05f;
-
-            Vector3 camOffset = new Vector3(0f, camHeight, 0.1f);
+            Vector3 thirdPersonOffset = new Vector3(0f, 1.4f, -2.2f);
+            Vector3 spawnPos = avatar.transform.position + avatar.transform.rotation * thirdPersonOffset;
 
             if (wheelchairCam != null)
             {
                 wheelchairCam.SetParent(avatar.transform, false);
-                wheelchairCam.localPosition = camOffset;
-                wheelchairCam.localRotation = Quaternion.identity;
+                wheelchairCam.position = spawnPos;
+                wheelchairCam.LookAt(avatar.transform.position + Vector3.up * 1.0f);
 
                 Camera cam = wheelchairCam.GetComponent<Camera>();
                 if (cam != null)
                     cam.targetDisplay = 1;
 
-                if (wheelchairCam.GetComponent<IVI.WheelchairCameraSmoothing>() == null)
-                    wheelchairCam.gameObject.AddComponent<IVI.WheelchairCameraSmoothing>();
+                var smoothing = wheelchairCam.GetComponent<IVI.WheelchairCameraSmoothing>();
+                if (smoothing == null)
+                    smoothing = wheelchairCam.gameObject.AddComponent<IVI.WheelchairCameraSmoothing>();
+                smoothing.thirdPersonOffset = thirdPersonOffset;
             }
             else
             {
-                GameObject camObj = new GameObject("PWDFirstPersonCamera");
+                GameObject camObj = new GameObject("PWDThirdPersonCamera");
                 camObj.transform.SetParent(avatar.transform, false);
-                camObj.transform.localPosition = camOffset;
-                camObj.transform.localRotation = Quaternion.identity;
+                camObj.transform.position = spawnPos;
+                camObj.transform.LookAt(avatar.transform.position + Vector3.up * 1.0f);
 
                 Camera cam = camObj.AddComponent<Camera>();
                 cam.targetDisplay = 1;
-                cam.fieldOfView = 70f;
+                cam.fieldOfView = 60f;
                 cam.nearClipPlane = 0.1f;
 
-                camObj.AddComponent<IVI.WheelchairCameraSmoothing>();
+                var smoothing = camObj.AddComponent<IVI.WheelchairCameraSmoothing>();
+                smoothing.thirdPersonOffset = thirdPersonOffset;
             }
 
-            Debug.Log($"[PWD] Camera attached to avatar root at offset {camOffset}");
-        }
+            Debug.Log($"[PWD] Third-person camera attached to avatar '{avatar.name}'");
 
-        private void ActivatePwdPlayerView(GameObject avatar)
-        {
-            if (!SessionReview.SessionOnboardingSettings.HasCompletedOnboarding ||
-                SessionReview.SessionOnboardingSettings.PwdStartupControl != SessionReview.StartupControlMode.Manual)
-                return;
-
-            Camera pwdCamera = null;
-            foreach (var cam in avatar.GetComponentsInChildren<Camera>(true))
-            {
-                cam.targetDisplay = 0;
-                cam.enabled = true;
-                cam.gameObject.SetActive(true);
-                if (pwdCamera == null)
-                    pwdCamera = cam;
-            }
-
-            foreach (Camera cam in Camera.allCameras)
-            {
-                if (pwdCamera != null && cam == pwdCamera)
-                    continue;
-
-                cam.enabled = false;
-            }
-
-            if (SEAN.instance != null)
-            {
-                SEAN.instance.PlayerControl = false;
-                if (SEAN.instance.player != null)
-                    SEAN.instance.player.gameObject.SetActive(false);
-            }
+            foreach (var camScript in avatar.GetComponentsInChildren<IVI.CameraScript>(true))
+                camScript.allowMouseScrollZoom = false;
         }
 
         private Transform FindBoneRecursive(Transform root, string boneName)

@@ -35,6 +35,7 @@ namespace SessionReview
         private TrialRecord currentTrial;
         private StateRecording currentRecording;
         private ControlModeLog controlModeLog;
+        private List<SignalAnnotation> signalAnnotations;
 
         private bool isRewinding;
         private float currentTime;
@@ -48,8 +49,11 @@ namespace SessionReview
         private string selectedPedestrianId;
 
         private Camera rewindCamera;
+        private AudioListener rewindAudioListener;
+        private ComfortMotionBlur rewindComfortBlur;
         private Camera robotFirstPersonCam;
         private Camera pwdFirstPersonCam;
+        private readonly Dictionary<Behaviour, bool> disabledCameraBehaviours = new Dictionary<Behaviour, bool>();
         private Vector3 savedCameraPos;
         private Quaternion savedCameraRot;
         private Camera savedMainCamera;
@@ -64,6 +68,20 @@ namespace SessionReview
         [SerializeField] private Color activePlanColor = new Color(0.2f, 1f, 0.3f, 0.9f);
         [SerializeField] private float activePlanWidth = 0.14f;
         private LineRenderer activePlanLine;
+
+        [Header("Signal Replay")]
+        [SerializeField] private float lightingReplayHoldSeconds = 1.1f;
+        [SerializeField] private float vlmReplayHoldSeconds = 2.0f;
+        [SerializeField] private bool showSignalReplayStatus = true;
+        private RobotSignalLightController reviewSignalLightController;
+        private TTSManager reviewTtsManager;
+        private string activeVlmReplayLabel = string.Empty;
+        private float activeVlmReplayAge = -1f;
+        private float lastEvaluatedSignalTime = -1f;
+        private int lastTriggeredVlmAnnotationIndex = -1;
+        private int lastTriggeredLightingAnnotationIndex = -1;
+        private readonly HashSet<int> activeLightingReplayCandidates = new HashSet<int>();
+        private bool manualLightingReplayTestActive;
 
         public bool IsRewinding => isRewinding;
         public float CurrentTime => currentTime;
@@ -84,10 +102,28 @@ namespace SessionReview
             rewindCamera.enabled = false;
             rewindCamera.nearClipPlane = 0.1f;
             rewindCamera.fieldOfView = 70f;
+            rewindAudioListener = gameObject.GetComponent<AudioListener>();
+            if (rewindAudioListener == null)
+                rewindAudioListener = gameObject.AddComponent<AudioListener>();
+            rewindAudioListener.enabled = false;
+
+            // Inherit HDR/rendering-path from the main camera so tone-mapping
+            // and post-processing behave consistently from the very first frame.
+            var mainCam = Camera.main;
+            if (mainCam != null)
+            {
+                rewindCamera.allowHDR = mainCam.allowHDR;
+                rewindCamera.renderingPath = mainCam.renderingPath;
+            }
+
+            rewindComfortBlur = gameObject.GetComponent<ComfortMotionBlur>();
+            if (rewindComfortBlur == null)
+                rewindComfortBlur = gameObject.AddComponent<ComfortMotionBlur>();
         }
 
         public void EnterRewind(TrialRecord trial, StateRecording recording,
-            ControlModeLog modeLog, MultiAgentTrajectoryRenderer trajRenderer, float recordingTimeOffset = 0f)
+            ControlModeLog modeLog, MultiAgentTrajectoryRenderer trajRenderer, float recordingTimeOffset = 0f,
+            List<SignalAnnotation> annotations = null)
         {
             if (trial == null || recording == null) return;
 
@@ -96,22 +132,40 @@ namespace SessionReview
             controlModeLog = modeLog;
             trajectoryRenderer = trajRenderer;
             timeOffset = recordingTimeOffset;
+            signalAnnotations = annotations ?? trial.signalAnnotations ?? new List<SignalAnnotation>();
 
             if (currentRecording.timelineDict == null)
                 currentRecording.BuildCache();
 
             liveRecorder = FindObjectOfType<LiveTrajectoryRecorder>();
+            reviewSignalLightController = FindObjectOfType<RobotSignalLightController>();
+            reviewTtsManager = FindObjectOfType<TTSManager>();
+            activeVlmReplayLabel = string.Empty;
+            activeVlmReplayAge = -1f;
+            lastTriggeredVlmAnnotationIndex = -1;
+            lastTriggeredLightingAnnotationIndex = -1;
+            activeLightingReplayCandidates.Clear();
+            manualLightingReplayTestActive = false;
 
             savedMainCamera = Camera.main;
             if (savedMainCamera != null)
             {
                 savedCameraPos = savedMainCamera.transform.position;
                 savedCameraRot = savedMainCamera.transform.rotation;
+                // Disable the main camera so it doesn't render simultaneously with
+                // rewindCamera — two cameras rendering to the same target in the same
+                // frame causes brightness flickering and depth-sort artefacts.
+                savedMainCamera.enabled = false;
             }
 
+            if (rewindAudioListener != null)
+                rewindAudioListener.enabled = true;
+
             FindAgentCameras();
+            DisableLiveCameraDrivers();
 
             currentTime = RecStartTime;
+            lastEvaluatedSignalTime = currentTime;
             isRewinding = true;
             isPlaying = false;
             playbackSpeed = 1f;
@@ -135,10 +189,21 @@ namespace SessionReview
                 savedMainCamera.enabled = true;
             }
 
+            if (rewindAudioListener != null)
+                rewindAudioListener.enabled = false;
+
             ClearTrails();
+            ClearReplayBehaviors();
             transformCache.Clear();
+            RestoreLiveCameraDrivers();
             currentTrial = null;
             currentRecording = null;
+            signalAnnotations = null;
+            lastEvaluatedSignalTime = -1f;
+            lastTriggeredVlmAnnotationIndex = -1;
+            lastTriggeredLightingAnnotationIndex = -1;
+            activeLightingReplayCandidates.Clear();
+            manualLightingReplayTestActive = false;
         }
 
         void Update()
@@ -169,6 +234,10 @@ namespace SessionReview
 
             if (perspectiveMode == PerspectiveMode.PedestrianOverShoulder)
                 UpdateOverShoulderCamera();
+            else if (perspectiveMode == PerspectiveMode.RobotFirstPerson)
+                UpdateRobotFPCamera();
+            else if (perspectiveMode == PerspectiveMode.PWDFirstPerson)
+                UpdatePwdFPCamera();
         }
 
         public void SetNormalizedTime(float t)
@@ -239,6 +308,9 @@ namespace SessionReview
                     ActivateFreeCam();
                     break;
             }
+
+            if (rewindComfortBlur != null)
+                rewindComfortBlur.TriggerTransitionBlur();
         }
 
         public void CyclePerspective()
@@ -260,6 +332,63 @@ namespace SessionReview
             if (!showTrails) ClearTrails();
         }
 
+        public bool IsTopDownActive()
+        {
+            return perspectiveMode == PerspectiveMode.TopDown &&
+                   rewindCamera != null &&
+                   rewindCamera.enabled &&
+                   rewindCamera.orthographic;
+        }
+
+        public void FocusTopDownOnBounds(Bounds bounds, bool switchToTopDown = true)
+        {
+            if (switchToTopDown)
+                SetPerspective(PerspectiveMode.TopDown);
+
+            FocusActiveTopDownCamera(bounds);
+        }
+
+        public void AdjustTopDownZoom(float zoomMultiplier)
+        {
+            if (!IsTopDownActive())
+                return;
+
+            float nextSize = rewindCamera.orthographicSize * Mathf.Max(0.1f, zoomMultiplier);
+            rewindCamera.orthographicSize = Mathf.Clamp(nextSize, 3f, topDownHeight * 0.5f);
+        }
+
+        public void ZoomTopDownAtScreenPoint(Vector2 screenPoint, float zoomMultiplier)
+        {
+            if (!IsTopDownActive())
+                return;
+
+            if (!TryGetTopDownGroundPoint(screenPoint, out Vector3 beforePoint))
+            {
+                AdjustTopDownZoom(zoomMultiplier);
+                return;
+            }
+
+            AdjustTopDownZoom(zoomMultiplier);
+
+            if (TryGetTopDownGroundPoint(screenPoint, out Vector3 afterPoint))
+            {
+                Vector3 delta = beforePoint - afterPoint;
+                delta.y = 0f;
+                rewindCamera.transform.position += delta;
+            }
+        }
+
+        public void PanTopDownFromScreenDelta(Vector2 screenDelta)
+        {
+            if (!IsTopDownActive())
+                return;
+
+            float pixelsPerScreenHeight = Mathf.Max(Screen.height, 1f);
+            float worldUnitsPerPixel = (rewindCamera.orthographicSize * 2f) / pixelsPerScreenHeight;
+            Vector3 translation = new Vector3(-screenDelta.x * worldUnitsPerPixel, 0f, -screenDelta.y * worldUnitsPerPixel);
+            rewindCamera.transform.position += translation;
+        }
+
         private void ApplyStateAtCurrentTime()
         {
             if (liveRecorder == null) return;
@@ -274,6 +403,256 @@ namespace SessionReview
                 t.position = kvp.Value.position;
                 t.rotation = kvp.Value.rotation;
             }
+
+            ApplySignalReplayState();
+        }
+
+        private void ApplySignalReplayState()
+        {
+            TriggerCrossedSignalBehaviors();
+            TriggerLightingReplayWindowFallback();
+            ApplyVlmReplayState();
+        }
+
+        private void TriggerCrossedSignalBehaviors()
+        {
+            if (signalAnnotations == null || signalAnnotations.Count == 0)
+            {
+                lastEvaluatedSignalTime = currentTime;
+                return;
+            }
+
+            float previousTime = lastEvaluatedSignalTime;
+            if (previousTime < 0f)
+            {
+                lastEvaluatedSignalTime = currentTime;
+                return;
+            }
+
+            bool movingForward = currentTime >= previousTime;
+            if (!movingForward)
+            {
+                if (reviewSignalLightController != null)
+                    reviewSignalLightController.ClearReviewSignalState();
+                if (reviewTtsManager != null)
+                    reviewTtsManager.StopPlayback();
+                lastTriggeredVlmAnnotationIndex = -1;
+                lastTriggeredLightingAnnotationIndex = -1;
+                activeLightingReplayCandidates.Clear();
+                Debug.Log($"[SessionReview] Replay moved backward to t={currentTime:F2}; reset signal replay state.");
+                lastEvaluatedSignalTime = currentTime;
+                return;
+            }
+
+            for (int i = 0; i < signalAnnotations.Count; i++)
+            {
+                SignalAnnotation annotation = signalAnnotations[i];
+                if (annotation.timestamp <= previousTime || annotation.timestamp > currentTime)
+                    continue;
+
+                if (annotation.type == SignalAnnotationType.VlmCapture)
+                {
+                    TriggerVlmReplay(annotation, i);
+                }
+                else
+                {
+                    TriggerLightingReplay(annotation, i);
+                }
+            }
+
+            lastEvaluatedSignalTime = currentTime;
+        }
+
+        private void TriggerLightingReplayWindowFallback()
+        {
+            if (signalAnnotations == null || signalAnnotations.Count == 0)
+                return;
+
+            for (int i = 0; i < signalAnnotations.Count; i++)
+            {
+                SignalAnnotation annotation = signalAnnotations[i];
+                if (!IsLightingAnnotation(annotation.type))
+                    continue;
+
+                float age = currentTime - annotation.timestamp;
+                bool insideWindow = age >= 0f && age <= lightingReplayHoldSeconds;
+                if (!insideWindow)
+                {
+                    activeLightingReplayCandidates.Remove(i);
+                    continue;
+                }
+
+                if (activeLightingReplayCandidates.Contains(i))
+                    continue;
+
+                Debug.Log($"[SessionReview] LightingAnnotation entered replay window at t={currentTime:F2} (annotation t={annotation.timestamp:F2}, type={annotation.type}).");
+                TriggerLightingReplay(annotation, i);
+                activeLightingReplayCandidates.Add(i);
+            }
+        }
+
+        private void TriggerLightingReplay(SignalAnnotation annotation, int annotationIndex)
+        {
+            if (reviewSignalLightController == null)
+                reviewSignalLightController = FindObjectOfType<RobotSignalLightController>();
+
+            if (reviewSignalLightController == null)
+            {
+                Debug.LogWarning("[SessionReview] LightingAnnotation replay skipped because RobotSignalLightController was not found.");
+                return;
+            }
+
+            if (lastTriggeredLightingAnnotationIndex == annotationIndex)
+                return;
+
+            Debug.Log($"[SessionReview] LightingAnnotation replay trigger at t={currentTime:F2} for annotation #{annotationIndex} ({annotation.type}).");
+            switch (annotation.type)
+            {
+                case SignalAnnotationType.LightingLeft:
+                    reviewSignalLightController.PlayReviewFlashLeft();
+                    break;
+                case SignalAnnotationType.LightingRight:
+                    reviewSignalLightController.PlayReviewFlashRight();
+                    break;
+                case SignalAnnotationType.LightingBoth:
+                    reviewSignalLightController.PlayReviewFlashBoth();
+                    break;
+                default:
+                    return;
+            }
+
+            lastTriggeredLightingAnnotationIndex = annotationIndex;
+        }
+
+        private void TriggerVlmReplay(SignalAnnotation annotation, int annotationIndex)
+        {
+            if (lastTriggeredVlmAnnotationIndex == annotationIndex)
+                return;
+
+            if (reviewTtsManager == null)
+                reviewTtsManager = FindObjectOfType<TTSManager>();
+
+            string responseText = annotation.metadata;
+            if (!string.IsNullOrWhiteSpace(responseText) && reviewTtsManager != null)
+            {
+                reviewTtsManager.PlaySpeech(responseText);
+                lastTriggeredVlmAnnotationIndex = annotationIndex;
+            }
+        }
+
+        private void ApplyVlmReplayState()
+        {
+            activeVlmReplayLabel = string.Empty;
+            activeVlmReplayAge = -1f;
+
+            if (signalAnnotations == null)
+                return;
+
+            SignalAnnotation best = null;
+            float bestAge = float.MaxValue;
+            for (int i = 0; i < signalAnnotations.Count; i++)
+            {
+                SignalAnnotation annotation = signalAnnotations[i];
+                if (annotation.type != SignalAnnotationType.VlmCapture)
+                    continue;
+
+                float age = currentTime - annotation.timestamp;
+                if (age < 0f || age > vlmReplayHoldSeconds)
+                    continue;
+
+                if (age < bestAge)
+                {
+                    best = annotation;
+                    bestAge = age;
+                }
+            }
+
+            if (best != null)
+            {
+                activeVlmReplayLabel = !string.IsNullOrWhiteSpace(best.metadata)
+                    ? best.metadata
+                    : (string.IsNullOrWhiteSpace(best.label) ? "VLMAnnotation active" : best.label);
+                activeVlmReplayAge = bestAge;
+            }
+        }
+
+        private void ClearReplayBehaviors()
+        {
+            activeVlmReplayLabel = string.Empty;
+            activeVlmReplayAge = -1f;
+
+            if (reviewSignalLightController == null)
+                reviewSignalLightController = FindObjectOfType<RobotSignalLightController>();
+
+            if (reviewSignalLightController != null)
+                reviewSignalLightController.ClearReviewSignalState();
+            if (reviewTtsManager == null)
+                reviewTtsManager = FindObjectOfType<TTSManager>();
+            if (reviewTtsManager != null)
+                reviewTtsManager.StopPlayback();
+            activeLightingReplayCandidates.Clear();
+            manualLightingReplayTestActive = false;
+        }
+
+        private static bool IsLightingAnnotation(SignalAnnotationType type)
+        {
+            return type == SignalAnnotationType.LightingLeft ||
+                   type == SignalAnnotationType.LightingRight ||
+                   type == SignalAnnotationType.LightingBoth;
+        }
+
+        public void ToggleLightingReplayTest()
+        {
+            if (reviewSignalLightController == null)
+                reviewSignalLightController = FindObjectOfType<RobotSignalLightController>();
+
+            if (reviewSignalLightController == null)
+            {
+                Debug.LogWarning("[SessionReview] Lighting replay test failed: RobotSignalLightController was not found.");
+                return;
+            }
+
+            manualLightingReplayTestActive = !manualLightingReplayTestActive;
+            reviewSignalLightController.SetReviewSignalState(manualLightingReplayTestActive, manualLightingReplayTestActive);
+            Debug.Log($"[SessionReview] Lighting replay test toggled: active={manualLightingReplayTestActive}.");
+        }
+
+        public void PlayAudioReplayTest()
+        {
+            if (reviewTtsManager == null)
+                reviewTtsManager = FindObjectOfType<TTSManager>();
+
+            if (reviewTtsManager == null)
+            {
+                Debug.LogWarning("[SessionReview] Audio replay test failed: TTSManager was not found.");
+                return;
+            }
+
+            string speechText = GetLatestReplaySpeechText();
+            if (string.IsNullOrWhiteSpace(speechText))
+                speechText = "Replay audio test.";
+
+            Debug.Log($"[SessionReview] Audio replay test speaking: {speechText}");
+            reviewTtsManager.PlaySpeech(speechText);
+        }
+
+        private string GetLatestReplaySpeechText()
+        {
+            if (signalAnnotations == null)
+                return string.Empty;
+
+            for (int i = signalAnnotations.Count - 1; i >= 0; i--)
+            {
+                SignalAnnotation annotation = signalAnnotations[i];
+                if (annotation != null &&
+                    annotation.type == SignalAnnotationType.VlmCapture &&
+                    !string.IsNullOrWhiteSpace(annotation.metadata))
+                {
+                    return annotation.metadata;
+                }
+            }
+
+            return string.Empty;
         }
 
         private Dictionary<string, Transform> transformCache = new Dictionary<string, Transform>();
@@ -341,12 +720,6 @@ namespace SessionReview
 
         public Camera GetActiveReviewCamera()
         {
-            if (robotFirstPersonCam != null && robotFirstPersonCam.enabled)
-                return robotFirstPersonCam;
-
-            if (pwdFirstPersonCam != null && pwdFirstPersonCam.enabled)
-                return pwdFirstPersonCam;
-
             if (rewindCamera != null && rewindCamera.enabled)
                 return rewindCamera;
 
@@ -374,6 +747,42 @@ namespace SessionReview
             }
         }
 
+        private void DisableLiveCameraDrivers()
+        {
+            disabledCameraBehaviours.Clear();
+            CacheAndDisableCameraBehaviours(robotFirstPersonCam);
+            CacheAndDisableCameraBehaviours(pwdFirstPersonCam);
+        }
+
+        private void RestoreLiveCameraDrivers()
+        {
+            foreach (var kvp in disabledCameraBehaviours)
+            {
+                if (kvp.Key != null)
+                    kvp.Key.enabled = kvp.Value;
+            }
+
+            disabledCameraBehaviours.Clear();
+        }
+
+        private void CacheAndDisableCameraBehaviours(Camera camera)
+        {
+            if (camera == null)
+                return;
+
+            CacheAndDisableBehaviour(camera.GetComponent<IVI.CameraScript>());
+            CacheAndDisableBehaviour(camera.GetComponent<IVI.WheelchairCameraSmoothing>());
+        }
+
+        private void CacheAndDisableBehaviour(Behaviour behaviour)
+        {
+            if (behaviour == null || disabledCameraBehaviours.ContainsKey(behaviour))
+                return;
+
+            disabledCameraBehaviours[behaviour] = behaviour.enabled;
+            behaviour.enabled = false;
+        }
+
         private void DisableAllRewindCameras()
         {
             rewindCamera.enabled = false;
@@ -386,7 +795,8 @@ namespace SessionReview
         {
             if (robotFirstPersonCam != null)
             {
-                robotFirstPersonCam.enabled = true;
+                ConfigureRewindFromSourceCamera(robotFirstPersonCam);
+                rewindCamera.enabled = true;
                 return;
             }
 
@@ -404,7 +814,8 @@ namespace SessionReview
         {
             if (pwdFirstPersonCam != null)
             {
-                pwdFirstPersonCam.enabled = true;
+                ConfigureRewindFromSourceCamera(pwdFirstPersonCam);
+                rewindCamera.enabled = true;
                 return;
             }
 
@@ -465,14 +876,63 @@ namespace SessionReview
             }
         }
 
+        private void UpdateRobotFPCamera()
+        {
+            if (robotFirstPersonCam != null)
+            {
+                ConfigureRewindFromSourceCamera(robotFirstPersonCam);
+                rewindCamera.enabled = true;
+            }
+        }
+
+        private void UpdatePwdFPCamera()
+        {
+            if (pwdFirstPersonCam != null)
+            {
+                ConfigureRewindFromSourceCamera(pwdFirstPersonCam);
+                rewindCamera.enabled = true;
+            }
+        }
+
         private void ActivateTopDown()
         {
             Vector3 center = ComputeSceneCenter();
-            rewindCamera.transform.position = new Vector3(center.x, center.y + topDownHeight, center.z);
+            var defaultBounds = new Bounds(center, new Vector3(topDownHeight, 1f, topDownHeight));
+            FocusActiveTopDownCamera(defaultBounds);
+        }
+
+        private void FocusActiveTopDownCamera(Bounds bounds)
+        {
+            float aspect = rewindCamera != null && rewindCamera.aspect > 0.01f
+                ? rewindCamera.aspect
+                : Mathf.Max(1f, (float)Screen.width / Mathf.Max(1, Screen.height));
+
+            float paddedWidth = Mathf.Max(bounds.size.x, 1f) + 4f;
+            float paddedDepth = Mathf.Max(bounds.size.z, 1f) + 4f;
+            float orthographicSize = Mathf.Max(paddedDepth * 0.5f, paddedWidth / Mathf.Max(aspect, 0.01f) * 0.5f);
+            float cameraHeight = Mathf.Max(bounds.max.y + 10f, bounds.center.y + topDownHeight);
+
+            rewindCamera.transform.position = new Vector3(bounds.center.x, cameraHeight, bounds.center.z);
             rewindCamera.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
             rewindCamera.orthographic = true;
-            rewindCamera.orthographicSize = topDownHeight * 0.5f;
+            rewindCamera.orthographicSize = Mathf.Max(orthographicSize, 5f);
             rewindCamera.enabled = true;
+        }
+
+        private bool TryGetTopDownGroundPoint(Vector2 screenPoint, out Vector3 groundPoint)
+        {
+            groundPoint = Vector3.zero;
+
+            if (!IsTopDownActive())
+                return false;
+
+            Ray ray = rewindCamera.ScreenPointToRay(screenPoint);
+            Plane plane = new Plane(Vector3.up, Vector3.zero);
+            if (!plane.Raycast(ray, out float enter))
+                return false;
+
+            groundPoint = ray.GetPoint(enter);
+            return true;
         }
 
         private void ActivateFreeCam()
@@ -482,6 +942,25 @@ namespace SessionReview
             rewindCamera.transform.LookAt(center);
             rewindCamera.orthographic = false;
             rewindCamera.enabled = true;
+        }
+
+        private void ConfigureRewindFromSourceCamera(Camera sourceCamera)
+        {
+            if (sourceCamera == null || rewindCamera == null)
+                return;
+
+            rewindCamera.transform.position = sourceCamera.transform.position;
+            rewindCamera.transform.rotation = sourceCamera.transform.rotation;
+            rewindCamera.orthographic = sourceCamera.orthographic;
+            rewindCamera.fieldOfView = sourceCamera.fieldOfView;
+            rewindCamera.orthographicSize = sourceCamera.orthographicSize;
+            rewindCamera.nearClipPlane = sourceCamera.nearClipPlane;
+            rewindCamera.farClipPlane = sourceCamera.farClipPlane;
+            // Match HDR and rendering path so post-processing / tone-mapping
+            // behaviour is identical to the source camera — mismatch causes
+            // brightness differences each time perspectives switch.
+            rewindCamera.allowHDR = sourceCamera.allowHDR;
+            rewindCamera.renderingPath = sourceCamera.renderingPath;
         }
 
         private Vector3 ComputeSceneCenter()
@@ -641,6 +1120,62 @@ namespace SessionReview
                 $"{playStr} {timeStr}  Speed:{speedStr}  [{perspStr}]  {trailStr}");
             GUI.Label(new Rect(20, labelY + 16, barWidth, 20),
                 "Space:Play  Left/Right:Step  +/-:Speed  F1-F5:View  G:Trails  Esc:Exit");
+
+            if (showSignalReplayStatus)
+                DrawSignalReplayStatus();
+        }
+
+        private void DrawSignalReplayStatus()
+        {
+            bool lightingActive = false;
+            if (reviewSignalLightController != null)
+            {
+                // Reflect the rewind-applied state through current annotation time window rather than live controller internals.
+                lightingActive = HasActiveLightingAnnotation();
+            }
+
+            bool vlmActive = !string.IsNullOrEmpty(activeVlmReplayLabel);
+            if (!lightingActive && !vlmActive)
+                return;
+
+            float width = 330f;
+            float height = vlmActive ? 68f : 48f;
+            Rect rect = new Rect(Screen.width - width - 20f, Screen.height - 150f, width, height);
+            GUI.Box(rect, "");
+
+            string lightingText = lightingActive ? "LightingAnnotation: ACTIVE" : "LightingAnnotation: idle";
+            GUI.Label(new Rect(rect.x + 10f, rect.y + 8f, rect.width - 20f, 20f), lightingText);
+
+            string vlmText = vlmActive
+                ? $"VLMAnnotation: {activeVlmReplayLabel}"
+                : "VLMAnnotation: idle";
+            GUI.Label(new Rect(rect.x + 10f, rect.y + 28f, rect.width - 20f, 20f), vlmText);
+
+            if (vlmActive)
+                GUI.Label(new Rect(rect.x + 10f, rect.y + 46f, rect.width - 20f, 18f), $"Age: {activeVlmReplayAge:F1}s");
+        }
+
+        private bool HasActiveLightingAnnotation()
+        {
+            if (signalAnnotations == null)
+                return false;
+
+            for (int i = 0; i < signalAnnotations.Count; i++)
+            {
+                SignalAnnotation annotation = signalAnnotations[i];
+                if (annotation.type != SignalAnnotationType.LightingLeft &&
+                    annotation.type != SignalAnnotationType.LightingRight &&
+                    annotation.type != SignalAnnotationType.LightingBoth)
+                {
+                    continue;
+                }
+
+                float age = currentTime - annotation.timestamp;
+                if (age >= 0f && age <= lightingReplayHoldSeconds)
+                    return true;
+            }
+
+            return false;
         }
     }
 }

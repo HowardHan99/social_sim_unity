@@ -79,6 +79,7 @@ namespace SessionReview
         public List<AgentControlSummary> controlSummaries = new List<AgentControlSummary>();
         public MetricsSnapshot metrics;
         public List<VLMCaptureEvent> vlmCaptures = new List<VLMCaptureEvent>();
+        public List<SignalAnnotation> signalAnnotations = new List<SignalAnnotation>();
 
         public float Duration => endTime - startTime;
     }
@@ -147,6 +148,7 @@ namespace SessionReview
                 float recStart = info.startTime - trajectoryRecorder.RecordingStartTime;
                 float recEnd = info.endTime - trajectoryRecorder.RecordingStartTime;
                 record.vlmCaptures = trajectoryRecorder.GetVLMCaptures(recStart, recEnd);
+                record.signalAnnotations = trajectoryRecorder.GetSignalAnnotations(recStart, recEnd);
             }
 
             Trials.Add(record);

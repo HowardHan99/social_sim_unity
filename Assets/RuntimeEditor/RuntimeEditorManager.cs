@@ -14,10 +14,6 @@ public class SpawnableObject
 
 public class RuntimeEditorManager : MonoBehaviour
 {
-    private const string DefaultSphereId = "0";
-    private const string DefaultCylinderId = "1";
-    private const string DefaultCapsuleId = "2";
-
     // Singleton Instance
     public static RuntimeEditorManager Instance { get; private set; }
 
@@ -60,6 +56,9 @@ public class RuntimeEditorManager : MonoBehaviour
     public Canvas spawnCanvas;
     public List<SpawnableObject> spawnableObjects = new List<SpawnableObject>();
     public float spawnDistance = 3f;
+
+    [Tooltip("When true, spawnCanvas is not shown in editor mode (e.g. Session Review World Building uses its own spawn UI).")]
+    public bool suppressSpawnCanvas;
 
 
     private GameObject currentSelectedObject;
@@ -234,10 +233,7 @@ public class RuntimeEditorManager : MonoBehaviour
         PrepareEditableObjects();
 
         if (spawnCanvas != null)
-        {
-            spawnCanvas.gameObject.SetActive(true);
-            //spawnCanvas.worldCamera = mainCamera;
-        }
+            spawnCanvas.gameObject.SetActive(!suppressSpawnCanvas);
 
         // Pause the game when entering editor mode
         if (PauseManager.Instance != null)
@@ -504,6 +500,8 @@ public class RuntimeEditorManager : MonoBehaviour
     void OnGUI()
     {
         if (!isEditorActive) return;
+        if (suppressSpawnCanvas)
+            return;
 
         // Simple UI overlay
         GUIStyle style = new GUIStyle(GUI.skin.label);
@@ -711,62 +709,24 @@ public class RuntimeEditorManager : MonoBehaviour
         SpawnableObject spawnableObject = spawnableObjects.Find(s => s.id == id);
         if (spawnableObject == null || spawnableObject.prefab == null)
         {
-            SpawnDefaultPrimitive(id);
+            Debug.LogWarning($"[RuntimeEditor] Spawnable object with id '{id}' not found or has no prefab assigned.");
             return;
         }
 
         Vector3 spawnPosition = GetSpawnPosition();
 
         GameObject spawnedObject = Instantiate(spawnableObject.prefab, spawnPosition, Quaternion.identity);
+        if (spawnedObject.GetComponent<SEAN.Scenario.Obstacles.TrackedObstacle>() == null)
+        {
+            var obstacle = spawnedObject.AddComponent<SEAN.Scenario.Obstacles.TrackedObstacle>();
+            obstacle.type = spawnableObject.prefab.name.ToLower();
+        }
+
         Debug.Log($"Spawned object: {spawnedObject.name} at {spawnPosition}");
 
         RegisterEditableObject(spawnedObject);
         SelectObject(spawnedObject);
 
-    }
-
-    private void SpawnDefaultPrimitive(string id)
-    {
-        PrimitiveType primitiveType;
-        string objectName;
-        string obstacleType;
-
-        switch (id)
-        {
-            case DefaultSphereId:
-                primitiveType = PrimitiveType.Sphere;
-                objectName = "Sphere";
-                obstacleType = "sphere";
-                break;
-            case DefaultCylinderId:
-                primitiveType = PrimitiveType.Cylinder;
-                objectName = "Cylinder";
-                obstacleType = "cylinder";
-                break;
-            case DefaultCapsuleId:
-                primitiveType = PrimitiveType.Capsule;
-                objectName = "Capsule";
-                obstacleType = "capsule";
-                break;
-            default:
-                Debug.LogWarning($"Spawnable object with id '{id}' not found!");
-                return;
-        }
-
-        Vector3 spawnPosition = GetSpawnPosition();
-        GameObject spawnedObject = GameObject.CreatePrimitive(primitiveType);
-        spawnedObject.name = objectName;
-        spawnedObject.transform.position = spawnPosition;
-
-        if (spawnedObject.GetComponent<SEAN.Scenario.Obstacles.TrackedObstacle>() == null)
-        {
-            var obstacle = spawnedObject.AddComponent<SEAN.Scenario.Obstacles.TrackedObstacle>();
-            obstacle.type = obstacleType;
-        }
-
-        RegisterEditableObject(spawnedObject);
-        SelectObject(spawnedObject);
-        Debug.Log($"Spawned default {objectName} at {spawnPosition}");
     }
 
     Vector3 GetSpawnPosition()
@@ -778,7 +738,9 @@ public class RuntimeEditorManager : MonoBehaviour
         {
             return hit.point;
         }
-        return mainCamera.transform.position + mainCamera.transform.forward * spawnDistance;
+
+        // Top-down / ortho: ray usually points into the scene; avoid using world-space forward alone (can miss the ground).
+        return ray.GetPoint(spawnDistance);
     }
 
     void RegisterEditableObject(GameObject obj)

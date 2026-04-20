@@ -62,6 +62,7 @@ public class RobotSignalLightController : MonoBehaviour
     private static readonly int EmissionColor = Shader.PropertyToID("_EmissionColor");
 
     private Coroutine activeFlashRoutine;
+    private Coroutine activeReviewFlashRoutine;
     private MaterialPropertyBlock propertyBlock;
     private Light[] discoveredLeftLights;
     private Light[] discoveredRightLights;
@@ -103,13 +104,60 @@ public class RobotSignalLightController : MonoBehaviour
 
     public void StopSignal()
     {
+        Debug.Log($"[RobotSignalLightController] StopSignal called on {name}.");
+
         if (activeFlashRoutine != null)
         {
             StopCoroutine(activeFlashRoutine);
             activeFlashRoutine = null;
         }
 
+        if (activeReviewFlashRoutine != null)
+        {
+            StopCoroutine(activeReviewFlashRoutine);
+            activeReviewFlashRoutine = null;
+        }
+
         SetAllSignals(false);
+    }
+
+    public void SetReviewSignalState(bool leftOn, bool rightOn)
+    {
+        Debug.Log($"[RobotSignalLightController] SetReviewSignalState called on {name}: leftOn={leftOn}, rightOn={rightOn}.");
+        PrepareReplayTargets();
+
+        if (activeFlashRoutine != null)
+        {
+            StopCoroutine(activeFlashRoutine);
+            activeFlashRoutine = null;
+        }
+
+        SetLeftSignals(leftOn);
+        SetRightSignals(rightOn);
+    }
+
+    public void ClearReviewSignalState()
+    {
+        Debug.Log($"[RobotSignalLightController] ClearReviewSignalState called on {name}.");
+        SetReviewSignalState(false, false);
+    }
+
+    public void PlayReviewFlashLeft()
+    {
+        Debug.Log($"[RobotSignalLightController] PlayReviewFlashLeft called on {name}.");
+        StartReviewFlash(SignalSide.Left);
+    }
+
+    public void PlayReviewFlashRight()
+    {
+        Debug.Log($"[RobotSignalLightController] PlayReviewFlashRight called on {name}.");
+        StartReviewFlash(SignalSide.Right);
+    }
+
+    public void PlayReviewFlashBoth()
+    {
+        Debug.Log($"[RobotSignalLightController] PlayReviewFlashBoth called on {name}.");
+        StartReviewFlash(SignalSide.Both);
     }
 
     private void StartFlash(SignalSide side)
@@ -120,6 +168,24 @@ public class RobotSignalLightController : MonoBehaviour
         }
 
         activeFlashRoutine = StartCoroutine(FlashRoutine(side));
+    }
+
+    private void StartReviewFlash(SignalSide side)
+    {
+        PrepareReplayTargets();
+        Debug.Log(
+            $"[RobotSignalLightController] StartReviewFlash called on {name}: side={side}, flashCount={flashCount}, onDuration={onDuration:F2}, offDuration={offDuration:F2}, " +
+            $"enablePhysicalLights={enablePhysicalLights}, leftLightCount={CountNonNull(leftLights) + CountNonNull(discoveredLeftLights)}, " +
+            $"rightLightCount={CountNonNull(rightLights) + CountNonNull(discoveredRightLights)}, " +
+            $"leftRendererCount={CountNonNull(leftSignalRenderers) + CountNonNull(discoveredLeftRenderers) + CountNonNull(leftEmissionTargets)}, " +
+            $"rightRendererCount={CountNonNull(rightSignalRenderers) + CountNonNull(discoveredRightRenderers) + CountNonNull(rightEmissionTargets)}.");
+
+        if (activeReviewFlashRoutine != null)
+        {
+            StopCoroutine(activeReviewFlashRoutine);
+        }
+
+        activeReviewFlashRoutine = StartCoroutine(ReviewFlashRoutine(side));
     }
 
     private IEnumerator FlashRoutine(SignalSide side)
@@ -136,6 +202,33 @@ public class RobotSignalLightController : MonoBehaviour
         }
 
         activeFlashRoutine = null;
+    }
+
+    private IEnumerator ReviewFlashRoutine(SignalSide side)
+    {
+        Debug.Log($"[RobotSignalLightController] ReviewFlashRoutine started on {name}: side={side}.");
+        SetAllSignals(false);
+
+        for (int i = 0; i < flashCount; i++)
+        {
+            Debug.Log($"[RobotSignalLightController] ReviewFlashRoutine pulse {i + 1}/{flashCount} ON for {side} on {name}.");
+            SetSideState(side, true);
+            yield return new WaitForSecondsRealtime(onDuration);
+
+            Debug.Log($"[RobotSignalLightController] ReviewFlashRoutine pulse {i + 1}/{flashCount} OFF for {side} on {name}.");
+            SetSideState(side, false);
+            yield return new WaitForSecondsRealtime(offDuration);
+        }
+
+        Debug.Log($"[RobotSignalLightController] ReviewFlashRoutine finished on {name}: side={side}.");
+        activeReviewFlashRoutine = null;
+    }
+
+    private void PrepareReplayTargets()
+    {
+        RefreshDiscoveredTargets();
+        if (autoEnableEmissionKeyword)
+            ConfigureEmissionMaterials();
     }
 
     private object Wait(float duration)
@@ -200,6 +293,8 @@ public class RobotSignalLightController : MonoBehaviour
         {
             if (lights[i] != null)
             {
+                if (isOn && !lights[i].gameObject.activeSelf)
+                    lights[i].gameObject.SetActive(true);
                 lights[i].enabled = isOn;
             }
         }
@@ -247,6 +342,21 @@ public class RobotSignalLightController : MonoBehaviour
         }
     }
 
+    private static int CountNonNull<T>(T[] values) where T : class
+    {
+        if (values == null)
+            return 0;
+
+        int count = 0;
+        for (int i = 0; i < values.Length; i++)
+        {
+            if (values[i] != null)
+                count++;
+        }
+
+        return count;
+    }
+
     private void ApplyRendererEmission(Renderer rendererTarget, bool applyToAllMaterials, int materialIndex, Color emissionColor)
     {
         if (rendererTarget == null)
@@ -284,6 +394,17 @@ public class RobotSignalLightController : MonoBehaviour
         rendererTarget.GetPropertyBlock(propertyBlock, materialIndex);
         propertyBlock.SetColor(EmissionColor, emissionColor);
         rendererTarget.SetPropertyBlock(propertyBlock, materialIndex);
+
+        Material[] runtimeMaterials = rendererTarget.materials;
+        if (runtimeMaterials != null && materialIndex >= 0 && materialIndex < runtimeMaterials.Length)
+        {
+            Material runtimeMaterial = runtimeMaterials[materialIndex];
+            if (runtimeMaterial != null && runtimeMaterial.HasProperty(EmissionColor))
+            {
+                runtimeMaterial.EnableKeyword("_EMISSION");
+                runtimeMaterial.SetColor(EmissionColor, emissionColor);
+            }
+        }
     }
 
     private void ConfigureEmissionMaterials()

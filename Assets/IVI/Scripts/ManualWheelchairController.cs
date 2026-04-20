@@ -1,5 +1,6 @@
 using System.Collections;
 using UnityEngine;
+using SessionReview;
 
 namespace IVI
 {
@@ -234,6 +235,9 @@ namespace IVI
         void OnGUI()
         {
             if (!initialized) return;
+
+            if (SessionReviewManager.Instance != null && SessionReviewManager.Instance.IsWorldBuildingModeActive)
+                return;
 
             if (waitingForStart)
             {

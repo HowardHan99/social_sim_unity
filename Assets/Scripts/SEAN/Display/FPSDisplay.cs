@@ -5,6 +5,7 @@
 // LICENSE file in the root directory of this source tree. 
 
 using UnityEngine;
+using SessionReview;
 
 namespace SEAN.Display
 {
@@ -12,6 +13,12 @@ namespace SEAN.Display
     {
         void OnGUI()
         {
+            if (SessionReviewManager.Instance != null && SessionReviewManager.Instance.IsWorldBuildingModeActive)
+                return;
+
+            if (Time.smoothDeltaTime <= 1e-6f)
+                return;
+
             int w = Screen.width, h = Screen.height;
             GUIStyle style = new GUIStyle();
             Rect rect = new Rect(0, 0, w, h * 2 / 100);

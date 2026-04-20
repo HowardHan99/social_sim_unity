@@ -42,6 +42,9 @@ public class PauseManager : MonoBehaviour
         // Toggle pause state when space key is pressed
         if (Input.GetKeyDown(KeyCode.Space))
         {
+            if (RuntimeEditorManager.Instance != null && RuntimeEditorManager.Instance.isEditorActive)
+                return;
+
             if (isPaused)
             {
                 UnpauseGame();

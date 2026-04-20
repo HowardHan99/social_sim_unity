@@ -56,6 +56,16 @@ namespace SessionReview
         [SerializeField] private float vlmMarkerYOffset = 0.25f;
         [SerializeField] private GameObject vlmAnnotationPrefab;
 
+        [Header("Signal Annotation Overlay")]
+        [SerializeField] private bool showSignalAnnotations = true;
+        [SerializeField] private Color lightingLeftAnnotationColor = new Color(1f, 0.72f, 0.2f, 0.98f);
+        [SerializeField] private Color lightingRightAnnotationColor = new Color(1f, 0.56f, 0.16f, 0.98f);
+        [SerializeField] private Color lightingBothAnnotationColor = new Color(1f, 0.9f, 0.25f, 0.98f);
+        [SerializeField] private float annotationStemHeight = 1.1f;
+        [SerializeField] private float annotationStemWidth = 0.05f;
+        [SerializeField] private float annotationHaloRadius = 0.22f;
+        [SerializeField] private float annotationYOffset = 0.12f;
+
         [Header("Auto Plan Path")]
         [SerializeField] private Color planPathColor = new Color(0.2f, 1f, 0.3f, 0.85f);
         [SerializeField] private float planPathLineWidth = 0.12f;
@@ -66,7 +76,9 @@ namespace SessionReview
         private List<LineRenderer> arrowLines = new List<LineRenderer>();
         private List<LineRenderer> stopCircleLines = new List<LineRenderer>();
         private List<LineRenderer> planPathLines = new List<LineRenderer>();
+        private List<LineRenderer> annotationLines = new List<LineRenderer>();
         private List<GameObject> vlmMarkers = new List<GameObject>();
+        private List<GameObject> annotationMarkers = new List<GameObject>();
         private List<GameObject> markers = new List<GameObject>();
         private bool isShowing;
 
@@ -82,17 +94,24 @@ namespace SessionReview
         /// <param name="timeOffset">recordingStartTime -- subtract from trial timestamps to get recording timestamps</param>
         public void ShowTrajectories(TrialRecord trial, StateRecording recording, ControlModeLog modeLog, float timeOffset = 0f)
         {
-            ShowTrajectories(trial, recording, modeLog, null, null, timeOffset);
+            ShowTrajectories(trial, recording, modeLog, null, null, null, timeOffset);
         }
 
         public void ShowTrajectories(TrialRecord trial, StateRecording recording, ControlModeLog modeLog,
             List<PlanPathSnapshot> planSnapshots, float timeOffset = 0f)
         {
-            ShowTrajectories(trial, recording, modeLog, planSnapshots, null, timeOffset);
+            ShowTrajectories(trial, recording, modeLog, planSnapshots, null, null, timeOffset);
         }
 
         public void ShowTrajectories(TrialRecord trial, StateRecording recording, ControlModeLog modeLog,
             List<PlanPathSnapshot> planSnapshots, List<VLMCaptureEvent> vlmCaptures, float timeOffset = 0f)
+        {
+            ShowTrajectories(trial, recording, modeLog, planSnapshots, vlmCaptures, null, timeOffset);
+        }
+
+        public void ShowTrajectories(TrialRecord trial, StateRecording recording, ControlModeLog modeLog,
+            List<PlanPathSnapshot> planSnapshots, List<VLMCaptureEvent> vlmCaptures, List<SignalAnnotation> signalAnnotations,
+            float timeOffset = 0f)
         {
             ClearAll();
             if (trial == null || recording == null) return;
@@ -205,7 +224,19 @@ namespace SessionReview
             }
 
             var vlmEvents = vlmCaptures ?? trial.vlmCaptures;
-            if (showVLMAnnotations && vlmEvents != null && vlmEvents.Count > 0)
+            List<SignalAnnotation> annotationsToRender = signalAnnotations ?? trial.signalAnnotations;
+            if ((annotationsToRender == null || annotationsToRender.Count == 0) &&
+                vlmEvents != null && vlmEvents.Count > 0)
+            {
+                annotationsToRender = ConvertLegacyVlmCaptures(vlmEvents);
+            }
+
+            if (showSignalAnnotations && annotationsToRender != null && annotationsToRender.Count > 0)
+            {
+                CreateSignalAnnotations(annotationsToRender);
+                AppendAnnotationLegendEntries(annotationsToRender);
+            }
+            else if (showVLMAnnotations && vlmEvents != null && vlmEvents.Count > 0)
             {
                 CreateVLMAnnotations(vlmEvents);
                 legendEntries.Add(new LegendEntry { label = $"VLM Capture ({vlmEvents.Count})", color = vlmAnnotationColor });
@@ -529,6 +560,223 @@ namespace SessionReview
             Debug.Log($"[SessionReview] VLM annotations: {events.Count}");
         }
 
+        private void CreateSignalAnnotations(List<SignalAnnotation> annotations)
+        {
+            int vlmCount = 0;
+            int lightingCount = 0;
+            for (int i = 0; i < annotations.Count; i++)
+            {
+                SignalAnnotation annotation = annotations[i];
+                CreateAnnotationBeacon(i, annotation);
+                if (annotation.type == SignalAnnotationType.VlmCapture)
+                    vlmCount++;
+                else if (IsLightingAnnotation(annotation.type))
+                    lightingCount++;
+            }
+
+            if (vlmCount > 0)
+                Debug.Log($"[SessionReview] VLMAnnotation rendered: {vlmCount}");
+            if (lightingCount > 0)
+                Debug.Log($"[SessionReview] LightingAnnotation rendered: {lightingCount}");
+        }
+
+        private void CreateAnnotationBeacon(int index, SignalAnnotation annotation)
+        {
+            Vector3 basePos = annotation.position + Vector3.up * annotationYOffset;
+            Color color = GetAnnotationColor(annotation.type);
+            float height = annotationStemHeight;
+            float haloRadius = annotationHaloRadius;
+            float topY = basePos.y + height;
+
+            string objectName = GetAnnotationObjectName(annotation.type, index);
+            GameObject parent = new GameObject(objectName);
+            parent.transform.SetParent(overlayParent.transform);
+            annotationMarkers.Add(parent);
+
+            LineRenderer stem = CreateAnnotationLineRenderer(parent.transform, "Stem", color, annotationStemWidth, annotationStemWidth * 0.85f);
+            stem.positionCount = 2;
+            stem.SetPosition(0, basePos);
+            stem.SetPosition(1, new Vector3(basePos.x, topY, basePos.z));
+
+            Vector3 center = new Vector3(basePos.x, topY, basePos.z);
+            LineRenderer halo = CreateAnnotationLineRenderer(parent.transform, "Halo", color, annotationStemWidth * 0.8f, annotationStemWidth * 0.8f);
+            halo.loop = true;
+            halo.positionCount = 4;
+            halo.SetPosition(0, center + new Vector3(0f, 0f, haloRadius));
+            halo.SetPosition(1, center + new Vector3(haloRadius, 0f, 0f));
+            halo.SetPosition(2, center + new Vector3(0f, 0f, -haloRadius));
+            halo.SetPosition(3, center + new Vector3(-haloRadius, 0f, 0f));
+
+            LineRenderer cap = CreateAnnotationLineRenderer(parent.transform, "Cap", color, annotationStemWidth * 0.65f, 0f);
+            cap.positionCount = 2;
+            cap.SetPosition(0, center);
+            cap.SetPosition(1, center + GetAnnotationDirection(annotation) * haloRadius * 1.75f);
+
+            CreateTypeAccent(parent.transform, center, annotation, color, haloRadius);
+        }
+
+        private void CreateTypeAccent(Transform parent, Vector3 center, SignalAnnotation annotation, Color color, float haloRadius)
+        {
+            switch (annotation.type)
+            {
+                case SignalAnnotationType.LightingLeft:
+                    CreateAccentWing(parent, center, color, Vector3.left, haloRadius);
+                    break;
+                case SignalAnnotationType.LightingRight:
+                    CreateAccentWing(parent, center, color, Vector3.right, haloRadius);
+                    break;
+                case SignalAnnotationType.LightingBoth:
+                    CreateAccentWing(parent, center, color, Vector3.left, haloRadius);
+                    CreateAccentWing(parent, center, color, Vector3.right, haloRadius);
+                    break;
+                default:
+                    CreateAccentCross(parent, center, color, haloRadius);
+                    break;
+            }
+        }
+
+        private void CreateAccentWing(Transform parent, Vector3 center, Color color, Vector3 side, float haloRadius)
+        {
+            LineRenderer wing = CreateAnnotationLineRenderer(parent, side.x < 0f ? "Wing_L" : "Wing_R",
+                color, annotationStemWidth * 0.6f, annotationStemWidth * 0.25f);
+            wing.positionCount = 2;
+            wing.SetPosition(0, center + side * haloRadius * 0.35f);
+            wing.SetPosition(1, center + side * haloRadius * 1.5f + Vector3.up * haloRadius * 0.25f);
+        }
+
+        private void CreateAccentCross(Transform parent, Vector3 center, Color color, float haloRadius)
+        {
+            LineRenderer cross = CreateAnnotationLineRenderer(parent, "Cross", color,
+                annotationStemWidth * 0.45f, annotationStemWidth * 0.45f);
+            cross.positionCount = 2;
+            cross.SetPosition(0, center + new Vector3(-haloRadius * 0.6f, 0f, -haloRadius * 0.6f));
+            cross.SetPosition(1, center + new Vector3(haloRadius * 0.6f, 0f, haloRadius * 0.6f));
+
+            LineRenderer cross2 = CreateAnnotationLineRenderer(parent, "Cross_2", color,
+                annotationStemWidth * 0.45f, annotationStemWidth * 0.45f);
+            cross2.positionCount = 2;
+            cross2.SetPosition(0, center + new Vector3(-haloRadius * 0.6f, 0f, haloRadius * 0.6f));
+            cross2.SetPosition(1, center + new Vector3(haloRadius * 0.6f, 0f, -haloRadius * 0.6f));
+        }
+
+        private LineRenderer CreateAnnotationLineRenderer(Transform parent, string name, Color color, float startWidth, float endWidth)
+        {
+            GameObject obj = new GameObject(name);
+            obj.transform.SetParent(parent);
+            LineRenderer lr = obj.AddComponent<LineRenderer>();
+            lr.useWorldSpace = true;
+            lr.startWidth = startWidth;
+            lr.endWidth = endWidth;
+            lr.numCornerVertices = 4;
+            ApplyLineMaterial(lr, color);
+            annotationLines.Add(lr);
+            return lr;
+        }
+
+        private Vector3 GetAnnotationDirection(SignalAnnotation annotation)
+        {
+            Vector3 forward = annotation.rotation * Vector3.forward;
+            forward.y = 0f;
+            if (forward.sqrMagnitude < 0.001f)
+                forward = Vector3.forward;
+            return forward.normalized;
+        }
+
+        private Color GetAnnotationColor(SignalAnnotationType type)
+        {
+            switch (type)
+            {
+                case SignalAnnotationType.VlmCapture:
+                    return vlmAnnotationColor;
+                case SignalAnnotationType.LightingLeft:
+                    return lightingLeftAnnotationColor;
+                case SignalAnnotationType.LightingRight:
+                    return lightingRightAnnotationColor;
+                case SignalAnnotationType.LightingBoth:
+                    return lightingBothAnnotationColor;
+                default:
+                    return Color.white;
+            }
+        }
+
+        private bool IsLightingAnnotation(SignalAnnotationType type)
+        {
+            return type == SignalAnnotationType.LightingLeft ||
+                   type == SignalAnnotationType.LightingRight ||
+                   type == SignalAnnotationType.LightingBoth;
+        }
+
+        private string GetAnnotationObjectName(SignalAnnotationType type, int index)
+        {
+            if (type == SignalAnnotationType.VlmCapture)
+                return $"VLMAnnotation_{index}";
+
+            if (IsLightingAnnotation(type))
+                return $"LightingAnnotation_{index}";
+
+            return $"SignalAnnotation_{index}";
+        }
+
+        private void AppendAnnotationLegendEntries(List<SignalAnnotation> annotations)
+        {
+            Dictionary<SignalAnnotationType, int> counts = new Dictionary<SignalAnnotationType, int>();
+            foreach (SignalAnnotation annotation in annotations)
+            {
+                if (!counts.ContainsKey(annotation.type))
+                    counts[annotation.type] = 0;
+                counts[annotation.type]++;
+            }
+
+            foreach (var pair in counts)
+            {
+                legendEntries.Add(new LegendEntry
+                {
+                    label = $"{GetAnnotationLegendLabel(pair.Key)} ({pair.Value})",
+                    color = GetAnnotationColor(pair.Key)
+                });
+            }
+        }
+
+        private string GetAnnotationLegendLabel(SignalAnnotationType type)
+        {
+            switch (type)
+            {
+                case SignalAnnotationType.VlmCapture:
+                    return "VLM Annotation";
+                case SignalAnnotationType.LightingLeft:
+                    return "Light Signal Left";
+                case SignalAnnotationType.LightingRight:
+                    return "Light Signal Right";
+                case SignalAnnotationType.LightingBoth:
+                    return "Light Signal Both";
+                default:
+                    return "Signal Annotation";
+            }
+        }
+
+        private List<SignalAnnotation> ConvertLegacyVlmCaptures(List<VLMCaptureEvent> events)
+        {
+            var annotations = new List<SignalAnnotation>();
+            if (events == null)
+                return annotations;
+
+            foreach (VLMCaptureEvent evt in events)
+            {
+                annotations.Add(new SignalAnnotation
+                {
+                    timestamp = evt.timestamp,
+                    agentId = evt.agentId,
+                    type = SignalAnnotationType.VlmCapture,
+                    position = evt.position,
+                    rotation = evt.rotation,
+                    label = "VLM Capture",
+                    metadata = string.Empty
+                });
+            }
+
+            return annotations;
+        }
+
         private void CreateVLMDiamond(int index, Vector3 center, Quaternion rotation)
         {
             float s = vlmMarkerSize;
@@ -664,7 +912,9 @@ namespace SessionReview
             arrowLines.Clear();
             stopCircleLines.Clear();
             planPathLines.Clear();
+            annotationLines.Clear();
             vlmMarkers.Clear();
+            annotationMarkers.Clear();
             markers.Clear();
             legendEntries.Clear();
             isShowing = false;
@@ -690,8 +940,14 @@ namespace SessionReview
             float lineH = 22f;
             float pad = 8f;
             float boxH = pad * 2 + legendEntries.Count * lineH + 20f;
-            float x = 15f;
-            float y = Screen.height - boxH - 15f;
+            const float marginRight = 20f;
+            const float gapAboveEndReviewButton = 12f;
+            // Must stay above SessionReviewManager.DrawEndReviewButton (y = Screen.height - 126, height 34).
+            const float endReviewButtonTopFromBottom = 126f;
+            float endReviewTopY = Screen.height - endReviewButtonTopFromBottom;
+            float x = Screen.width - boxW - marginRight;
+            float y = endReviewTopY - gapAboveEndReviewButton - boxH;
+            y = Mathf.Max(10f, y);
 
             GUI.backgroundColor = new Color(0f, 0f, 0f, 0.75f);
             GUI.Box(new Rect(x, y, boxW, boxH), "");
@@ -702,7 +958,7 @@ namespace SessionReview
                 fontSize = 13,
                 normal = { textColor = Color.white }
             };
-            GUI.Label(new Rect(x + pad, y + pad, boxW - pad * 2, 18f), "Agents", headerStyle);
+            GUI.Label(new Rect(x + pad, y + pad, boxW - pad * 2, 18f), "Review Legend", headerStyle);
 
             var labelStyle = new GUIStyle(GUI.skin.label) { fontSize = 12 };
             for (int i = 0; i < legendEntries.Count; i++)
@@ -723,4 +979,3 @@ namespace SessionReview
         }
     }
 }
-

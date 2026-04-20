@@ -51,6 +51,7 @@ namespace SessionReview
         public event OnTrialEnded TrialEnded;
 
         private SEAN.SEAN sean;
+        private bool subscribedToRobotTask;
         private bool tracking;
         private float trialStartTime;
         private ushort trialNumber;
@@ -63,29 +64,62 @@ namespace SessionReview
         private ManualWheelchairController pwdController;
         private LiveTrajectoryRecorder trajectoryRecorder;
         private IVI.INavigable pwdNavigable;
+        private float rosterRefreshUntilTime;
+        private bool pendingRosterRefresh;
+
+        public bool IsTracking => tracking;
+
+        void Awake()
+        {
+            trajectoryRecorder = GetComponent<LiveTrajectoryRecorder>();
+        }
 
         void Start()
         {
-            sean = SEAN.SEAN.instance;
-            if (sean == null || sean.robotTask == null)
-            {
-                enabled = false;
-                return;
-            }
-            trajectoryRecorder = GetComponent<LiveTrajectoryRecorder>();
-            sean.robotTask.onNewTask += HandleNewTask;
+            TryInitialize();
         }
 
         void OnDestroy()
         {
-            if (sean != null && sean.robotTask != null)
+            if (subscribedToRobotTask && sean != null && sean.robotTask != null)
                 sean.robotTask.onNewTask -= HandleNewTask;
+        }
+
+        private bool TryInitialize()
+        {
+            if (trajectoryRecorder == null)
+                trajectoryRecorder = GetComponent<LiveTrajectoryRecorder>();
+
+            if (sean == null)
+                sean = SEAN.SEAN.instance;
+
+            if (sean == null || sean.robotTask == null)
+                return false;
+
+            if (!subscribedToRobotTask)
+            {
+                sean.robotTask.onNewTask += HandleNewTask;
+                subscribedToRobotTask = true;
+            }
+
+            return true;
         }
 
         private void HandleNewTask()
         {
             if (tracking)
                 FinishCurrentTrial(TrialEndReason.Completion);
+
+            BeginTracking();
+        }
+
+        public void BeginTrackingForCurrentTask()
+        {
+            if (tracking)
+                return;
+
+            if (!TryInitialize() || !sean.robotTask.isRunning)
+                return;
 
             BeginTracking();
         }
@@ -161,6 +195,8 @@ namespace SessionReview
 
             tracking = true;
             RegisterAllWithRecorder();
+            pendingRosterRefresh = true;
+            rosterRefreshUntilTime = Time.time + 1.0f;
         }
 
         private void RegisterAllWithRecorder()
@@ -197,7 +233,14 @@ namespace SessionReview
 
         void Update()
         {
+            TryInitialize();
+
             if (!tracking) return;
+
+            if (pendingRosterRefresh)
+            {
+                RefreshTrackingRosterIfNeeded();
+            }
 
             foreach (var agent in trackedPedestrians)
             {
@@ -230,6 +273,69 @@ namespace SessionReview
 
             if (!sean.robotTask.isRunning && tracking)
                 FinishCurrentTrial(TrialEndReason.Timeout);
+        }
+
+        private void RefreshTrackingRosterIfNeeded()
+        {
+            if (Time.time > rosterRefreshUntilTime)
+            {
+                pendingRosterRefresh = false;
+                return;
+            }
+
+            bool addedAny = false;
+
+            if (pwdController == null)
+            {
+                pwdController = FindObjectOfType<ManualWheelchairController>();
+                if (pwdController != null)
+                {
+                    pwdNavigable = pwdController.GetComponent<IVI.INavigable>();
+                    string pwdId = GetObjectId(pwdController.gameObject);
+                    if (!string.IsNullOrEmpty(pwdId) && !agentRoles.ContainsKey(pwdId))
+                    {
+                        agentRoles[pwdId] = AgentRole.PWDPlayer;
+                        agentArrivals[pwdId] = new AgentArrivalInfo
+                        {
+                            objectId = pwdId,
+                            agentName = pwdController.gameObject.name,
+                            role = AgentRole.PWDPlayer,
+                            arrived = false,
+                            arrivalTime = -1f
+                        };
+                        addedAny = true;
+                    }
+                }
+            }
+
+            if (sean != null && sean.pedestrianBehavior != null && sean.pedestrianBehavior.agents != null)
+            {
+                foreach (var agent in sean.pedestrianBehavior.agents)
+                {
+                    if (agent == null) continue;
+
+                    string agentId = GetObjectId(agent.gameObject);
+                    if (string.IsNullOrEmpty(agentId) || agentRoles.ContainsKey(agentId))
+                        continue;
+
+                    trackedPedestrians.Add(agent);
+                    bool isPWD = agent.GetComponent<SFPWDAgent>() != null;
+                    AgentRole role = isPWD ? AgentRole.BackgroundPWD : AgentRole.BackgroundPed;
+                    agentRoles[agentId] = role;
+                    agentArrivals[agentId] = new AgentArrivalInfo
+                    {
+                        objectId = agentId,
+                        agentName = agent.gameObject.name,
+                        role = role,
+                        arrived = false,
+                        arrivalTime = -1f
+                    };
+                    addedAny = true;
+                }
+            }
+
+            if (addedAny)
+                RegisterAllWithRecorder();
         }
 
         private void FinishCurrentTrial(TrialEndReason reason)

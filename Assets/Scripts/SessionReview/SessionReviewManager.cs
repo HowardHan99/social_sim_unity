@@ -1,8 +1,9 @@
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using System.Collections.Generic;
 using System.IO;
 using System;
-using SEAN.Scenario.Obstacles;
+using UnityTemplateProjects;
 
 namespace SessionReview
 {
@@ -25,8 +26,8 @@ namespace SessionReview
         [SerializeField] private KeyCode freeCamKey = KeyCode.F5;
 
         [Header("Speed")]
-        [SerializeField] private KeyCode speedUpKey = KeyCode.Equals;
-        [SerializeField] private KeyCode speedDownKey = KeyCode.Minus;
+        [SerializeField] private KeyCode speedUpKey = KeyCode.RightBracket;
+        [SerializeField] private KeyCode speedDownKey = KeyCode.LeftBracket;
 
         [Header("VLM Capture Annotation")]
         [Tooltip("Transform whose position is recorded when a VLM capture occurs (e.g. the robot base_link). If null, falls back to SEAN robot.")]
@@ -46,6 +47,7 @@ namespace SessionReview
         [SerializeField] private KeyCode startTrialKey = KeyCode.Return;
         [SerializeField] private KeyCode exportReviewKey = KeyCode.E;
         [SerializeField] private bool requirePlanBeforeTrialStart = true;
+        [SerializeField] private bool allowStartWithoutRosBackend = true;
 
         private SessionTracker sessionTracker;
         private ControlModeLog controlModeLog;
@@ -60,10 +62,12 @@ namespace SessionReview
         private bool showPostTrialPrompt;
         private bool showTrialStartPrompt;
         private bool trialStartReady;
+        private bool bypassRosBackendForTrialStart;
         private bool postTrialPromptPausedTime;
         private bool trialStartPromptPausedTime;
         private bool trialWarmupPending;
         private int trialWarmupDelayFrames;
+        private int trialWarmupGoalRepublishFrames;
         private TrialEndInfo latestTrialEndInfo;
         private TrialRecord currentReviewTrial;
         private Rerun.StateRecording currentReviewRecording;
@@ -75,28 +79,27 @@ namespace SessionReview
         private bool isTopDownPanning;
         private Vector2 lastTopDownMousePosition;
         private static Texture2D lineTexture;
+        private static Texture2D worldBuildingThumbMailbox;
+        private static Texture2D worldBuildingThumbCardboard;
+        private static Texture2D worldBuildingThumbWheelchair;
+        private static bool worldBuildingSpawnThumbnailsLoadAttempted;
         private bool showReviewCompletionPrompt;
         private bool inWorldBuildingMode;
         private Camera worldBuildingCamera;
-        private Cameramovement worldBuildingCameraMovement;
-        private ObstaclePublisher worldBuildingObstaclePublisher;
-        private TrackedObstacle selectedWorldObstacle;
-        private Vector3 selectedWorldObstacleStartPosition;
-        private Vector3 selectedWorldObstacleDragOffset;
-        private Plane worldBuildingDragPlane;
-        private bool isDraggingWorldObstacle;
+        private RuntimeEditorManager runtimeEditorManager;
+        private SimpleCameraController worldBuildingCameraController;
         private Vector3 pendingWorldBuildingCameraPosition;
         private Quaternion pendingWorldBuildingCameraRotation;
         private float pendingWorldBuildingOrthoSize;
         private bool hasPendingWorldBuildingCameraPose;
-        private bool worldBuildingPausedTime;
-        private float worldBuildingSavedTimeScale = 1f;
         private Camera worldBuildingPreviousMainCamera;
         private bool worldBuildingPreviousMainCameraEnabled;
         private int worldBuildingPreviousTargetDisplay;
-        private int worldBuildingPreviousMovementTargetDisplay;
-        private bool worldBuildingPreviousUseUnscaledTime;
         private bool hasWorldBuildingTargetDisplayOverride;
+        private Camera runtimeEditorPreviousRaycastCamera;
+        private MonoBehaviour runtimeEditorPreviousCameraController;
+        private readonly System.Collections.Generic.Dictionary<Behaviour, bool> worldBuildingDisabledBehaviours =
+            new System.Collections.Generic.Dictionary<Behaviour, bool>();
 
         public bool UsePostTrialPrompt => usePostTrialPrompt;
         public bool IsReviewModeActive => inRewindMode;
@@ -129,6 +132,7 @@ namespace SessionReview
         private SEAN.Scenario.Agents.PwdGender selectedPwdGender = SEAN.Scenario.Agents.PwdGender.Male;
         private int selectedSceneIndex = -1;
         private Vector2 onboardingSceneScroll;
+        private Vector2 onboardingContentScroll;
 
         private GUIStyle onboardingPanelStyle;
         private GUIStyle onboardingTitleStyle;
@@ -145,6 +149,8 @@ namespace SessionReview
         private bool onboardingStylesBuilt;
         private Texture2D femaleWheelchairPreview;
         private Texture2D maleWheelchairPreview;
+        private Texture2D dogwalkerPreview;
+        private Texture2D scooterUserPreview;
 
         void Awake()
         {
@@ -288,7 +294,12 @@ namespace SessionReview
         private void HandleTrialStartPromptInput()
         {
             if (Input.GetKeyDown(startTrialKey) || Input.GetKeyDown(KeyCode.KeypadEnter))
-                StartTrialFromPrompt();
+            {
+                if (trialStartReady)
+                {
+                    StartTrialFromPrompt();
+                }
+            }
         }
 
         private void HandlePostTrialPromptInput()
@@ -315,23 +326,31 @@ namespace SessionReview
                 StartNextTrialFromReviewCompletion();
         }
 
-        private void HandleWorldBuildingInput()
+        private void EndReviewAndShowNextStepMenu()
         {
-            if (worldBuildingCamera == null)
+            if (!inRewindMode)
                 return;
 
-            if (Input.GetMouseButtonDown(0))
-                BeginWorldObstacleDrag();
+            rewindController?.SetPlaybackSpeed(0f);
+            if (rewindController != null && rewindController.IsPlaying)
+                rewindController.TogglePlayPause();
 
-            if (isDraggingWorldObstacle && Input.GetMouseButton(0))
-                UpdateWorldObstacleDrag();
+            showReviewCompletionPrompt = true;
+            showReviewExportPanel = false;
+        }
 
-            if (isDraggingWorldObstacle && Input.GetMouseButtonUp(0))
-                EndWorldObstacleDrag();
-
-            if (Input.GetKeyDown(KeyCode.Escape))
+        private void HandleWorldBuildingInput()
+        {
+            if (runtimeEditorManager == null)
             {
-                CancelWorldObstacleDrag();
+                ExitWorldBuildingMode();
+                showPostTrialPrompt = true;
+                PauseForPostTrialPrompt();
+                return;
+            }
+
+            if (!runtimeEditorManager.isEditorActive)
+            {
                 ExitWorldBuildingMode();
                 showPostTrialPrompt = true;
                 PauseForPostTrialPrompt();
@@ -340,8 +359,14 @@ namespace SessionReview
 
         private void HandleRewindInput()
         {
-            HandleReviewTopDownObstacleEditing();
             HandleTopDownMouseInput();
+
+            bool lightingTestPressed =
+                Input.GetKeyDown(KeyCode.Minus) ||
+                Input.GetKeyDown(KeyCode.KeypadMinus);
+            bool audioTestPressed =
+                Input.GetKeyDown(KeyCode.Equals) ||
+                Input.GetKeyDown(KeyCode.KeypadPlus);
 
             if (Input.GetKeyDown(exportReviewKey))
             {
@@ -366,6 +391,18 @@ namespace SessionReview
                 rewindController.JumpToStart();
             if (Input.GetKeyDown(KeyCode.End))
                 rewindController.JumpToEnd();
+
+            if (lightingTestPressed)
+            {
+                Debug.Log("[SessionReview] Replay lighting test key detected.");
+                rewindController.ToggleLightingReplayTest();
+            }
+
+            if (audioTestPressed)
+            {
+                Debug.Log("[SessionReview] Replay audio test key detected.");
+                rewindController.PlayAudioReplayTest();
+            }
 
             if (Input.GetKeyDown(speedUpKey))
             {
@@ -403,25 +440,6 @@ namespace SessionReview
                 EnterRewindMode(Mathf.Min(trialArchive.TrialCount - 1, reviewTrialIndex + 1));
         }
 
-        private void HandleReviewTopDownObstacleEditing()
-        {
-            if (!IsReviewTopDownEditingActive())
-            {
-                if (!inWorldBuildingMode)
-                    CancelWorldObstacleDrag();
-                return;
-            }
-
-            if (Input.GetMouseButtonDown(0) && !IsMouseOverReviewUi())
-                BeginWorldObstacleDrag();
-
-            if (isDraggingWorldObstacle && Input.GetMouseButton(0))
-                UpdateWorldObstacleDrag();
-
-            if (isDraggingWorldObstacle && Input.GetMouseButtonUp(0))
-                EndWorldObstacleDrag();
-        }
-
         private void HandleTopDownMouseInput()
         {
             if (rewindController == null || rewindController.CurrentPerspective != PerspectiveMode.TopDown)
@@ -429,9 +447,6 @@ namespace SessionReview
                 isTopDownPanning = false;
                 return;
             }
-
-            if (isDraggingWorldObstacle)
-                return;
 
             float scroll = Input.mouseScrollDelta.y;
             if (Mathf.Abs(scroll) > 0.01f)
@@ -456,25 +471,6 @@ namespace SessionReview
 
             if (Input.GetMouseButtonUp(2))
                 isTopDownPanning = false;
-        }
-
-        private bool IsReviewTopDownEditingActive()
-        {
-            return inRewindMode &&
-                   !inWorldBuildingMode &&
-                   rewindController != null &&
-                   rewindController.CurrentPerspective == PerspectiveMode.TopDown;
-        }
-
-        private Camera GetObstacleEditingCamera()
-        {
-            if (inWorldBuildingMode)
-                return worldBuildingCamera;
-
-            if (IsReviewTopDownEditingActive())
-                return rewindController != null ? rewindController.GetActiveReviewCamera() : null;
-
-            return null;
         }
 
         private bool IsMouseOverReviewUi()
@@ -528,14 +524,15 @@ namespace SessionReview
             float recEnd = trial.endTime - timeOffset;
             var planSnapshots = trajectoryRecorder.GetPlanSnapshots(recStart, recEnd);
             var vlmCaptures = trajectoryRecorder.GetVLMCaptures(recStart, recEnd);
+            var signalAnnotations = trajectoryRecorder.GetSignalAnnotations(recStart, recEnd);
 
             // Freeze the simulation
             savedTimeScale = Time.timeScale;
             Time.timeScale = 0f;
 
-            trajectoryRenderer.ShowTrajectories(trial, recording, controlModeLog, planSnapshots, vlmCaptures, timeOffset);
+            trajectoryRenderer.ShowTrajectories(trial, recording, controlModeLog, planSnapshots, vlmCaptures, signalAnnotations, timeOffset);
             metricsOverlay.ShowTrial(trial);
-            rewindController.EnterRewind(trial, recording, controlModeLog, trajectoryRenderer, timeOffset);
+            rewindController.EnterRewind(trial, recording, controlModeLog, trajectoryRenderer, timeOffset, signalAnnotations);
 
             currentReviewTrial = trial;
             currentReviewRecording = recording;
@@ -590,7 +587,11 @@ namespace SessionReview
 
         public void StartTrialFromPrompt()
         {
-            if (!trialStartReady)
+            bool canStart = bypassRosBackendForTrialStart
+                ? IsTrialPreviewReadyWithoutRosBackend()
+                : trialStartReady;
+
+            if (!canStart)
                 return;
 
             var sean = SEAN.SEAN.instance;
@@ -603,16 +604,34 @@ namespace SessionReview
                 selectedPwdStartupControl);
             ApplyStartupControlDefaults();
             SessionOnboardingSettings.MarkTrialStarted();
+            trialWarmupPending = false;
+            trialWarmupDelayFrames = 0;
+            trialStartReady = false;
             showTrialStartPrompt = false;
 
             ResetControlledMotion();
             sean.robotTask.StartPendingOrNewTask();
+            sessionTracker?.BeginTrackingForCurrentTask();
 
             if (trialStartPromptPausedTime)
             {
                 Time.timeScale = savedTimeScale;
                 trialStartPromptPausedTime = false;
             }
+        }
+
+        public void StartTrialWithoutRosBackend()
+        {
+            if (!IsTrialPreviewReadyWithoutRosBackend())
+            {
+                trialWarmupPending = true;
+                trialWarmupDelayFrames = 0;
+                ProcessTrialWarmup();
+                return;
+            }
+
+            bypassRosBackendForTrialStart = true;
+            StartTrialFromPrompt();
         }
 
         /// <summary>
@@ -632,6 +651,54 @@ namespace SessionReview
 
             string agentId = SessionTracker.GetObjectId(source.gameObject);
             trajectoryRecorder.RecordVLMCapture(agentId, source.position, source.rotation);
+        }
+
+        public void RecordLightingAnnotation(SignalAnnotationType type = SignalAnnotationType.LightingBoth)
+        {
+            if (trajectoryRecorder == null)
+                return;
+
+            Transform source = ResolveVLMSource();
+            if (source == null)
+            {
+                Debug.LogWarning("[SessionReview] RecordLightingAnnotation: no source transform available.");
+                return;
+            }
+
+            if (type != SignalAnnotationType.LightingLeft &&
+                type != SignalAnnotationType.LightingRight &&
+                type != SignalAnnotationType.LightingBoth)
+            {
+                type = SignalAnnotationType.LightingBoth;
+            }
+
+            string agentId = SessionTracker.GetObjectId(source.gameObject);
+            trajectoryRecorder.RecordSignalAnnotation(new SignalAnnotation
+            {
+                timestamp = -1f,
+                agentId = agentId,
+                type = type,
+                position = source.position,
+                rotation = source.rotation,
+                label = "LightingAnnotation",
+                metadata = string.Empty
+            });
+        }
+
+        public void AttachVLMReplayResponse(string responseText)
+        {
+            if (trajectoryRecorder == null)
+                return;
+
+            Transform source = ResolveVLMSource();
+            if (source == null)
+            {
+                Debug.LogWarning("[SessionReview] AttachVLMReplayResponse: no source transform available.");
+                return;
+            }
+
+            string agentId = SessionTracker.GetObjectId(source.gameObject);
+            trajectoryRecorder.AttachMetadataToLatestVlmAnnotation(agentId, "VLMAnnotation", responseText);
         }
 
         private Transform ResolveVLMSource()
@@ -698,9 +765,6 @@ namespace SessionReview
             if (showReviewCompletionPrompt)
                 DrawReviewCompletionPrompt();
 
-            if (inWorldBuildingMode)
-                DrawWorldBuildingOverlay();
-
             if (inRewindMode)
             {
                 DrawReviewRoiOverlay();
@@ -712,10 +776,25 @@ namespace SessionReview
                     $"REWIND [{playing}] Trial {reviewTrialIndex + 1}/{trialArchive.TrialCount}");
                 GUI.Label(new Rect(Screen.width - 335, 35, 320, 20),
                     $"{perspective} | F1-F5:View  Wheel:Zoom  MMB:Pan  Tab/Esc:Exit");
+                DrawEndReviewButton();
                 DrawTopDownReviewControls();
 
                 DrawReviewExportPanel();
             }
+
+            if (inWorldBuildingMode)
+                DrawWorldBuildingOverlay();
+        }
+
+        private void DrawEndReviewButton()
+        {
+            float width = 156f;
+            float height = 34f;
+            float x = Screen.width - width - 18f;
+            float y = Screen.height - 126f;
+
+            if (GUI.Button(new Rect(x, y, width, height), "End Review / Menu"))
+                EndReviewAndShowNextStepMenu();
         }
 
         private void DrawTopDownReviewControls()
@@ -726,11 +805,7 @@ namespace SessionReview
             Bounds roi = ReviewRoiExporter.ApplySettings(reviewExportEnvelope, reviewExportSettings);
             float top = 66f;
             float right = Screen.width - 500f;
-            string selectionText = selectedWorldObstacle != null
-                ? $"Editing: {selectedWorldObstacle.gameObject.name}"
-                : "LMB drag obstacle";
-
-            GUI.Label(new Rect(right, top - 22f, 304f, 20f), selectionText);
+            GUI.Label(new Rect(right, top - 22f, 304f, 20f), "Top-down review navigation");
 
             if (GUI.Button(new Rect(right, top, 96f, 28f), "Focus"))
                 rewindController.FocusTopDownOnBounds(roi, false);
@@ -977,34 +1052,102 @@ namespace SessionReview
 
         private void DrawWorldBuildingOverlay()
         {
-            float width = 520f;
-            float height = 196f;
+            float width = 560f;
+            float height = 178f;
             Rect rect = new Rect(24f, 24f, width, height);
             GUI.Box(rect, "");
             GUI.Label(new Rect(rect.x + 16f, rect.y + 14f, rect.width - 32f, 24f), "World Building");
             GUI.Label(new Rect(rect.x + 16f, rect.y + 40f, rect.width - 32f, 40f),
-                "Simulation is paused and the top-down edit camera is active. Drag tracked obstacles on the ground plane, and use the camera controls when you are not dragging.");
+                "Session review is now using the runtime editor. It opens in top-down map view so objects are easier to place, and you can switch into free camera while editing.");
 
-            string selectionText = selectedWorldObstacle != null
-                ? $"Selected: {selectedWorldObstacle.gameObject.name} ({selectedWorldObstacle.type})"
+            string cameraMode = worldBuildingCameraController != null && worldBuildingCameraController.IsTopDownView()
+                ? "Top-down"
+                : "Free camera";
+            string selectionText = runtimeEditorManager != null && runtimeEditorManager.CurrentSelectedObject != null
+                ? $"Selected: {runtimeEditorManager.CurrentSelectedObject.name}"
                 : "Selected: none";
-            GUI.Label(new Rect(rect.x + 16f, rect.y + 78f, rect.width - 32f, 22f), selectionText);
-            GUI.Label(new Rect(rect.x + 16f, rect.y + 100f, rect.width - 32f, 22f),
-                "Controls: Left click drag obstacle | WASD/R/F move camera | Right mouse look | Esc back");
 
-            if (GUI.Button(new Rect(rect.x + 16f, rect.y + 144f, 122f, 28f), "Back To Menu"))
+            GUI.Label(new Rect(rect.x + 16f, rect.y + 82f, rect.width - 32f, 22f), $"Camera: {cameraMode}");
+            GUI.Label(new Rect(rect.x + 16f, rect.y + 104f, rect.width - 32f, 22f), selectionText);
+            GUI.Label(new Rect(rect.x + 16f, rect.y + 126f, rect.width - 32f, 40f),
+                "Controls: Left click select/drag gizmo | T translate | R rotate | Right mouse free cam | Middle mouse pan | Wheel zoom | F4 top-down reset | E or Esc exit editor");
+
+            if (GUI.Button(new Rect(rect.x + 16f, rect.y + 140f, 132f, 28f), "Back To Menu"))
             {
-                CancelWorldObstacleDrag();
                 ExitWorldBuildingMode();
                 showPostTrialPrompt = true;
                 PauseForPostTrialPrompt();
             }
 
-            if (GUI.Button(new Rect(rect.x + 152f, rect.y + 144f, 122f, 28f), "Choose Scenario"))
+            if (GUI.Button(new Rect(rect.x + 164f, rect.y + 140f, 122f, 28f), "Choose Scenario"))
                 OpenOnboardingFromPostTrial();
 
-            if (GUI.Button(new Rect(rect.x + 288f, rect.y + 144f, 122f, 28f), "Run Again"))
+            if (GUI.Button(new Rect(rect.x + 302f, rect.y + 140f, 122f, 28f), "Run Again"))
                 StartNextTrialFromPrompt();
+
+            DrawWorldBuildingSpawnPalette();
+        }
+
+        private void DrawWorldBuildingSpawnPalette()
+        {
+            EnsureWorldBuildingSpawnThumbnails();
+
+            float panelWidth = 420f;
+            float panelHeight = 188f;
+            Rect panelRect = new Rect(Screen.width - panelWidth - 24f, Screen.height - panelHeight - 24f, panelWidth, panelHeight);
+            GUI.Box(panelRect, "");
+            GUI.Label(new Rect(panelRect.x + 16f, panelRect.y + 12f, panelRect.width - 32f, 22f), "Add Objects");
+            GUI.Label(new Rect(panelRect.x + 16f, panelRect.y + 32f, panelRect.width - 32f, 36f),
+                "Pick a prop (mailbox, box, or wheelchair). It spawns in front of the top-down view for placement.");
+
+            float cardY = panelRect.y + 74f;
+            float cardWidth = 120f;
+            float cardHeight = 96f;
+            float gap = 12f;
+
+            DrawSpawnPreviewCard(new Rect(panelRect.x + 16f, cardY, cardWidth, cardHeight), "Mailbox", "0", worldBuildingThumbMailbox);
+            DrawSpawnPreviewCard(new Rect(panelRect.x + 16f + cardWidth + gap, cardY, cardWidth, cardHeight), "Cardboard Box", "1", worldBuildingThumbCardboard);
+            DrawSpawnPreviewCard(new Rect(panelRect.x + 16f + (cardWidth + gap) * 2f, cardY, cardWidth, cardHeight), "Wheelchair", "2", worldBuildingThumbWheelchair);
+        }
+
+        private static void EnsureWorldBuildingSpawnThumbnails()
+        {
+            if (worldBuildingSpawnThumbnailsLoadAttempted)
+                return;
+            worldBuildingSpawnThumbnailsLoadAttempted = true;
+
+            worldBuildingThumbMailbox = Resources.Load<Texture2D>("WorldBuildingUI/0_mailboxImg");
+            worldBuildingThumbCardboard = Resources.Load<Texture2D>("WorldBuildingUI/1_CardboxImg");
+            worldBuildingThumbWheelchair = Resources.Load<Texture2D>("WorldBuildingUI/2_wheelChairAgentImg");
+        }
+
+        private void DrawSpawnPreviewCard(Rect rect, string label, string spawnId, Texture2D thumbnail)
+        {
+            GUI.Box(rect, "");
+
+            Rect previewRect = new Rect(rect.x + 12f, rect.y + 10f, rect.width - 24f, 44f);
+            DrawWorldBuildingSpawnThumbnail(previewRect, thumbnail);
+
+            GUI.Label(new Rect(rect.x + 10f, rect.y + 58f, rect.width - 20f, 18f), label);
+            if (GUI.Button(new Rect(rect.x + 10f, rect.y + 74f, rect.width - 20f, 18f), $"Add {label}"))
+                runtimeEditorManager?.SpawnObject(spawnId);
+        }
+
+        private static void DrawWorldBuildingSpawnThumbnail(Rect rect, Texture2D thumbnail)
+        {
+            Color previousColor = GUI.color;
+            Texture2D backdrop = Texture2D.whiteTexture;
+
+            GUI.color = new Color(0.12f, 0.15f, 0.19f, 0.95f);
+            GUI.DrawTexture(rect, backdrop);
+
+            if (thumbnail != null)
+            {
+                GUI.color = Color.white;
+                GUI.DrawTexture(rect, thumbnail, ScaleMode.ScaleToFit, true);
+            }
+
+            GUI.color = previousColor;
         }
 
         private void HandleReviewPlaybackReachedEnd()
@@ -1012,15 +1155,17 @@ namespace SessionReview
             if (!inRewindMode)
                 return;
 
-            showReviewCompletionPrompt = true;
+            EndReviewAndShowNextStepMenu();
         }
 
         private void DrawTrialStartPrompt()
         {
             EnsureOnboardingStyles();
 
+            bool noRosReady = IsTrialPreviewReadyWithoutRosBackend();
+
             float width = 520f;
-            float height = 260f;
+            float height = allowStartWithoutRosBackend ? 312f : 260f;
             Rect rect = new Rect((Screen.width - width) * 0.5f, 24f, width, height);
 
             GUI.Box(rect, "");
@@ -1060,13 +1205,34 @@ namespace SessionReview
                 "Robot and PWD can be set independently. The opposite pairing is only the default recommendation.",
                 onboardingHintStyle);
 
-            GUI.enabled = trialStartReady;
+            if (allowStartWithoutRosBackend)
+            {
+                GUI.Label(new Rect(rect.x + 18f, rect.y + 212f, rect.width - 36f, 28f),
+                    trialStartReady
+                        ? "ROS-backed start is ready. You can still bypass ROS explicitly if needed."
+                        : noRosReady
+                            ? "No ROS backend? The scene is ready; only the live planner is missing."
+                            : "Preparing non-ROS scene setup before a bypass start is allowed.",
+                    onboardingHintStyle);
+            }
+
+            GUI.enabled = trialStartReady || bypassRosBackendForTrialStart;
             if (GUI.Button(new Rect(rect.x + 152f, rect.y + 214f, 218f, 36f),
                 trialStartReady ? $"Start Trial [{startTrialKey}]" : "Loading..."))
             {
                 StartTrialFromPrompt();
             }
             GUI.enabled = true;
+
+            if (allowStartWithoutRosBackend)
+            {
+                GUI.enabled = trialStartReady || noRosReady;
+                if (GUI.Button(new Rect(rect.x + 152f, rect.y + 258f, 218f, 32f), "Start Without ROS Backend"))
+                {
+                    StartTrialWithoutRosBackend();
+                }
+                GUI.enabled = true;
+            }
         }
 
         private void PauseForPostTrialPrompt()
@@ -1131,22 +1297,7 @@ namespace SessionReview
                 PauseForPostTrialPrompt();
                 return;
             }
-
-            PauseForWorldBuildingMode();
             PrepareTopDownWorldBuildingCamera(worldBuildingCamera);
-
-            worldBuildingCameraMovement = worldBuildingCamera.GetComponent<Cameramovement>();
-            if (worldBuildingCameraMovement != null)
-            {
-                worldBuildingPreviousMovementTargetDisplay = worldBuildingCameraMovement.targetDisplay;
-                worldBuildingPreviousUseUnscaledTime = worldBuildingCameraMovement.useUnscaledTime;
-                worldBuildingCameraMovement.targetDisplay = 0;
-                worldBuildingCameraMovement.useUnscaledTime = true;
-                worldBuildingCameraMovement.enabled = true;
-            }
-            worldBuildingObstaclePublisher = FindObjectOfType<ObstaclePublisher>();
-            selectedWorldObstacle = null;
-            isDraggingWorldObstacle = false;
 
             if (hasPendingWorldBuildingCameraPose)
             {
@@ -1156,7 +1307,37 @@ namespace SessionReview
                     worldBuildingCamera.orthographicSize = pendingWorldBuildingOrthoSize;
             }
 
+            if (!EnsureRuntimeEditorReady())
+            {
+                showPostTrialPrompt = true;
+                PauseForPostTrialPrompt();
+                return;
+            }
+
             worldBuildingCamera.enabled = true;
+            runtimeEditorPreviousRaycastCamera = runtimeEditorManager.ActiveRaycastCamera;
+            runtimeEditorPreviousCameraController = runtimeEditorManager.cameraController;
+            runtimeEditorManager.SetEditorCamera(worldBuildingCamera, worldBuildingCameraController);
+            if (hasPendingWorldBuildingCameraPose)
+            {
+                FocusWorldBuildingCameraOnBounds(new Bounds(
+                    new Vector3(pendingWorldBuildingCameraPosition.x, 0f, pendingWorldBuildingCameraPosition.z),
+                    new Vector3(
+                        Mathf.Max(pendingWorldBuildingOrthoSize * 2f, 10f),
+                        1f,
+                        Mathf.Max(pendingWorldBuildingOrthoSize * 2f, 10f))));
+            }
+            else
+            {
+                FocusWorldBuildingCameraOnCurrentScene();
+                worldBuildingCameraController.SnapToTopDownView();
+            }
+
+            worldBuildingCameraController.SyncToCurrentTransform();
+
+            runtimeEditorManager.suppressSpawnCanvas = true;
+            runtimeEditorManager.SetEditorMode(true);
+
             showPostTrialPrompt = false;
             showReviewCompletionPrompt = false;
             inWorldBuildingMode = true;
@@ -1164,15 +1345,18 @@ namespace SessionReview
 
         private void ExitWorldBuildingMode()
         {
-            CancelWorldObstacleDrag();
             inWorldBuildingMode = false;
 
-            if (worldBuildingCameraMovement != null)
+            if (runtimeEditorManager != null)
             {
-                worldBuildingCameraMovement.enabled = false;
-                worldBuildingCameraMovement.useUnscaledTime = worldBuildingPreviousUseUnscaledTime;
-                if (hasWorldBuildingTargetDisplayOverride)
-                    worldBuildingCameraMovement.targetDisplay = worldBuildingPreviousMovementTargetDisplay;
+                runtimeEditorManager.suppressSpawnCanvas = false;
+
+                if (runtimeEditorManager.isEditorActive)
+                    runtimeEditorManager.SetEditorMode(false);
+
+                runtimeEditorManager.SetEditorCamera(
+                    runtimeEditorPreviousRaycastCamera != null ? runtimeEditorPreviousRaycastCamera : worldBuildingCamera,
+                    runtimeEditorPreviousCameraController);
             }
 
             if (worldBuildingCamera != null)
@@ -1193,112 +1377,15 @@ namespace SessionReview
                 worldBuildingCamera.enabled = worldBuildingPreviousMainCameraEnabled;
             }
 
-            worldBuildingCameraMovement = null;
+            runtimeEditorPreviousRaycastCamera = null;
+            runtimeEditorPreviousCameraController = null;
+            worldBuildingCameraController = null;
             worldBuildingCamera = null;
-            worldBuildingObstaclePublisher = null;
-            selectedWorldObstacle = null;
             hasPendingWorldBuildingCameraPose = false;
             worldBuildingPreviousMainCamera = null;
             hasWorldBuildingTargetDisplayOverride = false;
 
-            ResumeFromWorldBuildingMode();
-        }
-
-        private void BeginWorldObstacleDrag()
-        {
-            Camera obstacleCamera = GetObstacleEditingCamera();
-            if (obstacleCamera == null)
-            {
-                selectedWorldObstacle = null;
-                return;
-            }
-
-            if (worldBuildingObstaclePublisher == null)
-                worldBuildingObstaclePublisher = FindObjectOfType<ObstaclePublisher>();
-
-            Ray ray = obstacleCamera.ScreenPointToRay(Input.mousePosition);
-            if (!Physics.Raycast(ray, out RaycastHit hit, 1000f))
-            {
-                selectedWorldObstacle = null;
-                return;
-            }
-
-            TrackedObstacle obstacle = hit.collider.GetComponentInParent<TrackedObstacle>();
-            if (obstacle == null || !obstacle.gameObject.activeInHierarchy)
-            {
-                selectedWorldObstacle = null;
-                return;
-            }
-
-            selectedWorldObstacle = obstacle;
-            selectedWorldObstacleStartPosition = obstacle.transform.position;
-            worldBuildingDragPlane = new Plane(Vector3.up, obstacle.GetCenter());
-
-            if (worldBuildingDragPlane.Raycast(ray, out float enter))
-            {
-                Vector3 hitPoint = ray.GetPoint(enter);
-                selectedWorldObstacleDragOffset = obstacle.transform.position - hitPoint;
-                isDraggingWorldObstacle = true;
-                if (worldBuildingCameraMovement != null)
-                    worldBuildingCameraMovement.enabled = false;
-                isTopDownPanning = false;
-            }
-        }
-
-        private void UpdateWorldObstacleDrag()
-        {
-            if (selectedWorldObstacle == null)
-                return;
-
-            Camera obstacleCamera = GetObstacleEditingCamera();
-            if (obstacleCamera == null)
-                return;
-
-            Ray ray = obstacleCamera.ScreenPointToRay(Input.mousePosition);
-            if (!worldBuildingDragPlane.Raycast(ray, out float enter))
-                return;
-
-            Vector3 hitPoint = ray.GetPoint(enter);
-            Vector3 targetPosition = hitPoint + selectedWorldObstacleDragOffset;
-            targetPosition.y = selectedWorldObstacleStartPosition.y;
-            selectedWorldObstacle.transform.position = targetPosition;
-        }
-
-        private void EndWorldObstacleDrag()
-        {
-            if (selectedWorldObstacle != null && worldBuildingObstaclePublisher != null)
-                worldBuildingObstaclePublisher.ForcePublish();
-
-            isDraggingWorldObstacle = false;
-            if (worldBuildingCameraMovement != null && inWorldBuildingMode)
-                worldBuildingCameraMovement.enabled = true;
-        }
-
-        private void CancelWorldObstacleDrag()
-        {
-            selectedWorldObstacle = null;
-            isDraggingWorldObstacle = false;
-            if (worldBuildingCameraMovement != null && inWorldBuildingMode)
-                worldBuildingCameraMovement.enabled = true;
-        }
-
-        private void PauseForWorldBuildingMode()
-        {
-            if (worldBuildingPausedTime)
-                return;
-
-            worldBuildingSavedTimeScale = Time.timeScale;
-            Time.timeScale = 0f;
-            worldBuildingPausedTime = true;
-        }
-
-        private void ResumeFromWorldBuildingMode()
-        {
-            if (!worldBuildingPausedTime)
-                return;
-
-            Time.timeScale = worldBuildingSavedTimeScale;
-            worldBuildingPausedTime = false;
+            RestoreWorldBuildingCameraBehaviours();
         }
 
         private void ResetControlledMotion()
@@ -1352,12 +1439,229 @@ namespace SessionReview
             hasWorldBuildingTargetDisplayOverride = true;
             cameraToUse.targetDisplay = 0;
             cameraToUse.orthographic = true;
+            cameraToUse.nearClipPlane = 0.05f;
+            cameraToUse.farClipPlane = Mathf.Max(cameraToUse.farClipPlane, 2000f);
             cameraToUse.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+        }
+
+        private void FocusWorldBuildingCameraOnCurrentScene()
+        {
+            Bounds focusBounds;
+            if (TryGetWorldBuildingFocusBounds(out focusBounds))
+            {
+                FocusWorldBuildingCameraOnBounds(focusBounds);
+                return;
+            }
+
+            if (worldBuildingCamera == null)
+                return;
+
+            Vector3 fallbackCenter = Vector3.zero;
+            float fallbackExtent = 30f;
+            worldBuildingCamera.transform.position = new Vector3(fallbackCenter.x, fallbackExtent, fallbackCenter.z);
+            worldBuildingCamera.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+            worldBuildingCamera.orthographic = true;
+            worldBuildingCamera.orthographicSize = fallbackExtent * 0.5f;
+        }
+
+        private bool TryGetWorldBuildingFocusBounds(out Bounds focusBounds)
+        {
+            Bounds roi = ReviewRoiExporter.ApplySettings(reviewExportEnvelope, reviewExportSettings);
+            if (roi.size.x > 0.1f && roi.size.z > 0.1f)
+            {
+                focusBounds = roi;
+                return true;
+            }
+
+            var sean = SEAN.SEAN.instance;
+            if (sean != null && sean.environment != null && sean.environment.environment != null)
+            {
+                Renderer[] renderers = sean.environment.environment.GetComponentsInChildren<Renderer>(true);
+                bool hasBounds = false;
+                Bounds combined = default;
+                foreach (Renderer renderer in renderers)
+                {
+                    if (renderer == null || !renderer.enabled)
+                        continue;
+
+                    if (!hasBounds)
+                    {
+                        combined = renderer.bounds;
+                        hasBounds = true;
+                    }
+                    else
+                    {
+                        combined.Encapsulate(renderer.bounds);
+                    }
+                }
+
+                if (hasBounds)
+                {
+                    focusBounds = combined;
+                    return true;
+                }
+            }
+
+            focusBounds = default;
+            return false;
+        }
+
+        private void FocusWorldBuildingCameraOnBounds(Bounds bounds)
+        {
+            if (worldBuildingCamera == null)
+                return;
+
+            float aspect = worldBuildingCamera.aspect > 0.01f
+                ? worldBuildingCamera.aspect
+                : Mathf.Max(1f, (float)Screen.width / Mathf.Max(1, Screen.height));
+            float paddedWidth = Mathf.Max(bounds.size.x, 8f) + 6f;
+            float paddedDepth = Mathf.Max(bounds.size.z, 8f) + 6f;
+            float orthographicSize = Mathf.Max(paddedDepth * 0.5f, paddedWidth / Mathf.Max(aspect, 0.01f) * 0.5f);
+            float cameraHeight = Mathf.Max(bounds.max.y + 20f, bounds.center.y + orthographicSize + 10f);
+
+            worldBuildingCamera.transform.position = new Vector3(bounds.center.x, cameraHeight, bounds.center.z);
+            worldBuildingCamera.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+            worldBuildingCamera.orthographic = true;
+            worldBuildingCamera.orthographicSize = Mathf.Max(orthographicSize, 8f);
+        }
+
+        /// <summary>
+        /// Finds a scene RuntimeEditorManager even if its GameObject is inactive (FindObjectOfType skips inactive in 2020).
+        /// Avoids creating a duplicate: a second instance is destroyed in Awake, leaving a broken reference and an empty spawn list.
+        /// </summary>
+        private RuntimeEditorManager FindRuntimeEditorManagerForWorldBuilding()
+        {
+            RuntimeEditorManager singleton = RuntimeEditorManager.Instance;
+            if (singleton != null)
+                return singleton;
+
+            foreach (RuntimeEditorManager candidate in Resources.FindObjectsOfTypeAll<RuntimeEditorManager>())
+            {
+                if (candidate == null)
+                    continue;
+                GameObject go = candidate.gameObject;
+                if (!go.scene.IsValid())
+                    continue;
+                return candidate;
+            }
+
+            return null;
+        }
+
+        private static bool WorldBuildingSpawnListLooksConfigured(List<SpawnableObject> list)
+        {
+            if (list == null || list.Count < 3)
+                return false;
+            return FindSpawnableById(list, "0") != null
+                && FindSpawnableById(list, "1") != null
+                && FindSpawnableById(list, "2") != null;
+        }
+
+        private static SpawnableObject FindSpawnableById(List<SpawnableObject> list, string id)
+        {
+            foreach (SpawnableObject entry in list)
+            {
+                if (entry != null && entry.id == id && entry.prefab != null)
+                    return entry;
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Scene-specific RuntimeEditorManager may have no spawn list; fill from Resources so IMGUI Add buttons work.
+        /// </summary>
+        private void EnsureWorldBuildingSpawnPrefabsConfigured()
+        {
+            if (runtimeEditorManager == null)
+                return;
+
+            if (runtimeEditorManager.spawnableObjects == null)
+                runtimeEditorManager.spawnableObjects = new List<SpawnableObject>();
+
+            if (WorldBuildingSpawnListLooksConfigured(runtimeEditorManager.spawnableObjects))
+                return;
+
+            GameObject mailboxPrefab = Resources.Load<GameObject>("WorldBuildingSpawns/Mailbox");
+            GameObject boxPrefab = Resources.Load<GameObject>("WorldBuildingSpawns/Cardboard_Box");
+            GameObject wheelchairPrefab = Resources.Load<GameObject>("WorldBuildingSpawns/Wheelchair_male");
+            if (mailboxPrefab == null || boxPrefab == null || wheelchairPrefab == null)
+            {
+                Debug.LogError("[SessionReview] World building spawn prefabs missing. Expected Resources/WorldBuildingSpawns/Mailbox, Cardboard_Box, Wheelchair_male.");
+                return;
+            }
+
+            runtimeEditorManager.spawnableObjects.Clear();
+            runtimeEditorManager.spawnableObjects.Add(new SpawnableObject { id = "0", prefab = mailboxPrefab, spawnButton = null });
+            runtimeEditorManager.spawnableObjects.Add(new SpawnableObject { id = "1", prefab = boxPrefab, spawnButton = null });
+            runtimeEditorManager.spawnableObjects.Add(new SpawnableObject { id = "2", prefab = wheelchairPrefab, spawnButton = null });
+        }
+
+        private bool EnsureRuntimeEditorReady()
+        {
+            runtimeEditorManager = FindRuntimeEditorManagerForWorldBuilding();
+            if (runtimeEditorManager == null)
+            {
+                GameObject runtimeEditorObject = new GameObject("RuntimeEditorManager");
+                runtimeEditorManager = runtimeEditorObject.AddComponent<RuntimeEditorManager>();
+            }
+
+            if (!runtimeEditorManager.gameObject.activeInHierarchy)
+                runtimeEditorManager.gameObject.SetActive(true);
+
+            EnsureWorldBuildingSpawnPrefabsConfigured();
+
+            if (PauseManager.Instance == null)
+            {
+                GameObject pauseManagerObject = new GameObject("PauseManager");
+                pauseManagerObject.AddComponent<PauseManager>();
+            }
+
+            if (worldBuildingCamera == null)
+                return false;
+
+            worldBuildingCameraController = worldBuildingCamera.GetComponent<SimpleCameraController>();
+            if (worldBuildingCameraController == null)
+                worldBuildingCameraController = worldBuildingCamera.gameObject.AddComponent<SimpleCameraController>();
+
+            Cameramovement legacyCameraMovement = worldBuildingCamera.GetComponent<Cameramovement>();
+            if (legacyCameraMovement != null)
+                CacheAndDisableWorldBuildingBehaviour(legacyCameraMovement);
+
+            foreach (IVI.CameraScript cameraScript in FindObjectsOfType<IVI.CameraScript>(true))
+                CacheAndDisableWorldBuildingBehaviour(cameraScript);
+
+            foreach (IVI.WheelchairCameraSmoothing smoothing in FindObjectsOfType<IVI.WheelchairCameraSmoothing>(true))
+                CacheAndDisableWorldBuildingBehaviour(smoothing);
+
+            worldBuildingCameraController.enabled = true;
+            return true;
+        }
+
+        private void CacheAndDisableWorldBuildingBehaviour(Behaviour behaviour)
+        {
+            if (behaviour == null || worldBuildingDisabledBehaviours.ContainsKey(behaviour))
+                return;
+
+            worldBuildingDisabledBehaviours[behaviour] = behaviour.enabled;
+            behaviour.enabled = false;
+        }
+
+        private void RestoreWorldBuildingCameraBehaviours()
+        {
+            foreach (var kvp in worldBuildingDisabledBehaviours)
+            {
+                if (kvp.Key != null)
+                    kvp.Key.enabled = kvp.Value;
+            }
+
+            worldBuildingDisabledBehaviours.Clear();
         }
 
         private void ShowTrialStartPrompt()
         {
             showTrialStartPrompt = true;
+            bypassRosBackendForTrialStart = false;
             if (IsTrialPreviewReady())
             {
                 trialStartReady = true;
@@ -1376,6 +1680,7 @@ namespace SessionReview
             trialStartReady = false;
             trialWarmupPending = true;
             trialWarmupDelayFrames = 0;
+            trialWarmupGoalRepublishFrames = 0;
             ProcessTrialWarmup();
         }
 
@@ -1394,6 +1699,11 @@ namespace SessionReview
             if (sean == null || sean.robotTask == null)
                 return;
 
+            SessionOnboardingSettings.SyncInFlightTrialControls(
+                selectedPlayerMode,
+                selectedRobotStartupControl,
+                selectedPwdStartupControl);
+
             ApplyStartupControlDefaults();
 
             if (!sean.robotTask.hasPreparedTaskPreview)
@@ -1401,10 +1711,24 @@ namespace SessionReview
                 sean.robotTask.PrepareTaskPreview();
             }
 
+            if (requirePlanBeforeTrialStart && !bypassRosBackendForTrialStart && sean.robotTask.hasPreparedTaskPreview)
+            {
+                if (trialWarmupGoalRepublishFrames > 0)
+                {
+                    trialWarmupGoalRepublishFrames--;
+                }
+                else
+                {
+                    sean.robotTask.RepublishPreviewGoal();
+                    trialWarmupGoalRepublishFrames = 20;
+                }
+            }
+
             if (IsTrialPreviewReady())
             {
                 trialStartReady = true;
                 trialWarmupPending = false;
+                trialWarmupGoalRepublishFrames = 0;
 
                 if (showTrialStartPrompt && !trialStartPromptPausedTime)
                 {
@@ -1416,6 +1740,16 @@ namespace SessionReview
         }
 
         private bool IsTrialPreviewReady()
+        {
+            return IsTrialPreviewReadyCore(requireRosPlan: true);
+        }
+
+        private bool IsTrialPreviewReadyWithoutRosBackend()
+        {
+            return IsTrialPreviewReadyCore(requireRosPlan: false);
+        }
+
+        private bool IsTrialPreviewReadyCore(bool requireRosPlan)
         {
             var sean = SEAN.SEAN.instance;
             if (sean == null || sean.robotTask == null || !sean.robotTask.hasPreparedTaskPreview)
@@ -1429,7 +1763,7 @@ namespace SessionReview
                     return false;
             }
 
-            if (requirePlanBeforeTrialStart)
+            if (requirePlanBeforeTrialStart && requireRosPlan && !bypassRosBackendForTrialStart)
             {
                 var planVisualizer = FindObjectOfType<SEAN.Display.PlanVisualizer>();
                 if (planVisualizer == null)
@@ -1463,6 +1797,130 @@ namespace SessionReview
                 pwdController.startInManualMode = pwdManual;
                 pwdController.ApplyStartupControlMode(pwdManual);
             }
+
+            bool usePwdAsMainCamera =
+                selectedPlayerMode == OnboardingPlayerMode.Human &&
+                selectedPwdStartupControl == StartupControlMode.Manual;
+
+            if (usePwdAsMainCamera)
+                ActivatePwdCameraAsMain();
+            else
+                RestoreRobotGameplayCameras();
+        }
+
+        private static readonly HashSet<string> pwdCameraNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "wheelchairCamera", "PWDThirdPersonCamera", "PWDFirstPersonCamera"
+        };
+
+        private static bool IsPwdCamera(Camera cam)
+        {
+            if (cam == null) return false;
+            if (pwdCameraNames.Contains(cam.name)) return true;
+            if (cam.GetComponent<IVI.WheelchairCameraSmoothing>() != null) return true;
+            if (cam.GetComponent<IVI.CameraScript>() != null)
+            {
+                var pwdPlayer = cam.transform.root;
+                if (pwdPlayer != null && pwdPlayer.name == "PWDPlayer")
+                    return true;
+            }
+            return false;
+        }
+
+        private Camera FindPwdCamera()
+        {
+            foreach (var smoothing in FindObjectsOfType<IVI.WheelchairCameraSmoothing>())
+            {
+                var cam = smoothing != null ? smoothing.GetComponent<Camera>() : null;
+                if (cam != null) return cam;
+            }
+
+            foreach (Camera cam in Camera.allCameras)
+            {
+                if (IsPwdCamera(cam))
+                    return cam;
+            }
+
+            GameObject pwdPlayer = GameObject.Find("PWDPlayer");
+            if (pwdPlayer != null)
+            {
+                foreach (var cam in pwdPlayer.GetComponentsInChildren<Camera>(true))
+                    return cam;
+            }
+
+            return null;
+        }
+
+        private void RestoreRobotGameplayCameras()
+        {
+            // Disable ALL PWD cameras (including disabled ones that allCameras would miss)
+            foreach (Camera cam in FindObjectsOfType<Camera>(true))
+            {
+                if (IsPwdCamera(cam))
+                {
+                    cam.enabled = false;
+                    cam.targetDisplay = 1;
+                }
+            }
+
+            foreach (var smoothing in FindObjectsOfType<IVI.WheelchairCameraSmoothing>(true))
+            {
+                if (smoothing == null) continue;
+                var cam = smoothing.GetComponent<Camera>();
+                if (cam != null)
+                {
+                    cam.enabled = false;
+                    cam.targetDisplay = 1;
+                }
+            }
+
+            var sean = SEAN.SEAN.instance;
+            if (sean?.robot == null)
+            {
+                Debug.LogWarning("[SessionReview] RestoreRobotGameplayCameras: SEAN robot is null");
+                return;
+            }
+
+            void EnableRobotCam(Camera cam, string label)
+            {
+                if (cam == null)
+                {
+                    Debug.LogWarning($"[SessionReview] RestoreRobotGameplayCameras: {label} is null");
+                    return;
+                }
+                cam.gameObject.SetActive(true);
+                cam.enabled = true;
+                cam.targetDisplay = 0;
+                Debug.Log($"[SessionReview] Enabled {label}: '{cam.name}', enabled={cam.enabled}, display={cam.targetDisplay}");
+            }
+
+            EnableRobotCam(sean.robot.camera_first, "camera_first");
+            EnableRobotCam(sean.robot.camera_third, "camera_third");
+        }
+
+        private void ActivatePwdCameraAsMain()
+        {
+            Camera pwdCam = FindPwdCamera();
+            if (pwdCam == null)
+            {
+                Debug.LogWarning("[SessionReview] ActivatePwdCameraAsMain: no PWD camera found");
+                return;
+            }
+
+            // First enable the PWD camera
+            pwdCam.targetDisplay = 0;
+            pwdCam.enabled = true;
+            pwdCam.gameObject.SetActive(true);
+
+            // Disable ALL other cameras (including disabled ones, using FindObjectsOfType)
+            foreach (Camera cam in FindObjectsOfType<Camera>(true))
+            {
+                if (cam == pwdCam)
+                    continue;
+                cam.enabled = false;
+            }
+
+            Debug.Log($"[SessionReview] Activated PWD camera '{pwdCam.name}' as main view");
         }
 
         private void InitializeOnboardingSelection()
@@ -1500,6 +1958,7 @@ namespace SessionReview
             {
                 onboardingSavedTimeScale = Time.timeScale;
                 onboardingPausedTime = false;
+                bypassRosBackendForTrialStart = false;
                 RefreshOnboardingWarmupState();
             }
             else if (onboardingPausedTime)
@@ -1514,7 +1973,7 @@ namespace SessionReview
             EnsureOnboardingStyles();
 
             float panelWidth = Mathf.Min(Screen.width * 0.78f, 1100f);
-            float panelHeight = Mathf.Min(Screen.height * 0.8f, 780f);
+            float panelHeight = Mathf.Min(Screen.height * 0.88f, 860f);
             float panelX = (Screen.width - panelWidth) * 0.5f;
             float panelY = (Screen.height - panelHeight) * 0.5f;
             Rect panelRect = new Rect(panelX, panelY, panelWidth, panelHeight);
@@ -1536,45 +1995,17 @@ namespace SessionReview
                 "Choose who is playing, pick the PWD player gender when human control is enabled, and select the session scene to launch.",
                 onboardingBodyStyle);
             y += 72f;
-
-            GUI.Label(new Rect(x, y, 260f, 30f), "Who Is Playing?", onboardingSectionStyle);
-            y += 42f;
-
-            if (DrawChipButton(new Rect(x, y, 180f, 46f), "Robot", selectedPlayerMode == OnboardingPlayerMode.Robot))
-                ApplyRecommendedStartupControlsForPlayerMode(OnboardingPlayerMode.Robot);
-            if (DrawChipButton(new Rect(x + 196f, y, 180f, 46f), "Human", selectedPlayerMode == OnboardingPlayerMode.Human))
-                ApplyRecommendedStartupControlsForPlayerMode(OnboardingPlayerMode.Human);
-            y += 66f;
-
-            if (selectedPwdStartupControl == StartupControlMode.Manual)
-            {
-                GUI.Label(new Rect(x, y, innerWidth, 30f), "PWD Player Gender", onboardingSectionStyle);
-                y += 42f;
-
-                DrawGenderPreviewCard(new Rect(x, y, 220f, 196f), "Male", maleWheelchairPreview,
-                    selectedPwdGender == SEAN.Scenario.Agents.PwdGender.Male,
-                    () => selectedPwdGender = SEAN.Scenario.Agents.PwdGender.Male);
-
-                DrawGenderPreviewCard(new Rect(x + 236f, y, 220f, 196f), "Female", femaleWheelchairPreview,
-                    selectedPwdGender == SEAN.Scenario.Agents.PwdGender.Female,
-                    () => selectedPwdGender = SEAN.Scenario.Agents.PwdGender.Female);
-
-                if (DrawChipButton(new Rect(x, y + 208f, 160f, 40f), "Male", selectedPwdGender == SEAN.Scenario.Agents.PwdGender.Male))
-                    selectedPwdGender = SEAN.Scenario.Agents.PwdGender.Male;
-                if (DrawChipButton(new Rect(x + 176f, y + 208f, 160f, 40f), "Female", selectedPwdGender == SEAN.Scenario.Agents.PwdGender.Female))
-                    selectedPwdGender = SEAN.Scenario.Agents.PwdGender.Female;
-                y += 266f;
-            }
-
-            GUI.Label(new Rect(x, y, innerWidth, 30f), "Session To Play", onboardingSectionStyle);
-            y += 40f;
-
             var sceneChange = FindObjectOfType<SceneChange>();
             float footerTop = panelRect.y + panelRect.height - 86f;
-            float sceneHeight = sceneChange != null && sceneChange.SceneCount > 0
-                ? Mathf.Max(220f, footerTop - y - 12f)
-                : 160f;
-            DrawSceneSelection(new Rect(x, y, innerWidth, sceneHeight));
+            float scrollTop = y;
+            float scrollHeight = Mathf.Max(180f, footerTop - scrollTop - 18f);
+            Rect scrollRect = new Rect(x, scrollTop, innerWidth, scrollHeight);
+            float contentHeight = GetOnboardingContentHeight(sceneChange);
+            Rect viewRect = new Rect(0f, 0f, innerWidth - 18f, contentHeight);
+
+            onboardingContentScroll = GUI.BeginScrollView(scrollRect, onboardingContentScroll, viewRect);
+            DrawOnboardingContent(viewRect.width, sceneChange);
+            GUI.EndScrollView();
 
             bool canWarmupNow = CanWarmupCurrentSelectionInActiveScene();
             string actionLabel = SessionOnboardingSettings.HasCompletedOnboarding ? "Apply and Reload" : "Start Session";
@@ -1610,6 +2041,83 @@ namespace SessionReview
             }
         }
 
+        private float GetOnboardingContentHeight(SceneChange sceneChange)
+        {
+            float height = 0f;
+            height += 42f + 46f + 20f;
+
+            if (selectedPwdStartupControl == StartupControlMode.Manual)
+            {
+                height += 42f + 248f + 18f;
+                height += 42f + 150f + 22f;
+            }
+
+            height += 40f;
+
+            int sceneCount = sceneChange != null ? sceneChange.SceneCount : 0;
+            float sceneHeight = sceneCount > 0
+                ? Mathf.Max(160f, sceneCount * 48f + 8f)
+                : 160f;
+
+            height += 30f + sceneHeight;
+            return height + 8f;
+        }
+
+        private void DrawOnboardingContent(float width, SceneChange sceneChange)
+        {
+            float x = 0f;
+            float y = 0f;
+
+            GUI.Label(new Rect(x, y, 260f, 30f), "Who Is Playing?", onboardingSectionStyle);
+            y += 42f;
+
+            if (DrawChipButton(new Rect(x, y, 180f, 46f), "Robot", selectedPlayerMode == OnboardingPlayerMode.Robot))
+                ApplyRecommendedStartupControlsForPlayerMode(OnboardingPlayerMode.Robot);
+            if (DrawChipButton(new Rect(x + 196f, y, 180f, 46f), "Human", selectedPlayerMode == OnboardingPlayerMode.Human))
+                ApplyRecommendedStartupControlsForPlayerMode(OnboardingPlayerMode.Human);
+            y += 66f;
+
+            if (selectedPwdStartupControl == StartupControlMode.Manual)
+            {
+                GUI.Label(new Rect(x, y, width, 30f), "PWD Player Gender", onboardingSectionStyle);
+                y += 42f;
+
+                DrawGenderPreviewCard(new Rect(x, y, 220f, 196f), "Male", maleWheelchairPreview,
+                    selectedPwdGender == SEAN.Scenario.Agents.PwdGender.Male,
+                    () => selectedPwdGender = SEAN.Scenario.Agents.PwdGender.Male);
+
+                DrawGenderPreviewCard(new Rect(x + 236f, y, 220f, 196f), "Female", femaleWheelchairPreview,
+                    selectedPwdGender == SEAN.Scenario.Agents.PwdGender.Female,
+                    () => selectedPwdGender = SEAN.Scenario.Agents.PwdGender.Female);
+
+                if (DrawChipButton(new Rect(x, y + 208f, 160f, 40f), "Male", selectedPwdGender == SEAN.Scenario.Agents.PwdGender.Male))
+                    selectedPwdGender = SEAN.Scenario.Agents.PwdGender.Male;
+                if (DrawChipButton(new Rect(x + 176f, y + 208f, 160f, 40f), "Female", selectedPwdGender == SEAN.Scenario.Agents.PwdGender.Female))
+                    selectedPwdGender = SEAN.Scenario.Agents.PwdGender.Female;
+                y += 266f;
+
+                GUI.Label(new Rect(x, y, width, 30f), "Other Community-Informed Characters", onboardingSectionStyle);
+                y += 42f;
+
+                DrawPreviewCard(new Rect(x, y, 188f, 150f), "Dogwalker", dogwalkerPreview,
+                    "Shown here for UI preview only.");
+                DrawPreviewCard(new Rect(x + 204f, y, 188f, 150f), "Scooter User", scooterUserPreview,
+                    "Shown here for UI preview only.");
+                DrawPreviewCard(new Rect(x + 408f, y, 188f, 150f), "More To Be Built", null,
+                    "Additional characters coming soon.");
+                y += 172f;
+            }
+
+            GUI.Label(new Rect(x, y, width, 30f), "Session To Play", onboardingSectionStyle);
+            y += 40f;
+
+            int sceneCount = sceneChange != null ? sceneChange.SceneCount : 0;
+            float sceneHeight = sceneCount > 0
+                ? Mathf.Max(160f, sceneCount * 48f + 8f)
+                : 160f;
+            DrawSceneSelection(new Rect(x, y, width, sceneHeight));
+        }
+
         private void DrawSceneSelection(Rect rect)
         {
             var sceneChange = FindObjectOfType<SceneChange>();
@@ -1625,7 +2133,25 @@ namespace SessionReview
             if (selectedSceneIndex < 0 || selectedSceneIndex >= sceneChange.SceneCount)
                 selectedSceneIndex = sceneChange.CurrentSceneIndex;
 
-            Rect viewRect = new Rect(0f, 0f, rect.width - 18f, sceneChange.SceneCount * 48f);
+            float totalHeight = sceneChange.SceneCount * 48f;
+            if (totalHeight <= rect.height)
+            {
+                for (int i = 0; i < sceneChange.SceneCount; i++)
+                {
+                    Rect rowRect = new Rect(rect.x, rect.y + i * 48f, rect.width, 40f);
+                    bool isActive = i == selectedSceneIndex;
+                    string label = $"{i + 1}. {sceneChange.SceneNames[i]}";
+                    if (GUI.Button(rowRect, label, isActive ? onboardingSceneActiveButtonStyle : onboardingSceneButtonStyle))
+                    {
+                        selectedSceneIndex = i;
+                        RefreshOnboardingWarmupState();
+                    }
+                }
+
+                return;
+            }
+
+            Rect viewRect = new Rect(0f, 0f, rect.width - 18f, totalHeight);
             onboardingSceneScroll = GUI.BeginScrollView(rect, onboardingSceneScroll, viewRect);
 
             for (int i = 0; i < sceneChange.SceneCount; i++)
@@ -1666,6 +2192,24 @@ namespace SessionReview
 
             if (GUI.Button(rect, GUIContent.none, GUIStyle.none))
                 onClick?.Invoke();
+        }
+
+        private void DrawPreviewCard(Rect rect, string label, Texture2D preview, string helperText)
+        {
+            GUI.Box(rect, GUIContent.none, onboardingSceneButtonStyle);
+
+            Rect imageRect = new Rect(rect.x + 12f, rect.y + 12f, rect.width - 24f, rect.height - 72f);
+            if (preview != null)
+            {
+                GUI.DrawTexture(imageRect, preview, ScaleMode.ScaleToFit, true);
+            }
+            else
+            {
+                GUI.Label(imageRect, "Preview not found", onboardingHintStyle);
+            }
+
+            GUI.Label(new Rect(rect.x + 12f, rect.yMax - 50f, rect.width - 24f, 22f), label, onboardingPreviewLabelStyle);
+            GUI.Label(new Rect(rect.x + 12f, rect.yMax - 30f, rect.width - 24f, 22f), helperText, onboardingHintStyle);
         }
 
         private void ApplyOnboardingSelection()
@@ -1719,12 +2263,14 @@ namespace SessionReview
         {
             selectedRobotStartupControl = mode;
             RefreshOnboardingWarmupState();
+            ApplyStartupControlsIfTrialPromptVisible();
         }
 
         private void SetPwdStartupControl(StartupControlMode mode)
         {
             selectedPwdStartupControl = mode;
             RefreshOnboardingWarmupState();
+            ApplyStartupControlsIfTrialPromptVisible();
         }
 
         private void ApplyRecommendedStartupControlsForPlayerMode(OnboardingPlayerMode mode)
@@ -1737,6 +2283,14 @@ namespace SessionReview
                 ? StartupControlMode.Manual
                 : StartupControlMode.Auto;
             RefreshOnboardingWarmupState();
+            ApplyStartupControlsIfTrialPromptVisible();
+        }
+
+        private void ApplyStartupControlsIfTrialPromptVisible()
+        {
+            if (!showTrialStartPrompt)
+                return;
+            ApplyStartupControlDefaults();
         }
 
         private bool CanWarmupCurrentSelectionInActiveScene()
@@ -1758,6 +2312,11 @@ namespace SessionReview
 
         private void RefreshOnboardingWarmupState()
         {
+            SessionOnboardingSettings.SyncInFlightTrialControls(
+                selectedPlayerMode,
+                selectedRobotStartupControl,
+                selectedPwdStartupControl);
+
             if (!showOnboarding)
                 return;
 
@@ -1781,6 +2340,7 @@ namespace SessionReview
             trialStartReady = false;
             trialWarmupPending = true;
             trialWarmupDelayFrames = 0;
+            trialWarmupGoalRepublishFrames = 0;
         }
 
         public Transform ResolveTransformForObjectId(string objectId)
@@ -1899,6 +2459,8 @@ namespace SessionReview
         {
             femaleWheelchairPreview = LoadTextureFromAssets("UIResources/female-wheelchair.png");
             maleWheelchairPreview = LoadTextureFromAssets("UIResources/male_wheelchair_user.png");
+            dogwalkerPreview = LoadTextureFromAssets("UIResources/dogwalker.png");
+            scooterUserPreview = LoadTextureFromAssets("UIResources/scooteruser.png");
         }
 
         private Texture2D LoadTextureFromAssets(string relativeAssetPath)
