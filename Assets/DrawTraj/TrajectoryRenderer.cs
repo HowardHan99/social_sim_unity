@@ -43,6 +43,9 @@ public class TrajectoryRenderer : MonoBehaviour
 
         _line.startColor = lineColor;
         _line.endColor = lineColor;
+        _line.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        _line.receiveShadows = false;
+        _line.sortingOrder = 50;
     }
 
     /// <summary>Add a point to the live trajectory.</summary>
@@ -81,6 +84,14 @@ public class TrajectoryRenderer : MonoBehaviour
     }
 
     public List<Vector3> Points => _points;
+
+    public void ApplyVisualSettings()
+    {
+        if (_line == null)
+            _line = GetComponent<LineRenderer>();
+
+        ConfigureLine();
+    }
 
     public void Clear()
     {

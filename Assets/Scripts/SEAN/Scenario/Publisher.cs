@@ -27,9 +27,10 @@ namespace SEAN.Scenario
 
         private void Update()
         {
-            if (!sean.robotTask.isRunning) { return; }
-            sean.clock.UpdateMHeader(message.header);
+            if (!ShouldPublishSceneInfo()) { return; }
+
             message.header = new RosMessageTypes.Std.MHeader();
+            sean.clock.UpdateMHeader(message.header);
             message.scenario_name = sean.pedestrianBehavior.scenario_name;
             message.robot_start_pose = Util.Geometry.GetMPose(sean.robotTask.robotStart);
             message.robot_target_pose = Util.Geometry.GetMPose(sean.robotTask.robotGoal);
@@ -37,6 +38,16 @@ namespace SEAN.Scenario
             message.num_groups = (ushort)sean.pedestrianBehavior.groups.Length;
             message.environment = sean.environment.name;
             ros.Send(Topic, message);
+        }
+
+        private bool ShouldPublishSceneInfo()
+        {
+            if (sean == null || sean.robotTask == null)
+                return false;
+
+            // Publish during preview warmup as well as live trials so ROS can build
+            // planning context before the user presses Start Trial.
+            return sean.robotTask.isRunning || sean.robotTask.hasPreparedTaskPreview;
         }
     }
 }

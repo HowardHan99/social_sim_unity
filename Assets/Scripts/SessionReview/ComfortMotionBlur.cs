@@ -10,7 +10,7 @@ public class ComfortMotionBlur : MonoBehaviour
     [Tooltip("Pixel radius of the blur kernel at maximum strength. 8 = subtle, 20 = strong.")]
     [SerializeField] [Min(1f)] private float blurRadiusPixels = 15f;
     [Tooltip("Rotation speed (°/s) that produces maximum blur. Lower = kicks in sooner.")]
-    [SerializeField] private float rotationForMaxBlurDegreesPerSecond = 220f;
+    [SerializeField] private float rotationForMaxBlurDegreesPerSecond = 160f;
     [SerializeField] private float blurRiseSpeed = 10f;
     [SerializeField] private float blurFallSpeed = 18f;
     [SerializeField] private float transitionBoostStrength = 0.55f;

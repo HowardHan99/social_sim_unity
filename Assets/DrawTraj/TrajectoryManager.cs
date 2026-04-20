@@ -57,8 +57,14 @@ public class TrajectoryManager : MonoBehaviour
     [Tooltip("How many of the most-recent saved sessions to show in scene. 0 = all.")]
     [Min(0)] public int visibleSessionCount = 1;
 
+    [Header("Follow Trajectory")]
+    [Tooltip("When enabled in review, the robot follows the displayed trajectory at this speed.")]
+    [Min(0.1f)] public float followRobotSpeed = 0.6f;
+
     // ── Public state (read by TrajectoryUI) ──────────────────────────────────
     public bool IsDrawMode { get; private set; }
+    public bool IsFollowMode { get; private set; }
+    public bool HasFollowTrajectory => _followTrajectoryPoints.Count >= 2 && _followTrajectoryLength > 0.01f;
 
     // ── Private state ────────────────────────────────────────────────────────
     private TrajectoryRenderer _activeRenderer;
@@ -69,9 +75,12 @@ public class TrajectoryManager : MonoBehaviour
 
     private bool _trajectoriesVisible = true;
     private bool _cameraReady = false;   // false while camera is still flying in
+    private bool _wasReviewActive;
 
     // All renderers that are currently displayed (loaded from saved files).
     private readonly List<TrajectoryRenderer> _displayedRenderers = new List<TrajectoryRenderer>();
+    private readonly List<Vector3> _followTrajectoryPoints = new List<Vector3>();
+    private float _followTrajectoryLength;
 
     // ── Unity Lifecycle ──────────────────────────────────────────────────────
 
@@ -79,11 +88,19 @@ public class TrajectoryManager : MonoBehaviour
     {
         if (mainCamera == null) mainCamera = Camera.main;
         SetupTopDownCamera();
+        _wasReviewActive = IsReviewActive();
+        if (_wasReviewActive)
+            RefreshDisplay();
     }
 
     private void Update()
     {
-        if (IsDrawMode && !IsReviewActive())
+        bool reviewActive = IsReviewActive();
+        if (reviewActive && !_wasReviewActive && !IsDrawMode)
+            RefreshDisplay();
+        _wasReviewActive = reviewActive;
+
+        if (IsDrawMode && !reviewActive)
         {
             ExitDrawMode();
             return;
@@ -109,7 +126,7 @@ public class TrajectoryManager : MonoBehaviour
         IsDrawMode = true;
         _cameraReady = false;
 
-        SetVisibility(false);
+        SetVisibility(true);
         _sessionCollection = new TrajectoryCollection();
         SwitchCamera(topDown: true);
         BeginStroke();
@@ -142,6 +159,41 @@ public class TrajectoryManager : MonoBehaviour
         SetVisibility(!_trajectoriesVisible);
     }
 
+    public void ToggleFollowMode()
+    {
+        if (!IsReviewActive() || IsDrawMode || !HasFollowTrajectory)
+            return;
+
+        IsFollowMode = !IsFollowMode;
+    }
+
+    public bool ApplyFollowTrajectoryToRobot(float elapsedSeconds)
+    {
+        if (!IsFollowMode || !HasFollowTrajectory)
+            return false;
+
+        var sean = SEAN.SEAN.instance;
+        if (sean == null || sean.robot == null || sean.robot.base_link == null)
+            return false;
+
+        if (!TryEvaluateFollowPose(elapsedSeconds, out Vector3 followPosition, out Quaternion followRotation))
+            return false;
+
+        Transform robotTransform = sean.robot.base_link.transform;
+        followPosition.y = robotTransform.position.y;
+        robotTransform.position = followPosition;
+        robotTransform.rotation = followRotation;
+
+        Rigidbody rb = robotTransform.GetComponent<Rigidbody>();
+        if (rb != null)
+        {
+            rb.velocity = Vector3.zero;
+            rb.angularVelocity = Vector3.zero;
+        }
+
+        return true;
+    }
+
     private void SetVisibility(bool visible)
     {
         _trajectoriesVisible = visible;
@@ -158,10 +210,11 @@ public class TrajectoryManager : MonoBehaviour
     /// </summary>
     private IEnumerator FlyToTarget(System.Action onComplete)
     {
-        if (topDownCamera == null) { onComplete?.Invoke(); yield break; }
+        Camera drawCamera = GetDrawingCamera();
+        if (drawCamera == null) { onComplete?.Invoke(); yield break; }
 
-        Vector3 startPos = topDownCamera.transform.position;
-        float startSize = topDownCamera.orthographicSize;
+        Vector3 startPos = drawCamera.transform.position;
+        float startSize = drawCamera.orthographicSize;
 
         // Destination: directly above target (or keep current XZ if no target)
         Vector3 destPos = startPos;
@@ -176,15 +229,15 @@ public class TrajectoryManager : MonoBehaviour
         while (elapsed < cameraFlyDuration)
         {
             float t = Mathf.SmoothStep(0f, 1f, elapsed / cameraFlyDuration);
-            topDownCamera.transform.position = Vector3.Lerp(startPos, destPos, t);
-            topDownCamera.orthographicSize = Mathf.Lerp(startSize, destSize, t);
-            elapsed += Time.deltaTime;
+            drawCamera.transform.position = Vector3.Lerp(startPos, destPos, t);
+            drawCamera.orthographicSize = Mathf.Lerp(startSize, destSize, t);
+            elapsed += Time.unscaledDeltaTime;
             yield return null;
         }
 
         // Snap to exact destination
-        topDownCamera.transform.position = destPos;
-        topDownCamera.orthographicSize = destSize;
+        drawCamera.transform.position = destPos;
+        drawCamera.orthographicSize = destSize;
 
         onComplete?.Invoke();
     }
@@ -236,7 +289,9 @@ public class TrajectoryManager : MonoBehaviour
 
     private void TryAddPointFromScreen(Vector2 screenPos)
     {
-        Camera cam = topDownCamera != null ? topDownCamera : mainCamera;
+        Camera cam = GetDrawingCamera();
+        if (cam == null)
+            return;
         Ray ray = cam.ScreenPointToRay(screenPos);
 
         Vector3 point;
@@ -264,6 +319,7 @@ public class TrajectoryManager : MonoBehaviour
         go.transform.SetParent(transform);
         _activeRenderer = go.AddComponent<TrajectoryRenderer>();
         _activeRenderer.lineColor = drawColor;
+        _activeRenderer.ApplyVisualSettings();
         _sessionPoints.Clear();
     }
 
@@ -304,6 +360,8 @@ public class TrajectoryManager : MonoBehaviour
         foreach (var r in _displayedRenderers)
             if (r != null) Destroy(r.gameObject);
         _displayedRenderers.Clear();
+        _followTrajectoryPoints.Clear();
+        _followTrajectoryLength = 0f;
 
         foreach (var r in _sessionRenderers)
             if (r != null) Destroy(r.gameObject);
@@ -319,11 +377,71 @@ public class TrajectoryManager : MonoBehaviour
             foreach (var data in col.trajectories)
             {
                 if (data.points.Count < 2) continue;
+                CaptureFollowTrajectory(data);
                 StartCoroutine(SpawnDisplayRenderer(data));
             }
         }
 
+        if (!HasFollowTrajectory)
+            IsFollowMode = false;
+
         _trajectoriesVisible = true;
+    }
+
+    private void CaptureFollowTrajectory(TrajectoryData data)
+    {
+        if (_followTrajectoryPoints.Count > 0 || data == null || data.points == null || data.points.Count < 2)
+            return;
+
+        _followTrajectoryPoints.Clear();
+        for (int i = 0; i < data.points.Count; i++)
+            _followTrajectoryPoints.Add(data.points[i].ToVector3());
+
+        _followTrajectoryLength = 0f;
+        for (int i = 1; i < _followTrajectoryPoints.Count; i++)
+            _followTrajectoryLength += Vector3.Distance(_followTrajectoryPoints[i - 1], _followTrajectoryPoints[i]);
+    }
+
+    private bool TryEvaluateFollowPose(float elapsedSeconds, out Vector3 position, out Quaternion rotation)
+    {
+        position = Vector3.zero;
+        rotation = Quaternion.identity;
+
+        if (!HasFollowTrajectory)
+            return false;
+
+        float targetDistance = Mathf.Clamp(Mathf.Max(0f, elapsedSeconds) * followRobotSpeed, 0f, _followTrajectoryLength);
+        float traversedDistance = 0f;
+
+        for (int i = 1; i < _followTrajectoryPoints.Count; i++)
+        {
+            Vector3 from = _followTrajectoryPoints[i - 1];
+            Vector3 to = _followTrajectoryPoints[i];
+            float segmentLength = Vector3.Distance(from, to);
+            if (segmentLength <= 0.0001f)
+                continue;
+
+            if (traversedDistance + segmentLength >= targetDistance)
+            {
+                float segmentT = (targetDistance - traversedDistance) / segmentLength;
+                position = Vector3.Lerp(from, to, segmentT);
+
+                Vector3 forward = to - from;
+                forward.y = 0f;
+                if (forward.sqrMagnitude > 0.0001f)
+                    rotation = Quaternion.LookRotation(forward.normalized, Vector3.up);
+                return true;
+            }
+
+            traversedDistance += segmentLength;
+        }
+
+        position = _followTrajectoryPoints[_followTrajectoryPoints.Count - 1];
+        Vector3 endForward = _followTrajectoryPoints[_followTrajectoryPoints.Count - 1] - _followTrajectoryPoints[_followTrajectoryPoints.Count - 2];
+        endForward.y = 0f;
+        if (endForward.sqrMagnitude > 0.0001f)
+            rotation = Quaternion.LookRotation(endForward.normalized, Vector3.up);
+        return true;
     }
 
     private IEnumerator SpawnDisplayRenderer(TrajectoryData data)
@@ -332,6 +450,7 @@ public class TrajectoryManager : MonoBehaviour
         go.transform.SetParent(transform);
         var r = go.AddComponent<TrajectoryRenderer>();
         r.lineColor = loadedColor;
+        r.ApplyVisualSettings();
 
         yield return null;
 
@@ -366,8 +485,49 @@ public class TrajectoryManager : MonoBehaviour
 
     private void SwitchCamera(bool topDown)
     {
+        var rewind = GetReviewController();
+        bool reviewActive = IsReviewActive() && rewind != null;
+
+        if (reviewActive)
+        {
+            if (topDown)
+                rewind.SetPerspective(SessionReview.PerspectiveMode.TopDown);
+
+            if (topDownCamera != null)
+                topDownCamera.gameObject.SetActive(false);
+            return;
+        }
+
         mainCamera?.gameObject.SetActive(!topDown);
         topDownCamera?.gameObject.SetActive(topDown);
+    }
+
+    private Camera GetDrawingCamera()
+    {
+        if (IsReviewActive())
+        {
+            var rewind = GetReviewController();
+            if (rewind != null)
+            {
+                Camera reviewCamera = rewind.GetActiveReviewCamera();
+                if (reviewCamera != null)
+                    return reviewCamera;
+            }
+        }
+
+        if (topDownCamera != null && topDownCamera.gameObject.activeInHierarchy)
+            return topDownCamera;
+
+        return mainCamera;
+    }
+
+    private SessionReview.RewindController GetReviewController()
+    {
+        var reviewManager = SessionReview.SessionReviewManager.Instance;
+        if (reviewManager == null)
+            return null;
+
+        return reviewManager.GetComponent<SessionReview.RewindController>();
     }
 
     private static bool IsReviewActive()

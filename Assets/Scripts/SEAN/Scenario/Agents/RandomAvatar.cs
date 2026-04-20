@@ -407,7 +407,11 @@ namespace SEAN.Scenario.Agents
 
                 Camera cam = wheelchairCam.GetComponent<Camera>();
                 if (cam != null)
+                {
                     cam.targetDisplay = 1;
+                    if (cam.GetComponent<ComfortMotionBlur>() == null)
+                        cam.gameObject.AddComponent<ComfortMotionBlur>();
+                }
 
                 var smoothing = wheelchairCam.GetComponent<IVI.WheelchairCameraSmoothing>();
                 if (smoothing == null)
@@ -425,6 +429,8 @@ namespace SEAN.Scenario.Agents
                 cam.targetDisplay = 1;
                 cam.fieldOfView = 60f;
                 cam.nearClipPlane = 0.1f;
+                if (cam.GetComponent<ComfortMotionBlur>() == null)
+                    cam.gameObject.AddComponent<ComfortMotionBlur>();
 
                 var smoothing = camObj.AddComponent<IVI.WheelchairCameraSmoothing>();
                 smoothing.thirdPersonOffset = thirdPersonOffset;

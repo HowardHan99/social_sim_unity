@@ -69,7 +69,7 @@ namespace SessionReview
 
             if (!pwdFound)
             {
-                pwdController = FindObjectOfType<ManualWheelchairController>();
+                pwdController = FindPwdPlayerController();
                 if (pwdController != null)
                 {
                     pwdFound = true;
@@ -130,6 +130,24 @@ namespace SessionReview
                 agentId = agentId,
                 mode = mode
             });
+        }
+
+        private static ManualWheelchairController FindPwdPlayerController()
+        {
+            ManualWheelchairController fallback = null;
+            foreach (var controller in FindObjectsOfType<ManualWheelchairController>())
+            {
+                if (controller == null)
+                    continue;
+
+                if (controller.gameObject != null && controller.gameObject.name == "PWDPlayer")
+                    return controller;
+
+                if (fallback == null)
+                    fallback = controller;
+            }
+
+            return fallback;
         }
 
         public List<ControlModeEntry> GetEntriesInRange(float startTime, float endTime)

@@ -361,6 +361,18 @@ namespace SessionReview
         {
             HandleTopDownMouseInput();
 
+            var drawTrajManager = FindObjectOfType<TrajectoryManager>();
+            bool isDrawTrajectoryModeActive = drawTrajManager != null && drawTrajManager.IsDrawMode;
+
+            if (isDrawTrajectoryModeActive)
+            {
+                if (Input.GetKeyDown(reviewToggleKey))
+                    return;
+
+                if (Input.GetKeyDown(KeyCode.Escape))
+                    return;
+            }
+
             bool lightingTestPressed =
                 Input.GetKeyDown(KeyCode.Minus) ||
                 Input.GetKeyDown(KeyCode.KeypadMinus);
@@ -373,7 +385,13 @@ namespace SessionReview
                 showReviewExportPanel = !showReviewExportPanel;
             }
 
-            if (Input.GetKeyDown(KeyCode.Escape) || Input.GetKeyDown(reviewToggleKey))
+            if (Input.GetKeyDown(KeyCode.Escape))
+            {
+                EndReviewAndShowNextStepMenu();
+                return;
+            }
+
+            if (Input.GetKeyDown(reviewToggleKey))
             {
                 ExitReviewMode();
                 return;
@@ -603,6 +621,7 @@ namespace SessionReview
                 selectedRobotStartupControl,
                 selectedPwdStartupControl);
             ApplyStartupControlDefaults();
+            TrajectoryIO.ClearAllSessions();
             SessionOnboardingSettings.MarkTrialStarted();
             trialWarmupPending = false;
             trialWarmupDelayFrames = 0;
@@ -771,11 +790,16 @@ namespace SessionReview
 
                 string perspective = rewindController.CurrentPerspective.ToString();
                 string playing = rewindController.IsPlaying ? "PLAYING" : "PAUSED";
+                var drawTrajManager = FindObjectOfType<TrajectoryManager>();
+                bool isDrawTrajectoryModeActive = drawTrajManager != null && drawTrajManager.IsDrawMode;
+                string controlsLine = isDrawTrajectoryModeActive
+                    ? $"{perspective} | Draw Traj: LMB draw  Wheel:Zoom  MMB:Pan  Esc:Finish Draw"
+                    : $"{perspective} | F1-F5:View  Wheel:Zoom  MMB:Pan  Tab/Esc:Exit";
                 GUI.Box(new Rect(Screen.width - 340, 10, 330, 50), "");
                 GUI.Label(new Rect(Screen.width - 335, 15, 320, 20),
                     $"REWIND [{playing}] Trial {reviewTrialIndex + 1}/{trialArchive.TrialCount}");
                 GUI.Label(new Rect(Screen.width - 335, 35, 320, 20),
-                    $"{perspective} | F1-F5:View  Wheel:Zoom  MMB:Pan  Tab/Esc:Exit");
+                    controlsLine);
                 DrawEndReviewButton();
                 DrawTopDownReviewControls();
 

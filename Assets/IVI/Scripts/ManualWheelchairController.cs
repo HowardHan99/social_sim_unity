@@ -7,10 +7,10 @@ namespace IVI
     public class ManualWheelchairController : MonoBehaviour
     {
         [Header("Control Settings")]
-        public float moveSpeed = 3f;
-        public float rotationSpeed = 90f;
+        public float moveSpeed = 1.0f;
+        public float rotationSpeed = 60f;
         public KeyCode toggleModeKey = KeyCode.RightShift;
-        public bool useWASD = false;
+        public bool useWASD = true;
         public bool startInManualMode = false;
         public bool enableJoystick = true;
         public string joystickHorizontalAxis = "RHorizontal";
@@ -21,6 +21,19 @@ namespace IVI
         public bool invertJoystickHorizontal = false;
         public bool invertJoystickVertical = true;
 
+        [Header("Manual Brake/Reverse Behavior")]
+        public float brakeStopThreshold = 0.02f;
+        public int sPressesToEnableReverse = 2;
+        public float sPressWindowSec = 0.6f;
+
+        [Header("Manual Smoothing")]
+        public float manualAcceleration = 0.25f;
+        public float manualDeceleration = 2.8f;
+        public float manualAngularAcceleration = 220f;
+
+        [Header("Debug Manual Brake (read-only)")]
+        public int debugSBrakePressCount;
+
         [Header("Status (read-only)")]
         public bool isManualMode = false;
 
@@ -29,13 +42,16 @@ namespace IVI
         private Animator animator;
         private Vector3 manualVelocity;
         private bool initialized = false;
-        private bool waitingForStart = true;
+        private bool waitingForStart = false;
         public bool WaitingForStart => waitingForStart;
         private Quaternion spawnRotation;
         private WheelchairCameraSmoothing camSmoothing;
         private bool JoystickPresent => enableJoystick && Input.GetJoystickNames().Length > 0;
         private bool lastJoystickStartPressed;
         private bool lastJoystickTogglePressed;
+        private float lastSBrakePressRealtime = -1f;
+        private float currentManualLinearSpeed;
+        private float currentManualAngularSpeed;
 
         void Start()
         {
@@ -56,49 +72,29 @@ namespace IVI
             if (rb != null)
                 rb.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
 
-            // Freeze the agent on spawn; navigation begins on Space press.
-            if (sfpwdAgent != null)
-            {
-                sfpwdAgent.KillNavigationCoroutine();
-                sfpwdAgent.enabled = false;
-            }
             if (rb != null)
                 rb.velocity = Vector3.zero;
 
             // Restore the exact spawn rotation (the one-frame agent tick may have changed it).
             transform.rotation = spawnRotation;
 
-            // Disable camera smoothing during wait so the user can free-look.
             camSmoothing = GetComponentInChildren<WheelchairCameraSmoothing>(true);
             if (camSmoothing != null)
-                camSmoothing.enabled = false;
+                camSmoothing.enabled = true;
 
-            waitingForStart = true;
+            waitingForStart = false;
             initialized = true;
-            Debug.Log("[PWD] ManualWheelchairController ready. Waiting for Space to start.");
+            if (startInManualMode)
+                SetManualMode();
+            else
+                SetAutomaticMode();
+
+            Debug.Log($"[PWD] ManualWheelchairController ready. Starting in {(startInManualMode ? "MANUAL" : "AUTO")} mode.");
         }
 
         void Update()
         {
             if (!initialized) return;
-
-            if (waitingForStart)
-            {
-                if (Input.GetKeyDown(KeyCode.Space) || ReadJoystickButtonDown(joystickStartAxis))
-                {
-                    waitingForStart = false;
-
-                    if (camSmoothing != null)
-                        camSmoothing.enabled = true;
-
-                    Debug.Log("[PWD] Space pressed -- starting navigation.");
-                    if (startInManualMode)
-                        SetManualMode();
-                    else
-                        SetAutomaticMode();
-                }
-                return;
-            }
 
             if (Input.GetKeyDown(toggleModeKey) || ReadJoystickButtonDown(joystickToggleModeAxis))
             {
@@ -128,38 +124,108 @@ namespace IVI
 
         void HandleInput()
         {
-            float h = 0f, v = 0f;
+            float manualDesiredLin = currentManualLinearSpeed;
+            float manualDesiredAng = 0f;
 
             if (JoystickPresent)
             {
-                h = ReadJoystickAxis(joystickHorizontalAxis, invertJoystickHorizontal);
-                v = ReadJoystickAxis(joystickVerticalAxis, invertJoystickVertical);
+                float h = ReadJoystickAxis(joystickHorizontalAxis, invertJoystickHorizontal);
+                float v = ReadJoystickAxis(joystickVerticalAxis, invertJoystickVertical);
+                manualDesiredLin = moveSpeed * v;
+                manualDesiredAng = rotationSpeed * h;
             }
 
-            if (Input.GetKey(KeyCode.UpArrow)) v += 1f;
-            if (Input.GetKey(KeyCode.DownArrow)) v -= 1f;
-            if (Input.GetKey(KeyCode.LeftArrow)) h -= 1f;
-            if (Input.GetKey(KeyCode.RightArrow)) h += 1f;
+            bool wHeld = Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow);
+            bool sHeld = Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.DownArrow);
+            bool sPressed = Input.GetKeyDown(KeyCode.S) || Input.GetKeyDown(KeyCode.DownArrow);
+            float nowRealtime = Time.realtimeSinceStartup;
+
+            if (!sHeld &&
+                lastSBrakePressRealtime > 0f &&
+                nowRealtime - lastSBrakePressRealtime > sPressWindowSec)
+            {
+                debugSBrakePressCount = 0;
+                lastSBrakePressRealtime = -1f;
+            }
+
+            if (sPressed)
+            {
+                if (lastSBrakePressRealtime < 0f ||
+                    nowRealtime - lastSBrakePressRealtime > sPressWindowSec)
+                {
+                    debugSBrakePressCount = 0;
+                }
+
+                debugSBrakePressCount++;
+                lastSBrakePressRealtime = nowRealtime;
+            }
+
+            if (wHeld)
+            {
+                manualDesiredLin = moveSpeed;
+                debugSBrakePressCount = 0;
+                lastSBrakePressRealtime = -1f;
+            }
+            else if (sHeld)
+            {
+                bool movingForward = currentManualLinearSpeed > brakeStopThreshold;
+                bool nearStop = Mathf.Abs(currentManualLinearSpeed) <= brakeStopThreshold;
+                bool reverseArmed = debugSBrakePressCount >= Mathf.Max(1, sPressesToEnableReverse);
+
+                if (movingForward)
+                {
+                    manualDesiredLin = 0f;
+                }
+                else if (nearStop)
+                {
+                    manualDesiredLin = reverseArmed ? -moveSpeed : 0f;
+                }
+                else
+                {
+                    manualDesiredLin = -moveSpeed;
+                }
+            }
 
             if (useWASD)
             {
-                if (Input.GetKey(KeyCode.W)) v += 1f;
-                if (Input.GetKey(KeyCode.S)) v -= 1f;
-                if (Input.GetKey(KeyCode.A)) h -= 1f;
-                if (Input.GetKey(KeyCode.D)) h += 1f;
+                if (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow))
+                {
+                    manualDesiredAng = -rotationSpeed;
+                }
+                else if (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow))
+                {
+                    manualDesiredAng = rotationSpeed;
+                }
             }
 
-            v = Mathf.Clamp(v, -1f, 1f);
-            h = Mathf.Clamp(h, -1f, 1f);
+            if (Input.GetKey(KeyCode.H))
+            {
+                manualDesiredLin = 0f;
+                manualDesiredAng = 0f;
+                debugSBrakePressCount = 0;
+                lastSBrakePressRealtime = -1f;
+            }
 
-            float rot = h * rotationSpeed * Time.deltaTime;
+            float linearStep = Mathf.Abs(manualDesiredLin) > Mathf.Abs(currentManualLinearSpeed)
+                ? manualAcceleration
+                : manualDeceleration;
+            currentManualLinearSpeed = Mathf.MoveTowards(
+                currentManualLinearSpeed,
+                manualDesiredLin,
+                linearStep * Time.deltaTime);
+            currentManualAngularSpeed = Mathf.MoveTowards(
+                currentManualAngularSpeed,
+                manualDesiredAng,
+                manualAngularAcceleration * Time.deltaTime);
+
+            float rot = currentManualAngularSpeed * Time.deltaTime;
             if (Mathf.Abs(rot) > 0.001f)
                 transform.Rotate(0f, rot, 0f);
 
             Vector3 fwd = transform.forward;
             fwd.y = 0f;
             if (fwd.sqrMagnitude > 0.001f) fwd.Normalize();
-            manualVelocity = fwd * v * moveSpeed;
+            manualVelocity = fwd * currentManualLinearSpeed;
         }
 
         void UpdateAnimator()
@@ -178,6 +244,10 @@ namespace IVI
         {
             isManualMode = true;
             manualVelocity = Vector3.zero;
+            currentManualLinearSpeed = 0f;
+            currentManualAngularSpeed = 0f;
+            debugSBrakePressCount = 0;
+            lastSBrakePressRealtime = -1f;
 
             if (sfpwdAgent != null)
             {
@@ -198,6 +268,10 @@ namespace IVI
         {
             isManualMode = false;
             manualVelocity = Vector3.zero;
+            currentManualLinearSpeed = 0f;
+            currentManualAngularSpeed = 0f;
+            debugSBrakePressCount = 0;
+            lastSBrakePressRealtime = -1f;
 
             // Keep root motion OFF -- ManualWheelchairController drives position
             // directly using the SFPWDAgent's computed velocity.
@@ -239,15 +313,6 @@ namespace IVI
             if (SessionReviewManager.Instance != null && SessionReviewManager.Instance.IsWorldBuildingModeActive)
                 return;
 
-            if (waitingForStart)
-            {
-                string startHint = JoystickPresent
-                    ? $"Press {joystickStartAxis} to start"
-                    : "Press SPACE to start";
-                GUI.Box(new Rect(10, 10, 300, 40), startHint);
-                return;
-            }
-
             string mode = isManualMode ? "MANUAL" : "AUTO";
             string pos = $"({transform.position.x:F1}, {transform.position.z:F1})";
             string vel = isManualMode
@@ -255,7 +320,7 @@ namespace IVI
                 : (sfpwdAgent != null ? $"{sfpwdAgent.velocity.magnitude:F1}" : "--");
             string controlHint = JoystickPresent
                 ? "Joystick + keyboard active"
-                : "RShift: toggle | WASD/Arrows: move";
+                : "RShift: toggle | W/S brake+reverse | A/D turn | H stop";
             GUI.Box(new Rect(10, 10, 300, 60),
                 $"[{mode}] Pos:{pos} Vel:{vel}\n{controlHint}");
         }

@@ -9,6 +9,8 @@ namespace SessionReview
         [Header("Line Settings")]
         [SerializeField] private float lineWidth = 0.08f;
         [SerializeField] private Material lineMaterial;
+        [SerializeField] private float trajectoryYOffset = 0.05f;
+        [SerializeField] private float pwdTrajectoryExtraYOffset = 0.12f;
 
         [Header("Direction Arrows")]
         [SerializeField] private bool showDirectionArrows = true;
@@ -84,10 +86,19 @@ namespace SessionReview
 
         private struct LegendEntry
         {
+            public string key;
             public string label;
             public Color color;
+            public bool toggleable;
         }
         private List<LegendEntry> legendEntries = new List<LegendEntry>();
+        private class VisibilityGroup
+        {
+            public bool visible = true;
+            public readonly List<Renderer> renderers = new List<Renderer>();
+            public readonly List<GameObject> gameObjects = new List<GameObject>();
+        }
+        private readonly Dictionary<string, VisibilityGroup> visibilityGroups = new Dictionary<string, VisibilityGroup>();
 
         public bool IsShowing => isShowing;
 
@@ -192,13 +203,19 @@ namespace SessionReview
                     int stops = CreateStopCircles(objectId, positions, timestamps, baseColor);
                     if (stops > 0 && !stopLegendAdded)
                     {
-                        legendEntries.Add(new LegendEntry { label = "Robot Stop (radius=duration)", color = stopCircleColor });
+                        legendEntries.Add(new LegendEntry
+                        {
+                            key = "robot_stops",
+                            label = "Robot Stop (radius=duration)",
+                            color = stopCircleColor,
+                            toggleable = true
+                        });
                         stopLegendAdded = true;
                     }
                 }
 
                 if (showDirectionArrows && (role == AgentRole.Robot || role == AgentRole.PWDPlayer))
-                    CreateDirectionArrows(objectId, positions, rotations, baseColor);
+                    CreateDirectionArrows(objectId, positions, rotations, baseColor, role);
 
                 CreateMarker(positions[0], baseColor, objectId + "_start", 1f);
                 CreateMarker(positions[positions.Count - 1], baseColor, objectId + "_end", 0.6f);
@@ -207,7 +224,13 @@ namespace SessionReview
                 int lastUnderscore = objectId.LastIndexOf('_');
                 if (lastUnderscore > 0 && lastUnderscore < objectId.Length - 1)
                     shortName = objectId.Substring(0, lastUnderscore);
-                legendEntries.Add(new LegendEntry { label = $"{role}: {shortName}", color = baseColor });
+                legendEntries.Add(new LegendEntry
+                {
+                    key = objectId,
+                    label = $"{role}: {shortName}",
+                    color = baseColor,
+                    toggleable = true
+                });
             }
 
             if (agentsFound == 0)
@@ -220,7 +243,13 @@ namespace SessionReview
             if (showPlanPaths && planSnapshots != null && planSnapshots.Count > 0)
             {
                 CreatePlanPathLines(planSnapshots);
-                legendEntries.Add(new LegendEntry { label = "ROS Nav Plan", color = planPathColor });
+                legendEntries.Add(new LegendEntry
+                {
+                    key = "plan_path",
+                    label = "ROS Nav Plan",
+                    color = planPathColor,
+                    toggleable = true
+                });
             }
 
             var vlmEvents = vlmCaptures ?? trial.vlmCaptures;
@@ -239,7 +268,13 @@ namespace SessionReview
             else if (showVLMAnnotations && vlmEvents != null && vlmEvents.Count > 0)
             {
                 CreateVLMAnnotations(vlmEvents);
-                legendEntries.Add(new LegendEntry { label = $"VLM Capture ({vlmEvents.Count})", color = vlmAnnotationColor });
+                legendEntries.Add(new LegendEntry
+                {
+                    key = "vlm_annotations",
+                    label = $"VLM Capture ({vlmEvents.Count})",
+                    color = vlmAnnotationColor,
+                    toggleable = true
+                });
             }
 
             isShowing = true;
@@ -300,12 +335,14 @@ namespace SessionReview
             var lineObj = new GameObject("Traj_" + id);
             lineObj.transform.SetParent(overlayParent.transform);
             var lr = lineObj.AddComponent<LineRenderer>();
+            RegisterRendererToGroup(id, lr);
 
             lr.positionCount = positions.Count;
+            float yOffset = GetTrajectoryYOffset(role);
             for (int i = 0; i < positions.Count; i++)
             {
                 Vector3 p = positions[i];
-                p.y += 0.05f;
+                p.y += yOffset;
                 lr.SetPosition(i, p);
             }
 
@@ -344,13 +381,15 @@ namespace SessionReview
             trajectoryLines.Add(lr);
         }
 
-        private void CreateDirectionArrows(string id, List<Vector3> positions, List<Quaternion> rotations, Color color)
+        private void CreateDirectionArrows(string id, List<Vector3> positions, List<Quaternion> rotations, Color color, AgentRole role)
         {
+            float yOffset = GetTrajectoryYOffset(role);
             for (int i = 0; i < positions.Count; i += arrowSpacing)
             {
                 var arrowObj = new GameObject("Arrow_" + id + "_" + i);
                 arrowObj.transform.SetParent(overlayParent.transform);
                 var arrow = arrowObj.AddComponent<LineRenderer>();
+                RegisterRendererToGroup(id, arrow);
 
                 arrow.positionCount = 2;
                 arrow.startWidth = lineWidth * 0.4f;
@@ -367,7 +406,7 @@ namespace SessionReview
                 arrow.endColor = color;
 
                 Vector3 pos = positions[i];
-                pos.y += 0.05f;
+                pos.y += yOffset;
                 Vector3 forward = rotations[i] * Vector3.forward;
                 arrow.SetPosition(0, pos);
                 arrow.SetPosition(1, pos + forward * arrowLength);
@@ -381,7 +420,7 @@ namespace SessionReview
             var marker = GameObject.CreatePrimitive(PrimitiveType.Sphere);
             marker.name = "Marker_" + name;
             marker.transform.SetParent(overlayParent.transform);
-            marker.transform.position = position + Vector3.up * 0.3f;
+            marker.transform.position = position + Vector3.up * (trajectoryYOffset + 0.25f);
             marker.transform.localScale = Vector3.one * markerSize * scale;
 
             var collider = marker.GetComponent<Collider>();
@@ -395,6 +434,17 @@ namespace SessionReview
             }
 
             markers.Add(marker);
+            string groupKey = GetGroupKeyFromMarkerName(name);
+            if (!string.IsNullOrEmpty(groupKey))
+                RegisterGameObjectToGroup(groupKey, marker);
+        }
+
+        private float GetTrajectoryYOffset(AgentRole role)
+        {
+            if (role == AgentRole.PWDPlayer)
+                return trajectoryYOffset + pwdTrajectoryExtraYOffset;
+
+            return trajectoryYOffset;
         }
 
         private int CreateStopCircles(string id, List<Vector3> positions, List<float> timestamps, Color baseColor)
@@ -465,6 +515,7 @@ namespace SessionReview
             var circleObj = new GameObject($"StopCircle_{id}_{startIndex}_{endIndex}");
             circleObj.transform.SetParent(overlayParent.transform);
             var lr = circleObj.AddComponent<LineRenderer>();
+            RegisterRendererToGroup("robot_stops", lr);
 
             lr.useWorldSpace = true;
             lr.loop = false;
@@ -508,6 +559,7 @@ namespace SessionReview
                 crossObj.transform.SetParent(circleParent);
 
                 var lr = crossObj.AddComponent<LineRenderer>();
+                RegisterRendererToGroup("robot_stops", lr);
                 lr.useWorldSpace = true;
                 lr.loop = false;
                 lr.positionCount = 2;
@@ -545,16 +597,17 @@ namespace SessionReview
                 Vector3 pos = evt.position;
                 pos.y += vlmMarkerYOffset;
 
-                if (vlmAnnotationPrefab != null)
-                {
-                    var instance = Instantiate(vlmAnnotationPrefab, pos, Quaternion.identity, overlayParent.transform);
-                    instance.name = $"VLMAnnotation_{i}";
-                    vlmMarkers.Add(instance);
-                }
-                else
-                {
-                    CreateVLMDiamond(i, pos, evt.rotation);
-                }
+            if (vlmAnnotationPrefab != null)
+            {
+                var instance = Instantiate(vlmAnnotationPrefab, pos, Quaternion.identity, overlayParent.transform);
+                instance.name = $"VLMAnnotation_{i}";
+                vlmMarkers.Add(instance);
+                RegisterGameObjectToGroup("vlm_annotations", instance);
+            }
+            else
+            {
+                CreateVLMDiamond(i, pos, evt.rotation);
+            }
             }
 
             Debug.Log($"[SessionReview] VLM annotations: {events.Count}");
@@ -592,6 +645,7 @@ namespace SessionReview
             GameObject parent = new GameObject(objectName);
             parent.transform.SetParent(overlayParent.transform);
             annotationMarkers.Add(parent);
+            RegisterGameObjectToGroup(GetAnnotationGroupKey(annotation.type), parent);
 
             LineRenderer stem = CreateAnnotationLineRenderer(parent.transform, "Stem", color, annotationStemWidth, annotationStemWidth * 0.85f);
             stem.positionCount = 2;
@@ -731,8 +785,10 @@ namespace SessionReview
             {
                 legendEntries.Add(new LegendEntry
                 {
+                    key = GetAnnotationGroupKey(pair.Key),
                     label = $"{GetAnnotationLegendLabel(pair.Key)} ({pair.Value})",
-                    color = GetAnnotationColor(pair.Key)
+                    color = GetAnnotationColor(pair.Key),
+                    toggleable = true
                 });
             }
         }
@@ -751,6 +807,23 @@ namespace SessionReview
                     return "Light Signal Both";
                 default:
                     return "Signal Annotation";
+            }
+        }
+
+        private string GetAnnotationGroupKey(SignalAnnotationType type)
+        {
+            switch (type)
+            {
+                case SignalAnnotationType.VlmCapture:
+                    return "annotation_vlm";
+                case SignalAnnotationType.LightingLeft:
+                    return "annotation_light_left";
+                case SignalAnnotationType.LightingRight:
+                    return "annotation_light_right";
+                case SignalAnnotationType.LightingBoth:
+                    return "annotation_light_both";
+                default:
+                    return "annotation_misc";
             }
         }
 
@@ -782,6 +855,7 @@ namespace SessionReview
             float s = vlmMarkerSize;
             var parent = new GameObject($"VLMDiamond_{index}");
             parent.transform.SetParent(overlayParent.transform);
+            RegisterGameObjectToGroup("vlm_annotations", parent);
 
             Vector3 top = center + new Vector3(0f, 0f, s);
             Vector3 right = center + new Vector3(s, 0f, 0f);
@@ -791,6 +865,7 @@ namespace SessionReview
             var outlineObj = new GameObject("Outline");
             outlineObj.transform.SetParent(parent.transform);
             var outline = outlineObj.AddComponent<LineRenderer>();
+            RegisterRendererToGroup("vlm_annotations", outline);
             outline.useWorldSpace = true;
             outline.loop = true;
             outline.positionCount = 4;
@@ -806,6 +881,7 @@ namespace SessionReview
             var crossH = new GameObject("Cross_H");
             crossH.transform.SetParent(parent.transform);
             var lrH = crossH.AddComponent<LineRenderer>();
+            RegisterRendererToGroup("vlm_annotations", lrH);
             lrH.useWorldSpace = true;
             lrH.positionCount = 2;
             lrH.startWidth = lineWidth * 0.3f;
@@ -818,6 +894,7 @@ namespace SessionReview
             var crossV = new GameObject("Cross_V");
             crossV.transform.SetParent(parent.transform);
             var lrV = crossV.AddComponent<LineRenderer>();
+            RegisterRendererToGroup("vlm_annotations", lrV);
             lrV.useWorldSpace = true;
             lrV.positionCount = 2;
             lrV.startWidth = lineWidth * 0.3f;
@@ -835,6 +912,7 @@ namespace SessionReview
                 var dirObj = new GameObject("ViewDir");
                 dirObj.transform.SetParent(parent.transform);
                 var dirLr = dirObj.AddComponent<LineRenderer>();
+                RegisterRendererToGroup("vlm_annotations", dirLr);
                 dirLr.useWorldSpace = true;
                 dirLr.positionCount = 2;
                 dirLr.startWidth = lineWidth * 0.5f;
@@ -875,6 +953,7 @@ namespace SessionReview
             var lineObj = new GameObject("PlanPath_final");
             lineObj.transform.SetParent(overlayParent.transform);
             var lr = lineObj.AddComponent<LineRenderer>();
+            RegisterRendererToGroup("plan_path", lr);
 
             lr.positionCount = lastSnap.positions.Length;
             for (int i = 0; i < lastSnap.positions.Length; i++)
@@ -903,6 +982,95 @@ namespace SessionReview
                       $"from {snapshots.Count} total snapshots)");
         }
 
+        public void SetAllTrajectoryVisibility(bool visible)
+        {
+            foreach (var key in new List<string>(visibilityGroups.Keys))
+                SetGroupVisibility(key, visible);
+        }
+
+        private void RegisterRendererToGroup(string key, Renderer renderer)
+        {
+            if (renderer == null || string.IsNullOrEmpty(key))
+                return;
+
+            VisibilityGroup group = GetOrCreateVisibilityGroup(key);
+            group.renderers.Add(renderer);
+            renderer.enabled = group.visible;
+        }
+
+        private void RegisterGameObjectToGroup(string key, GameObject go)
+        {
+            if (go == null || string.IsNullOrEmpty(key))
+                return;
+
+            VisibilityGroup group = GetOrCreateVisibilityGroup(key);
+            group.gameObjects.Add(go);
+            go.SetActive(group.visible);
+        }
+
+        private VisibilityGroup GetOrCreateVisibilityGroup(string key)
+        {
+            if (!visibilityGroups.TryGetValue(key, out VisibilityGroup group))
+            {
+                group = new VisibilityGroup();
+                visibilityGroups[key] = group;
+            }
+
+            return group;
+        }
+
+        private void ToggleGroupVisibility(string key)
+        {
+            if (string.IsNullOrEmpty(key) || !visibilityGroups.TryGetValue(key, out VisibilityGroup group))
+                return;
+
+            SetGroupVisibility(key, !group.visible);
+        }
+
+        private void SetGroupVisibility(string key, bool visible)
+        {
+            if (string.IsNullOrEmpty(key) || !visibilityGroups.TryGetValue(key, out VisibilityGroup group))
+                return;
+
+            group.visible = visible;
+
+            foreach (Renderer renderer in group.renderers)
+            {
+                if (renderer != null)
+                    renderer.enabled = visible;
+            }
+
+            foreach (GameObject go in group.gameObjects)
+            {
+                if (go != null)
+                    go.SetActive(visible);
+            }
+        }
+
+        private bool IsGroupVisible(string key)
+        {
+            return string.IsNullOrEmpty(key) ||
+                   !visibilityGroups.TryGetValue(key, out VisibilityGroup group) ||
+                   group.visible;
+        }
+
+        private static string GetGroupKeyFromMarkerName(string name)
+        {
+            const string startSuffix = "_start";
+            const string endSuffix = "_end";
+
+            if (string.IsNullOrEmpty(name))
+                return null;
+
+            if (name.EndsWith(startSuffix))
+                return name.Substring(0, name.Length - startSuffix.Length);
+
+            if (name.EndsWith(endSuffix))
+                return name.Substring(0, name.Length - endSuffix.Length);
+
+            return null;
+        }
+
         public void ClearAll()
         {
             if (overlayParent != null)
@@ -917,6 +1085,7 @@ namespace SessionReview
             annotationMarkers.Clear();
             markers.Clear();
             legendEntries.Clear();
+            visibilityGroups.Clear();
             isShowing = false;
         }
 
@@ -936,10 +1105,12 @@ namespace SessionReview
         {
             if (!isShowing || legendEntries.Count == 0) return;
 
-            float boxW = 220f;
-            float lineH = 22f;
-            float pad = 8f;
-            float boxH = pad * 2 + legendEntries.Count * lineH + 20f;
+            float boxW = 360f;
+            float lineH = 30f;
+            float pad = 12f;
+            float headerH = 22f;
+            float controlsH = 34f;
+            float boxH = pad * 2 + headerH + controlsH + 8f + legendEntries.Count * lineH;
             const float marginRight = 20f;
             const float gapAboveEndReviewButton = 12f;
             // Must stay above SessionReviewManager.DrawEndReviewButton (y = Screen.height - 126, height 34).
@@ -955,24 +1126,59 @@ namespace SessionReview
             var headerStyle = new GUIStyle(GUI.skin.label)
             {
                 fontStyle = FontStyle.Bold,
-                fontSize = 13,
+                fontSize = 15,
                 normal = { textColor = Color.white }
             };
-            GUI.Label(new Rect(x + pad, y + pad, boxW - pad * 2, 18f), "Review Legend", headerStyle);
+            var buttonStyle = new GUIStyle(GUI.skin.button)
+            {
+                fontSize = 13,
+                alignment = TextAnchor.MiddleCenter
+            };
+            var rowTextStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 13,
+                alignment = TextAnchor.MiddleLeft,
+                clipping = TextClipping.Clip,
+                padding = new RectOffset(0, 0, 0, 0),
+                normal = { textColor = Color.white }
+            };
 
-            var labelStyle = new GUIStyle(GUI.skin.label) { fontSize = 12 };
+            GUI.Label(new Rect(x + pad, y + pad, boxW - pad * 2, headerH), "Review Legend", headerStyle);
+
+            float controlsY = y + pad + headerH + 2f;
+            float controlsWidth = (boxW - pad * 2 - 8f) * 0.5f;
+            if (GUI.Button(new Rect(x + pad, controlsY, controlsWidth, 28f), "Show All", buttonStyle))
+                SetAllTrajectoryVisibility(true);
+            if (GUI.Button(new Rect(x + pad + controlsWidth + 8f, controlsY, controlsWidth, 28f), "Hide All", buttonStyle))
+                SetAllTrajectoryVisibility(false);
+
             for (int i = 0; i < legendEntries.Count; i++)
             {
                 var entry = legendEntries[i];
-                float ly = y + pad + 20f + i * lineH;
+                float ly = controlsY + controlsH + i * lineH;
+                bool visible = IsGroupVisible(entry.key);
+                Rect rowRect = new Rect(x + pad, ly, boxW - pad * 2, lineH - 4f);
+
+                GUI.backgroundColor = visible
+                    ? new Color(0.08f, 0.1f, 0.14f, 0.92f)
+                    : new Color(0.05f, 0.05f, 0.06f, 0.75f);
+                GUI.Box(rowRect, "");
 
                 Color prev = GUI.backgroundColor;
-                GUI.backgroundColor = entry.color;
-                GUI.Box(new Rect(x + pad, ly + 3f, 14f, 14f), "", GUI.skin.button);
+                GUI.backgroundColor = visible
+                    ? entry.color
+                    : new Color(entry.color.r * 0.35f, entry.color.g * 0.35f, entry.color.b * 0.35f, 0.9f);
+                GUI.Box(new Rect(rowRect.x + 8f, rowRect.y + 7f, 14f, 14f), "", GUI.skin.button);
                 GUI.backgroundColor = prev;
 
-                labelStyle.normal.textColor = entry.color;
-                GUI.Label(new Rect(x + pad + 20f, ly, boxW - pad * 2 - 20f, lineH), entry.label, labelStyle);
+                rowTextStyle.normal.textColor = visible
+                    ? Color.white
+                    : new Color(0.66f, 0.69f, 0.73f, 1f);
+                string label = visible ? entry.label : $"{entry.label}  [hidden]";
+                Rect labelRect = new Rect(rowRect.x + 30f, rowRect.y + 1f, rowRect.width - 38f, rowRect.height - 2f);
+                if (entry.toggleable && GUI.Button(labelRect, entry.label, GUIStyle.none))
+                    ToggleGroupVisibility(entry.key);
+                GUI.Label(labelRect, label, rowTextStyle);
             }
 
             GUI.backgroundColor = Color.white;

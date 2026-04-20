@@ -148,7 +148,7 @@ namespace SessionReview
                 };
             }
 
-            pwdController = FindObjectOfType<ManualWheelchairController>();
+            pwdController = FindPwdPlayerController();
             if (pwdController != null)
             {
                 pwdNavigable = pwdController.GetComponent<IVI.INavigable>();
@@ -216,7 +216,7 @@ namespace SessionReview
             {
                 string id = GetObjectId(pwdController.gameObject);
                 if (!string.IsNullOrEmpty(id))
-                    trajectoryRecorder.TrackAgent(id, pwdController.transform);
+                    trajectoryRecorder.TrackAgent(id, ResolveTrackingTransform(pwdController.gameObject));
             }
 
             // Pedestrians
@@ -267,6 +267,12 @@ namespace SessionReview
                     {
                         agentArrivals[pwdId].arrived = true;
                         agentArrivals[pwdId].arrivalTime = Time.time;
+
+                        if (ShouldFinishTrialOnPwdArrival())
+                        {
+                            FinishCurrentTrial(TrialEndReason.Completion);
+                            return;
+                        }
                     }
                 }
             }
@@ -285,9 +291,9 @@ namespace SessionReview
 
             bool addedAny = false;
 
-            if (pwdController == null)
+            if (pwdController == null || !IsPwdPlayerController(pwdController))
             {
-                pwdController = FindObjectOfType<ManualWheelchairController>();
+                pwdController = FindPwdPlayerController();
                 if (pwdController != null)
                 {
                     pwdNavigable = pwdController.GetComponent<IVI.INavigable>();
@@ -370,6 +376,36 @@ namespace SessionReview
             return GetObjectId(sean.robot.base_link);
         }
 
+        private static bool ShouldFinishTrialOnPwdArrival()
+        {
+            return SessionOnboardingSettings.PlayerMode == OnboardingPlayerMode.Human;
+        }
+
+        private static bool IsPwdPlayerController(ManualWheelchairController controller)
+        {
+            return controller != null &&
+                   controller.gameObject != null &&
+                   string.Equals(controller.gameObject.name, "PWDPlayer", StringComparison.Ordinal);
+        }
+
+        private static ManualWheelchairController FindPwdPlayerController()
+        {
+            ManualWheelchairController fallback = null;
+            foreach (var controller in FindObjectsOfType<ManualWheelchairController>())
+            {
+                if (controller == null)
+                    continue;
+
+                if (IsPwdPlayerController(controller))
+                    return controller;
+
+                if (fallback == null)
+                    fallback = controller;
+            }
+
+            return fallback;
+        }
+
         public static string GetObjectId(GameObject go)
         {
             if (go == null) return null;
@@ -378,6 +414,44 @@ namespace SessionReview
             if (tracked != null && !string.IsNullOrEmpty(tracked.objectId))
                 return tracked.objectId;
             return go.name;
+        }
+
+        public static Transform ResolveTrackingTransform(GameObject go)
+        {
+            if (go == null)
+                return null;
+
+            // Some runtime-spawned agents, especially PWDPlayer, keep their controller
+            // on the root while motion is driven by a child Rigidbody. Prefer the actual
+            // physics-driven transform so recorded review paths match what moved on-screen.
+            Rigidbody[] rigidbodies = go.GetComponentsInChildren<Rigidbody>(true);
+            if (rigidbodies != null && rigidbodies.Length > 0)
+            {
+                Rigidbody best = null;
+                foreach (Rigidbody rb in rigidbodies)
+                {
+                    if (rb == null)
+                        continue;
+
+                    if (best == null)
+                        best = rb;
+
+                    if (!rb.isKinematic)
+                    {
+                        best = rb;
+                        break;
+                    }
+                }
+
+                if (best != null)
+                    return best.transform;
+            }
+
+            var trajectory = go.GetComponent<SEAN.Scenario.Trajectory.TrackedTrajectory>();
+            if (trajectory != null && trajectory.mainGameObject != null)
+                return trajectory.mainGameObject.transform;
+
+            return go.transform;
         }
 
         private static Vector3 GetGoalPosition(GameObject goal, out bool hasGoal)

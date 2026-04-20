@@ -61,6 +61,29 @@ public static class TrajectoryIO
         return files;
     }
 
+    /// <summary>Deletes all saved trajectory session files.</summary>
+    public static void ClearAllSessions()
+    {
+        if (!Directory.Exists(SaveDir))
+            return;
+
+        string[] files = Directory.GetFiles(SaveDir, "trajectory_*.json");
+        foreach (string filePath in files)
+        {
+            try
+            {
+                File.Delete(filePath);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[TrajectoryIO] Failed to delete {filePath}: {ex.Message}");
+            }
+        }
+
+        if (files.Length > 0)
+            Debug.Log($"[TrajectoryIO] Cleared {files.Length} saved trajectory session(s).");
+    }
+
     /// <summary>Load a session collection from a specific file path.</summary>
     public static TrajectoryCollection LoadFromPath(string filePath)
     {

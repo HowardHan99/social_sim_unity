@@ -30,6 +30,12 @@ namespace SessionReview
         [Header("Trail Overlay")]
         [SerializeField] private float trailLineWidth = 0.05f;
 
+        [Header("Free Camera")]
+        [SerializeField] private float freeCamMoveSpeed = 8f;
+        [SerializeField] private float freeCamFastMultiplier = 2.5f;
+        [SerializeField] private float freeCamLookSensitivity = 2.5f;
+        [SerializeField] private float freeCamZoomSpeed = 10f;
+
         private LiveTrajectoryRecorder liveRecorder;
 
         private TrialRecord currentTrial;
@@ -57,12 +63,17 @@ namespace SessionReview
         private Vector3 savedCameraPos;
         private Quaternion savedCameraRot;
         private Camera savedMainCamera;
+        private float freeCamYaw;
+        private float freeCamPitch;
+        private bool freeCamLooking;
+        private Vector3 lastFreeCamMousePosition;
 
         private GameObject trailParent;
         private Dictionary<string, LineRenderer> trailRenderers = new Dictionary<string, LineRenderer>();
         private bool showTrails = true;
 
         private MultiAgentTrajectoryRenderer trajectoryRenderer;
+        private TrajectoryManager drawTrajectoryManager;
 
         [Header("Plan Path")]
         [SerializeField] private Color activePlanColor = new Color(0.2f, 1f, 0.3f, 0.9f);
@@ -131,6 +142,7 @@ namespace SessionReview
             currentRecording = recording;
             controlModeLog = modeLog;
             trajectoryRenderer = trajRenderer;
+            drawTrajectoryManager = FindObjectOfType<TrajectoryManager>();
             timeOffset = recordingTimeOffset;
             signalAnnotations = annotations ?? trial.signalAnnotations ?? new List<SignalAnnotation>();
 
@@ -179,6 +191,9 @@ namespace SessionReview
             if (!isRewinding) return;
             isRewinding = false;
             isPlaying = false;
+            freeCamLooking = false;
+            Cursor.visible = true;
+            Cursor.lockState = CursorLockMode.None;
 
             DisableAllRewindCameras();
 
@@ -238,6 +253,8 @@ namespace SessionReview
                 UpdateRobotFPCamera();
             else if (perspectiveMode == PerspectiveMode.PWDFirstPerson)
                 UpdatePwdFPCamera();
+            else if (perspectiveMode == PerspectiveMode.FreeCam)
+                UpdateFreeCam();
         }
 
         public void SetNormalizedTime(float t)
@@ -404,7 +421,21 @@ namespace SessionReview
                 t.rotation = kvp.Value.rotation;
             }
 
+            ApplyDrawTrajectoryFollowState();
+
             ApplySignalReplayState();
+        }
+
+        private void ApplyDrawTrajectoryFollowState()
+        {
+            if (drawTrajectoryManager == null)
+                drawTrajectoryManager = FindObjectOfType<TrajectoryManager>();
+
+            if (drawTrajectoryManager == null || currentTrial == null)
+                return;
+
+            float elapsedSeconds = Mathf.Max(0f, currentTime - RecStartTime);
+            drawTrajectoryManager.ApplyFollowTrajectoryToRobot(elapsedSeconds);
         }
 
         private void ApplySignalReplayState()
@@ -675,8 +706,9 @@ namespace SessionReview
                 var mwc = FindObjectOfType<IVI.ManualWheelchairController>();
                 if (mwc != null && SessionTracker.GetObjectId(mwc.gameObject) == objectId)
                 {
-                    transformCache[objectId] = mwc.transform;
-                    return mwc.transform;
+                    Transform resolved = SessionTracker.ResolveTrackingTransform(mwc.gameObject);
+                    transformCache[objectId] = resolved;
+                    return resolved;
                 }
 
                 if (sean.pedestrianBehavior != null && sean.pedestrianBehavior.agents != null)
@@ -942,6 +974,77 @@ namespace SessionReview
             rewindCamera.transform.LookAt(center);
             rewindCamera.orthographic = false;
             rewindCamera.enabled = true;
+            Vector3 euler = rewindCamera.transform.eulerAngles;
+            freeCamYaw = euler.y;
+            freeCamPitch = NormalizePitch(euler.x);
+            freeCamLooking = false;
+        }
+
+        private void UpdateFreeCam()
+        {
+            if (rewindCamera == null || !rewindCamera.enabled)
+                return;
+
+            if (Input.GetKeyDown(KeyCode.Mouse2))
+            {
+                freeCamLooking = true;
+                Cursor.visible = false;
+                Cursor.lockState = CursorLockMode.Locked;
+                lastFreeCamMousePosition = Input.mousePosition;
+                if (rewindComfortBlur != null)
+                    rewindComfortBlur.TriggerTransitionBlur();
+            }
+            else if (Input.GetKeyUp(KeyCode.Mouse2))
+            {
+                freeCamLooking = false;
+                Cursor.visible = true;
+                Cursor.lockState = CursorLockMode.None;
+            }
+
+            if (freeCamLooking)
+            {
+                Vector3 mouseDelta = Input.mousePosition - lastFreeCamMousePosition;
+                freeCamYaw += mouseDelta.x * freeCamLookSensitivity * 0.02f;
+                freeCamPitch -= mouseDelta.y * freeCamLookSensitivity * 0.02f;
+                freeCamPitch = Mathf.Clamp(freeCamPitch, -85f, 85f);
+                rewindCamera.transform.rotation = Quaternion.Euler(freeCamPitch, freeCamYaw, 0f);
+                lastFreeCamMousePosition = Input.mousePosition;
+            }
+
+            float speed = freeCamMoveSpeed;
+            if (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))
+                speed *= freeCamFastMultiplier;
+
+            Vector3 move = Vector3.zero;
+            if (Input.GetKey(KeyCode.W))
+                move += rewindCamera.transform.forward;
+            if (Input.GetKey(KeyCode.S))
+                move -= rewindCamera.transform.forward;
+            if (Input.GetKey(KeyCode.A))
+                move -= rewindCamera.transform.right;
+            if (Input.GetKey(KeyCode.D))
+                move += rewindCamera.transform.right;
+            if (Input.GetKey(KeyCode.Q))
+                move += Vector3.up;
+            if (Input.GetKey(KeyCode.E))
+                move -= Vector3.up;
+
+            if (move.sqrMagnitude > 0.001f)
+            {
+                move.Normalize();
+                rewindCamera.transform.position += move * speed * Time.unscaledDeltaTime;
+            }
+
+            float scroll = Input.mouseScrollDelta.y;
+            if (Mathf.Abs(scroll) > 0.01f)
+                rewindCamera.transform.position += rewindCamera.transform.forward * (scroll * freeCamZoomSpeed);
+        }
+
+        private static float NormalizePitch(float pitch)
+        {
+            while (pitch > 180f)
+                pitch -= 360f;
+            return pitch;
         }
 
         private void ConfigureRewindFromSourceCamera(Camera sourceCamera)
@@ -1115,11 +1218,14 @@ namespace SessionReview
             string playStr = isPlaying ? "||" : ">";
             string perspStr = perspectiveMode.ToString();
             string trailStr = showTrails ? "Trails:ON" : "Trails:OFF";
+            string controlsStr = perspectiveMode == PerspectiveMode.FreeCam
+                ? "MMB:Look  WASD:Move  Q/E:Up/Down  Wheel:Zoom  Shift:Fast  Esc:Exit"
+                : "Space:Play  Left/Right:Step  +/-:Speed  F1-F5:View  G:Trails  Esc:Exit";
 
             GUI.Label(new Rect(20, labelY, barWidth, 20),
                 $"{playStr} {timeStr}  Speed:{speedStr}  [{perspStr}]  {trailStr}");
             GUI.Label(new Rect(20, labelY + 16, barWidth, 20),
-                "Space:Play  Left/Right:Step  +/-:Speed  F1-F5:View  G:Trails  Esc:Exit");
+                controlsStr);
 
             if (showSignalReplayStatus)
                 DrawSignalReplayStatus();
