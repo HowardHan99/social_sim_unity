@@ -15,6 +15,7 @@ GameObject:
   - component: {fileID: 6885732002790802482}
   - component: {fileID: 8949813842953406120}
   - component: {fileID: 4828862030053796946}
+  - component: {fileID: 8140267131996231004}
   m_Layer: 0
   m_Name: ThirdPersonCamera
   m_TagString: MainCamera
@@ -197,6 +198,28 @@ MonoBehaviour:
   m_BeforeTransparentBundles: []
   m_BeforeStackBundles: []
   m_AfterStackBundles: []
+--- !u!114 &8140267131996231004
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6885732002790802487}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 57717d771b194b9d871c0ae1df1df1bd, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  dotSize: 16
+  ringSize: 26
+  verticalOffset: -22
+  alpha: 0.7
+  ringAlpha: 0.22
+  outlineAlpha: 0.22
+  anchorColor: {r: 1, g: 1, b: 1, a: 1}
+  overlayLabel: you are driving the agent
+  fontSize: 15
+  labelOffsetY: 16
 --- !u!1 &6885732002872308065
 GameObject:
   m_ObjectHideFlags: 0

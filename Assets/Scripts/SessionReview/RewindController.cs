@@ -66,6 +66,7 @@ namespace SessionReview
         private float freeCamYaw;
         private float freeCamPitch;
         private bool freeCamLooking;
+        private bool freeCamPanning;
         private Vector3 lastFreeCamMousePosition;
 
         private GameObject trailParent;
@@ -192,6 +193,7 @@ namespace SessionReview
             isRewinding = false;
             isPlaying = false;
             freeCamLooking = false;
+            freeCamPanning = false;
             Cursor.visible = true;
             Cursor.lockState = CursorLockMode.None;
 
@@ -782,6 +784,7 @@ namespace SessionReview
         private void DisableLiveCameraDrivers()
         {
             disabledCameraBehaviours.Clear();
+            CacheAndDisableCameraBehaviours(savedMainCamera);
             CacheAndDisableCameraBehaviours(robotFirstPersonCam);
             CacheAndDisableCameraBehaviours(pwdFirstPersonCam);
         }
@@ -819,6 +822,7 @@ namespace SessionReview
         {
             rewindCamera.enabled = false;
             rewindCamera.orthographic = false;
+            freeCamPanning = false;
             if (robotFirstPersonCam != null) robotFirstPersonCam.enabled = false;
             if (pwdFirstPersonCam != null) pwdFirstPersonCam.enabled = false;
         }
@@ -978,6 +982,7 @@ namespace SessionReview
             freeCamYaw = euler.y;
             freeCamPitch = NormalizePitch(euler.x);
             freeCamLooking = false;
+            freeCamPanning = false;
         }
 
         private void UpdateFreeCam()
@@ -985,20 +990,31 @@ namespace SessionReview
             if (rewindCamera == null || !rewindCamera.enabled)
                 return;
 
-            if (Input.GetKeyDown(KeyCode.Mouse2))
+            if (Input.GetKeyDown(KeyCode.Mouse1))
             {
                 freeCamLooking = true;
+                freeCamPanning = false;
                 Cursor.visible = false;
                 Cursor.lockState = CursorLockMode.Locked;
                 lastFreeCamMousePosition = Input.mousePosition;
                 if (rewindComfortBlur != null)
                     rewindComfortBlur.TriggerTransitionBlur();
             }
-            else if (Input.GetKeyUp(KeyCode.Mouse2))
+            else if (Input.GetKeyUp(KeyCode.Mouse1))
             {
                 freeCamLooking = false;
                 Cursor.visible = true;
                 Cursor.lockState = CursorLockMode.None;
+            }
+
+            if (!freeCamLooking && Input.GetKeyDown(KeyCode.Mouse2))
+            {
+                freeCamPanning = true;
+                lastFreeCamMousePosition = Input.mousePosition;
+            }
+            else if (Input.GetKeyUp(KeyCode.Mouse2))
+            {
+                freeCamPanning = false;
             }
 
             if (freeCamLooking)
@@ -1008,6 +1024,15 @@ namespace SessionReview
                 freeCamPitch -= mouseDelta.y * freeCamLookSensitivity * 0.02f;
                 freeCamPitch = Mathf.Clamp(freeCamPitch, -85f, 85f);
                 rewindCamera.transform.rotation = Quaternion.Euler(freeCamPitch, freeCamYaw, 0f);
+                lastFreeCamMousePosition = Input.mousePosition;
+            }
+            else if (freeCamPanning)
+            {
+                Vector3 mouseDelta = Input.mousePosition - lastFreeCamMousePosition;
+                float panScale = 0.02f;
+                Vector3 panOffset =
+                    (-rewindCamera.transform.right * mouseDelta.x + -rewindCamera.transform.up * mouseDelta.y) * panScale;
+                rewindCamera.transform.position += panOffset;
                 lastFreeCamMousePosition = Input.mousePosition;
             }
 
@@ -1219,7 +1244,7 @@ namespace SessionReview
             string perspStr = perspectiveMode.ToString();
             string trailStr = showTrails ? "Trails:ON" : "Trails:OFF";
             string controlsStr = perspectiveMode == PerspectiveMode.FreeCam
-                ? "MMB:Look  WASD:Move  Q/E:Up/Down  Wheel:Zoom  Shift:Fast  Esc:Exit"
+                ? "RMB:Look  MMB:Pan  WASD:Move  Q/E:Up/Down  Wheel:Zoom  Shift:Fast  Esc:Exit"
                 : "Space:Play  Left/Right:Step  +/-:Speed  F1-F5:View  G:Trails  Esc:Exit";
 
             GUI.Label(new Rect(20, labelY, barWidth, 20),

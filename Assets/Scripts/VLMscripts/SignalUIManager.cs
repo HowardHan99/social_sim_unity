@@ -59,6 +59,20 @@ public class SignalUIManager : MonoBehaviour
 
     private void Update()
     {
+        if (IsReviewSessionActive())
+        {
+            if (isSignalSequenceActive)
+                FinishSequence();
+            else
+            {
+                SetSendSignalButtonVisible(false);
+                SetSignalSelectionVisible(false);
+                SetLightingFlowVisible(false);
+                SetVlmCaptureButtonVisible(false);
+            }
+            return;
+        }
+
         if (isSignalSequenceActive)
             return;
 
@@ -233,7 +247,7 @@ public class SignalUIManager : MonoBehaviour
         if (vlmCamCapture != null)
             vlmCamCapture.SetCaptureButtonOverride(false);
 
-        SetSendSignalButtonVisible(true);
+        SetSendSignalButtonVisible(!IsReviewSessionActive());
         SetVlmCaptureButtonVisible(false);
 
         if (PauseManager.Instance != null && PauseManager.Instance.IsGamePaused())
@@ -274,6 +288,13 @@ public class SignalUIManager : MonoBehaviour
     {
         if (vlmCaptureButton != null)
             vlmCaptureButton.SetActive(isVisible);
+    }
+
+    private static bool IsReviewSessionActive()
+    {
+        return SessionReviewManager.Instance != null &&
+               (SessionReviewManager.Instance.IsReviewModeActive ||
+                SessionReviewManager.Instance.IsWorldBuildingModeActive);
     }
 
 }

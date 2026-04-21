@@ -247,6 +247,8 @@ namespace SEAN.Tasks
 
             if (hasPreparedTaskPreview)
             {
+                UpdatePositions();
+                UpdateCameras();
                 if (PublishGoal)
                 {
                     Publish(interactiveGoal);
@@ -405,11 +407,64 @@ namespace SEAN.Tasks
                     sean.player.transform.GetChild(0).position = playerStart.transform.position;
                 }
             }
+
+            SyncPwdPlayerToTaskStartGoal();
+
             if (robotStart)
             {
                 sean.robot.base_link.transform.rotation = robotStart.transform.rotation;
                 sean.robot.base_link.transform.position = robotStart.transform.position;
             }
+        }
+
+        private void SyncPwdPlayerToTaskStartGoal()
+        {
+            if (!sean.PlayerControl || playerStart == null)
+                return;
+
+            IVI.ManualWheelchairController pwdController = FindPwdPlayerController();
+            if (pwdController == null)
+                return;
+
+            Transform pwdTransform = pwdController.transform;
+            pwdTransform.rotation = playerStart.transform.rotation;
+            pwdTransform.position = playerStart.transform.position;
+
+            foreach (Rigidbody rb in pwdTransform.GetComponentsInChildren<Rigidbody>(true))
+            {
+                if (rb == null)
+                    continue;
+
+                rb.velocity = Vector3.zero;
+                rb.angularVelocity = Vector3.zero;
+            }
+
+            IVI.SFPWDAgent sfpwd = pwdController.GetComponent<IVI.SFPWDAgent>();
+            if (sfpwd != null)
+            {
+                sfpwd.useWaypoints = true;
+                sfpwd.waypointStart = playerStart.transform.position;
+                if (playerGoal != null)
+                    sfpwd.waypointGoal = playerGoal.transform.position;
+            }
+        }
+
+        private static IVI.ManualWheelchairController FindPwdPlayerController()
+        {
+            IVI.ManualWheelchairController fallback = null;
+            foreach (IVI.ManualWheelchairController controller in FindObjectsOfType<IVI.ManualWheelchairController>())
+            {
+                if (controller == null)
+                    continue;
+
+                if (controller.gameObject != null && controller.gameObject.name == "PWDPlayer")
+                    return controller;
+
+                if (fallback == null)
+                    fallback = controller;
+            }
+
+            return fallback;
         }
 
         private bool timeout()

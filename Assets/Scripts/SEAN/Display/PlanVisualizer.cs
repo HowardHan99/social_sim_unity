@@ -49,6 +49,20 @@ namespace SEAN.Display
             return (Vector3[])renderPathPositions.Clone();
         }
 
+        public void ClearCurrentPlan()
+        {
+            renderPathPositions = null;
+            message = null;
+            stamp = 0;
+            prevStamp = 0;
+
+            if (pathPositions != null)
+                pathPositions.Clear();
+
+            if (lineStripBehavior != null)
+                EnableLineStrip(false);
+        }
+
         void Awake()
         {
             // Make sure we catch the first global plan message
@@ -128,6 +142,7 @@ namespace SEAN.Display
             }
             else
             {
+                renderPathPositions = null;
                 EnableLineStrip(false);
             }
             prevStamp = stamp;

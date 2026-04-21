@@ -1,4 +1,4 @@
-﻿using System.Collections;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -7,13 +7,20 @@ public class CameraCollision : MonoBehaviour
     public float minDistance = 1.0f;
     public float maxDistance = 4.0f;
     public float smooth = 10.0f;
+    public float returnSmooth = 4.0f;
+    public float distanceDeadzone = 0.08f;
+    public float collisionBuffer = 0.12f;
+
     Vector3 playerDir;
     public float distance;
+
+    private float targetDistance;
 
     void Awake()
     {
         playerDir = transform.localPosition.normalized;
         distance = transform.localPosition.magnitude;
+        targetDistance = distance;
     }
 
     void Update()
@@ -25,13 +32,20 @@ public class CameraCollision : MonoBehaviour
 
         if (Physics.Linecast(playerPos, desiredCameraPos, out hit))
         {
-            distance = Mathf.Clamp(hit.distance, minDistance, maxDistance);
+            targetDistance = Mathf.Clamp(hit.distance - collisionBuffer, minDistance, maxDistance);
         }
         else
         {
-            distance = maxDistance;
+            targetDistance = maxDistance;
         }
 
-        transform.localPosition = Vector3.Lerp(transform.localPosition, playerDir * distance, Time.deltaTime * smooth);
+        if (Mathf.Abs(targetDistance - distance) <= distanceDeadzone)
+        {
+            targetDistance = distance;
+        }
+
+        float currentSmooth = targetDistance < distance ? smooth : returnSmooth;
+        distance = Mathf.Lerp(distance, targetDistance, Time.deltaTime * currentSmooth);
+        transform.localPosition = playerDir * distance;
     }
 }

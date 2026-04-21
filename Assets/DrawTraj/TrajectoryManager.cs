@@ -134,7 +134,6 @@ public class TrajectoryManager : MonoBehaviour
         // Fly camera to above the target, then seed the first point
         StartCoroutine(FlyToTarget(() =>
         {
-            PlantStartPoint();
             _cameraReady = true;
         }));
     }
@@ -243,27 +242,6 @@ public class TrajectoryManager : MonoBehaviour
     }
 
     // ── Drawing ──────────────────────────────────────────────────────────────
-
-    /// <summary>
-    /// Seed the very first trajectory point at the target's ground position
-    /// so the path always originates from the character's feet.
-    /// </summary>
-    private void PlantStartPoint()
-    {
-        if (trajectoryTarget == null) return;
-
-        // Project target position onto the ground (raycast down from above)
-        Ray ray = new Ray(trajectoryTarget.position + Vector3.up * 5f, Vector3.down);
-        Vector3 startPoint;
-
-        if (Physics.Raycast(ray, out RaycastHit hit, 20f, groundLayer))
-            startPoint = hit.point + Vector3.up * heightOffset;
-        else
-            startPoint = new Vector3(trajectoryTarget.position.x, heightOffset, trajectoryTarget.position.z);
-
-        _activeRenderer?.AddPoint(startPoint);
-        _sessionPoints.Add(startPoint);
-    }
 
     private void HandleDrawInput()
     {

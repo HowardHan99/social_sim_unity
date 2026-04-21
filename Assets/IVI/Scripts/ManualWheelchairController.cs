@@ -7,7 +7,7 @@ namespace IVI
     public class ManualWheelchairController : MonoBehaviour
     {
         [Header("Control Settings")]
-        public float moveSpeed = 1.0f;
+        public float moveSpeed = 0.7f;
         public float rotationSpeed = 60f;
         public KeyCode toggleModeKey = KeyCode.RightShift;
         public bool useWASD = true;
@@ -27,9 +27,9 @@ namespace IVI
         public float sPressWindowSec = 0.6f;
 
         [Header("Manual Smoothing")]
-        public float manualAcceleration = 0.25f;
-        public float manualDeceleration = 2.8f;
-        public float manualAngularAcceleration = 220f;
+        public float manualAcceleration = 0.12f;
+        public float manualDeceleration = 1.2f;
+        public float manualAngularAcceleration = 90f;
 
         [Header("Debug Manual Brake (read-only)")]
         public int debugSBrakePressCount;

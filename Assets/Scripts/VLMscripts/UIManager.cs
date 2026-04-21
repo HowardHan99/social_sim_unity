@@ -67,7 +67,13 @@ public class UIManager : MonoBehaviour
         {
             bool robotFocusedPlayer = !SessionReview.SessionOnboardingSettings.HasCompletedOnboarding ||
                 SessionReview.SessionOnboardingSettings.PlayerMode == SessionReview.OnboardingPlayerMode.Robot;
-            bool shouldShow = PauseManager.Instance.isPaused && !SuppressSignalButtons && robotFocusedPlayer;
+            bool reviewSessionActive = SessionReview.SessionReviewManager.Instance != null &&
+                (SessionReview.SessionReviewManager.Instance.IsReviewModeActive ||
+                 SessionReview.SessionReviewManager.Instance.IsWorldBuildingModeActive);
+            bool shouldShow = PauseManager.Instance.isPaused &&
+                !SuppressSignalButtons &&
+                robotFocusedPlayer &&
+                !reviewSessionActive;
             SetManagedSignalButtonsVisible(shouldShow);
         }
 

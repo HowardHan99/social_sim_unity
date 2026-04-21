@@ -28,8 +28,8 @@ namespace SEAN.Control
         // Manual control variables
         private bool manualControlActive = false;
         public bool ManualControlActive => manualControlActive;
-        public float manualLinearSpeed = 0.15f;
-        public float manualAngularSpeed = 0.6f;
+        public float manualLinearSpeed = 0.7f;
+        public float manualAngularSpeed = 0.7f;
 
         [Header("Startup Control")]
         public bool startInManualMode = false;
@@ -54,14 +54,14 @@ namespace SEAN.Control
         // Momentum-based Transition variables
         private float prevLinVelocity = 0f;
         private float prevAngVelocity = 0f;
-        public float velocityDamping = 0.9f;
+        public float velocityDamping = 0.97f;
 
         [Header("Unity Velocity Post-Processing")]
         public bool bypassUnityVelocityPostProcessing = true;
         public bool preserveManualVelocitySmoothing = true;
-        public float manualVelocityDamping = 0.992f;
+        public float manualVelocityDamping = 0.997f;
         public bool enforceManualSpeedLimit = true;
-        public float manualMaxPlanarSpeed = 0.8f;
+        public float manualMaxPlanarSpeed = 0.7f;
 
         // Debug fields to show last received ROS commands in Inspector
         [Header("Debug ROS Speeds (Read-Only)")]
@@ -166,8 +166,8 @@ namespace SEAN.Control
         public bool enableCommandShaping = true;
         public float linearCommandDeadband = 0.01f;
         public float angularCommandDeadband = 0.03f;
-        public float maxLinearCommand = 0.6f;
-        public float maxAngularCommand = 1.2f;
+        public float maxLinearCommand = 0.7f;
+        public float maxAngularCommand = 0.7f;
 
         [Header("Path Reacquisition")]
         public bool enablePathReacquisition = true;

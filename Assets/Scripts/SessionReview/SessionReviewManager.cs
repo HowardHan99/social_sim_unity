@@ -79,10 +79,7 @@ namespace SessionReview
         private bool isTopDownPanning;
         private Vector2 lastTopDownMousePosition;
         private static Texture2D lineTexture;
-        private static Texture2D worldBuildingThumbMailbox;
-        private static Texture2D worldBuildingThumbCardboard;
-        private static Texture2D worldBuildingThumbWheelchair;
-        private static bool worldBuildingSpawnThumbnailsLoadAttempted;
+        private Vector2 worldBuildingSpawnScroll;
         private bool showReviewCompletionPrompt;
         private bool inWorldBuildingMode;
         private Camera worldBuildingCamera;
@@ -228,7 +225,7 @@ namespace SessionReview
 
         private void OnTrialEnded(TrialEndInfo info)
         {
-            ExitWorldBuildingMode();
+            ExitWorldBuildingMode(true);
 
             if (inRewindMode)
                 ExitReviewMode();
@@ -343,15 +340,19 @@ namespace SessionReview
         {
             if (runtimeEditorManager == null)
             {
-                ExitWorldBuildingMode();
+                ExitWorldBuildingMode(true);
                 showPostTrialPrompt = true;
                 PauseForPostTrialPrompt();
                 return;
             }
 
+            bool mouseOverWorldBuildingUi = IsMouseOverWorldBuildingUi();
+            if (worldBuildingCameraController != null)
+                worldBuildingCameraController.enabled = !mouseOverWorldBuildingUi;
+
             if (!runtimeEditorManager.isEditorActive)
             {
-                ExitWorldBuildingMode();
+                ExitWorldBuildingMode(true);
                 showPostTrialPrompt = true;
                 PauseForPostTrialPrompt();
             }
@@ -466,11 +467,20 @@ namespace SessionReview
                 return;
             }
 
+            bool mouseOverReviewUi = IsMouseOverReviewUi();
+
             float scroll = Input.mouseScrollDelta.y;
-            if (Mathf.Abs(scroll) > 0.01f)
+            if (!mouseOverReviewUi && Mathf.Abs(scroll) > 0.01f)
             {
                 float zoomMultiplier = scroll > 0f ? 0.85f : 1.15f;
                 rewindController.ZoomTopDownAtScreenPoint(Input.mousePosition, zoomMultiplier);
+            }
+
+            if (mouseOverReviewUi)
+            {
+                if (!Input.GetMouseButton(2))
+                    isTopDownPanning = false;
+                return;
             }
 
             if (Input.GetMouseButtonDown(2))
@@ -525,7 +535,7 @@ namespace SessionReview
             var trial = trialArchive.GetTrial(trialIndex);
             if (trial == null) return;
 
-            ExitWorldBuildingMode();
+            ExitWorldBuildingMode(true);
 
             if (inRewindMode)
                 rewindController.ExitRewind();
@@ -582,7 +592,7 @@ namespace SessionReview
         {
             CaptureReviewCameraForWorldBuilding();
             showReviewCompletionPrompt = false;
-            ExitWorldBuildingMode();
+            ExitWorldBuildingMode(true);
             if (inRewindMode)
                 ExitReviewMode();
 
@@ -630,6 +640,7 @@ namespace SessionReview
 
             ResetControlledMotion();
             sean.robotTask.StartPendingOrNewTask();
+            ApplyStartupControlDefaults();
             sessionTracker?.BeginTrackingForCurrentTask();
 
             if (trialStartPromptPausedTime)
@@ -748,7 +759,7 @@ namespace SessionReview
         {
             showReviewCompletionPrompt = false;
             CaptureReviewCameraForWorldBuilding();
-            ExitWorldBuildingMode();
+            ExitWorldBuildingMode(true);
             if (inRewindMode)
                 ExitReviewMode();
 
@@ -1076,13 +1087,27 @@ namespace SessionReview
 
         private void DrawWorldBuildingOverlay()
         {
-            float width = 560f;
-            float height = 178f;
-            Rect rect = new Rect(24f, 24f, width, height);
+            Rect rect = GetWorldBuildingOverlayRect();
             GUI.Box(rect, "");
-            GUI.Label(new Rect(rect.x + 16f, rect.y + 14f, rect.width - 32f, 24f), "World Building");
-            GUI.Label(new Rect(rect.x + 16f, rect.y + 40f, rect.width - 32f, 40f),
-                "Session review is now using the runtime editor. It opens in top-down map view so objects are easier to place, and you can switch into free camera while editing.");
+
+            GUIStyle bodyStyle = new GUIStyle(GUI.skin.label)
+            {
+                wordWrap = true,
+                richText = false
+            };
+
+            float contentX = rect.x + 16f;
+            float contentWidth = rect.width - 32f;
+            float y = rect.y + 14f;
+
+            GUI.Label(new Rect(contentX, y, contentWidth, 24f), "World Building");
+            y += 28f;
+
+            string introText =
+                "Session review is now using the runtime editor. It opens in top-down map view so objects are easier to place, and you can switch into free camera while editing.";
+            float introHeight = bodyStyle.CalcHeight(new GUIContent(introText), contentWidth);
+            GUI.Label(new Rect(contentX, y, contentWidth, introHeight), introText, bodyStyle);
+            y += introHeight + 10f;
 
             string cameraMode = worldBuildingCameraController != null && worldBuildingCameraController.IsTopDownView()
                 ? "Top-down"
@@ -1091,22 +1116,32 @@ namespace SessionReview
                 ? $"Selected: {runtimeEditorManager.CurrentSelectedObject.name}"
                 : "Selected: none";
 
-            GUI.Label(new Rect(rect.x + 16f, rect.y + 82f, rect.width - 32f, 22f), $"Camera: {cameraMode}");
-            GUI.Label(new Rect(rect.x + 16f, rect.y + 104f, rect.width - 32f, 22f), selectionText);
-            GUI.Label(new Rect(rect.x + 16f, rect.y + 126f, rect.width - 32f, 40f),
-                "Controls: Left click select/drag gizmo | T translate | R rotate | Right mouse free cam | Middle mouse pan | Wheel zoom | F4 top-down reset | E or Esc exit editor");
+            GUI.Label(new Rect(contentX, y, contentWidth, 22f), $"Camera: {cameraMode}");
+            y += 22f;
+            GUI.Label(new Rect(contentX, y, contentWidth, 22f), selectionText);
+            y += 26f;
 
-            if (GUI.Button(new Rect(rect.x + 16f, rect.y + 140f, 132f, 28f), "Back To Menu"))
+            string controlsText =
+                "Controls: Left click select/drag gizmo | T translate | R rotate | Right mouse free cam | Middle mouse pan | Wheel zoom | F4 top-down reset | E or Esc exit editor";
+            float controlsHeight = bodyStyle.CalcHeight(new GUIContent(controlsText), contentWidth);
+            GUI.Label(new Rect(contentX, y, contentWidth, controlsHeight), controlsText, bodyStyle);
+            y += controlsHeight + 12f;
+
+            float buttonWidth = 148f;
+            float buttonHeight = 30f;
+            float buttonGap = 12f;
+
+            if (GUI.Button(new Rect(contentX, y, buttonWidth, buttonHeight), "Back To Menu"))
             {
-                ExitWorldBuildingMode();
+                ExitWorldBuildingMode(true);
                 showPostTrialPrompt = true;
                 PauseForPostTrialPrompt();
             }
 
-            if (GUI.Button(new Rect(rect.x + 164f, rect.y + 140f, 122f, 28f), "Choose Scenario"))
+            if (GUI.Button(new Rect(contentX + buttonWidth + buttonGap, y, buttonWidth, buttonHeight), "Choose Scenario"))
                 OpenOnboardingFromPostTrial();
 
-            if (GUI.Button(new Rect(rect.x + 302f, rect.y + 140f, 122f, 28f), "Run Again"))
+            if (GUI.Button(new Rect(contentX + (buttonWidth + buttonGap) * 2f, y, buttonWidth, buttonHeight), "Run Again"))
                 StartNextTrialFromPrompt();
 
             DrawWorldBuildingSpawnPalette();
@@ -1114,35 +1149,101 @@ namespace SessionReview
 
         private void DrawWorldBuildingSpawnPalette()
         {
-            EnsureWorldBuildingSpawnThumbnails();
+            IReadOnlyList<WorldBuildingSpawnUiRow> rows = WorldBuildingSpawnLibrary.LastUiRows;
+            if (rows == null || rows.Count == 0)
+            {
+                Rect panelRect = GetWorldBuildingSpawnPaletteRect(72f, 360f);
+                GUI.Box(panelRect, "");
+                GUI.Label(new Rect(panelRect.x + 12f, panelRect.y + 12f, panelRect.width - 24f, 48f),
+                    "No world-building props: each prefab in Resources/WorldBuildingSpawns needs a matching thumbnail in Resources/WorldBuildingUI (see WorldBuildingSpawnLibrary).");
+                return;
+            }
 
-            float panelWidth = 420f;
-            float panelHeight = 188f;
-            Rect panelRect = new Rect(Screen.width - panelWidth - 24f, Screen.height - panelHeight - 24f, panelWidth, panelHeight);
-            GUI.Box(panelRect, "");
-            GUI.Label(new Rect(panelRect.x + 16f, panelRect.y + 12f, panelRect.width - 32f, 22f), "Add Objects");
-            GUI.Label(new Rect(panelRect.x + 16f, panelRect.y + 32f, panelRect.width - 32f, 36f),
-                "Pick a prop (mailbox, box, or wheelchair). It spawns in front of the top-down view for placement.");
-
-            float cardY = panelRect.y + 74f;
-            float cardWidth = 120f;
+            float panelWidth2 = Mathf.Min(540f, Screen.width - 32f);
+            float headerH = 68f;
             float cardHeight = 96f;
-            float gap = 12f;
+            float gap = 10f;
+            int cols = 3;
+            int rowCount = (rows.Count + cols - 1) / cols;
+            float scrollAreaMin = 120f;
+            float scrollAreaMax = Mathf.Min(280f, Screen.height * 0.38f);
+            float scrollInnerHeight = rowCount * (cardHeight + gap) + gap;
+            float scrollViewportH = Mathf.Clamp(scrollInnerHeight, scrollAreaMin, scrollAreaMax);
+            float panelHeight2 = headerH + scrollViewportH + 16f;
+            Rect panelRect2 = GetWorldBuildingSpawnPaletteRect(panelHeight2, panelWidth2);
 
-            DrawSpawnPreviewCard(new Rect(panelRect.x + 16f, cardY, cardWidth, cardHeight), "Mailbox", "0", worldBuildingThumbMailbox);
-            DrawSpawnPreviewCard(new Rect(panelRect.x + 16f + cardWidth + gap, cardY, cardWidth, cardHeight), "Cardboard Box", "1", worldBuildingThumbCardboard);
-            DrawSpawnPreviewCard(new Rect(panelRect.x + 16f + (cardWidth + gap) * 2f, cardY, cardWidth, cardHeight), "Wheelchair", "2", worldBuildingThumbWheelchair);
+            GUI.Box(panelRect2, "");
+            GUI.Label(new Rect(panelRect2.x + 14f, panelRect2.y + 10f, panelRect2.width - 28f, 22f), "Add Objects");
+            GUI.Label(new Rect(panelRect2.x + 14f, panelRect2.y + 30f, panelRect2.width - 28f, 34f),
+                "Only prefabs with a matching image in Resources/WorldBuildingUI are listed (others in WorldBuildingSpawns are ignored).");
+
+            float innerPad = 12f;
+            float scrollBarReserve = 18f;
+            Rect viewRect = new Rect(
+                panelRect2.x + innerPad,
+                panelRect2.y + headerH,
+                panelRect2.width - innerPad * 2f,
+                scrollViewportH);
+            float innerW = viewRect.width - scrollBarReserve;
+            float cardW = (innerW - (cols - 1) * gap) / cols;
+            float contentW = viewRect.width - scrollBarReserve;
+            float contentH = Mathf.Max(scrollInnerHeight, viewRect.height);
+            Rect contentRect = new Rect(0f, 0f, contentW, contentH);
+
+            worldBuildingSpawnScroll = GUI.BeginScrollView(viewRect, worldBuildingSpawnScroll, contentRect, false, true);
+            for (int i = 0; i < rows.Count; i++)
+            {
+                WorldBuildingSpawnUiRow row = rows[i];
+                int r = i / cols;
+                int c = i % cols;
+                float x = c * (cardW + gap);
+                float y = gap + r * (cardHeight + gap);
+                DrawSpawnPreviewCard(new Rect(x, y, cardW, cardHeight), row.DisplayName, row.SpawnId, row.Thumbnail);
+            }
+
+            GUI.EndScrollView();
         }
 
-        private static void EnsureWorldBuildingSpawnThumbnails()
+        private bool IsMouseOverWorldBuildingUi()
         {
-            if (worldBuildingSpawnThumbnailsLoadAttempted)
-                return;
-            worldBuildingSpawnThumbnailsLoadAttempted = true;
+            Vector2 mouse = Input.mousePosition;
+            float guiY = Screen.height - mouse.y;
+            Vector2 guiPoint = new Vector2(mouse.x, guiY);
 
-            worldBuildingThumbMailbox = Resources.Load<Texture2D>("WorldBuildingUI/0_mailboxImg");
-            worldBuildingThumbCardboard = Resources.Load<Texture2D>("WorldBuildingUI/1_CardboxImg");
-            worldBuildingThumbWheelchair = Resources.Load<Texture2D>("WorldBuildingUI/2_wheelChairAgentImg");
+            if (GetWorldBuildingOverlayRect().Contains(guiPoint))
+                return true;
+
+            return GetWorldBuildingSpawnPaletteRect().Contains(guiPoint);
+        }
+
+        private static Rect GetWorldBuildingOverlayRect()
+        {
+            return new Rect(24f, 24f, 620f, 228f);
+        }
+
+        private static Rect GetWorldBuildingSpawnPaletteRect()
+        {
+            IReadOnlyList<WorldBuildingSpawnUiRow> rows = WorldBuildingSpawnLibrary.LastUiRows;
+            if (rows == null || rows.Count == 0)
+                return GetWorldBuildingSpawnPaletteRect(72f, 360f);
+
+            float panelWidth = Mathf.Min(540f, Screen.width - 32f);
+            float headerH = 68f;
+            float cardHeight = 96f;
+            float gap = 10f;
+            int cols = 3;
+            int rowCount = (rows.Count + cols - 1) / cols;
+            float scrollAreaMin = 120f;
+            float scrollAreaMax = Mathf.Min(280f, Screen.height * 0.38f);
+            float scrollInnerHeight = rowCount * (cardHeight + gap) + gap;
+            float scrollViewportH = Mathf.Clamp(scrollInnerHeight, scrollAreaMin, scrollAreaMax);
+            float panelHeight = headerH + scrollViewportH + 16f;
+            return GetWorldBuildingSpawnPaletteRect(panelHeight, panelWidth);
+        }
+
+        private static Rect GetWorldBuildingSpawnPaletteRect(float panelHeight, float panelWidth)
+        {
+            return new Rect(Screen.width - panelWidth - 24f, Screen.height - panelHeight - 24f, panelWidth, panelHeight);
         }
 
         private void DrawSpawnPreviewCard(Rect rect, string label, string spawnId, Texture2D thumbnail)
@@ -1367,7 +1468,7 @@ namespace SessionReview
             inWorldBuildingMode = true;
         }
 
-        private void ExitWorldBuildingMode()
+        private void ExitWorldBuildingMode(bool restoreGameplayCameras = false)
         {
             inWorldBuildingMode = false;
 
@@ -1390,8 +1491,12 @@ namespace SessionReview
                     worldBuildingCamera.targetDisplay = worldBuildingPreviousTargetDisplay;
             }
 
-            if (worldBuildingPreviousMainCamera != null &&
-                worldBuildingPreviousMainCamera != worldBuildingCamera)
+            if (restoreGameplayCameras)
+            {
+                RestoreRobotGameplayCameras();
+            }
+            else if (worldBuildingPreviousMainCamera != null &&
+                     worldBuildingPreviousMainCamera != worldBuildingCamera)
             {
                 worldBuildingPreviousMainCamera.enabled = worldBuildingPreviousMainCameraEnabled;
             }
@@ -1572,53 +1677,40 @@ namespace SessionReview
             return null;
         }
 
-        private static bool WorldBuildingSpawnListLooksConfigured(List<SpawnableObject> list)
-        {
-            if (list == null || list.Count < 3)
-                return false;
-            return FindSpawnableById(list, "0") != null
-                && FindSpawnableById(list, "1") != null
-                && FindSpawnableById(list, "2") != null;
-        }
-
-        private static SpawnableObject FindSpawnableById(List<SpawnableObject> list, string id)
-        {
-            foreach (SpawnableObject entry in list)
-            {
-                if (entry != null && entry.id == id && entry.prefab != null)
-                    return entry;
-            }
-
-            return null;
-        }
-
         /// <summary>
-        /// Scene-specific RuntimeEditorManager may have no spawn list; fill from Resources so IMGUI Add buttons work.
+        /// Sync spawn list from Resources/WorldBuildingSpawns so RuntimeEditorManager and IMGUI palette stay aligned.
         /// </summary>
         private void EnsureWorldBuildingSpawnPrefabsConfigured()
         {
             if (runtimeEditorManager == null)
                 return;
 
-            if (runtimeEditorManager.spawnableObjects == null)
-                runtimeEditorManager.spawnableObjects = new List<SpawnableObject>();
-
-            if (WorldBuildingSpawnListLooksConfigured(runtimeEditorManager.spawnableObjects))
-                return;
-
-            GameObject mailboxPrefab = Resources.Load<GameObject>("WorldBuildingSpawns/Mailbox");
-            GameObject boxPrefab = Resources.Load<GameObject>("WorldBuildingSpawns/Cardboard_Box");
-            GameObject wheelchairPrefab = Resources.Load<GameObject>("WorldBuildingSpawns/Wheelchair_male");
-            if (mailboxPrefab == null || boxPrefab == null || wheelchairPrefab == null)
+            WorldBuildingSpawnLibrary.RefreshFromResources();
+            IReadOnlyList<SpawnableObject> built = WorldBuildingSpawnLibrary.LastSpawnables;
+            if (built == null || built.Count == 0)
             {
-                Debug.LogError("[SessionReview] World building spawn prefabs missing. Expected Resources/WorldBuildingSpawns/Mailbox, Cardboard_Box, Wheelchair_male.");
+                Debug.LogWarning("[SessionReview] World building: no prefabs with UI thumbnails (pair WorldBuildingSpawns prefabs + WorldBuildingUI textures).");
+                if (runtimeEditorManager.spawnableObjects == null)
+                    runtimeEditorManager.spawnableObjects = new List<SpawnableObject>();
+                else
+                    runtimeEditorManager.spawnableObjects.Clear();
                 return;
             }
 
+            if (runtimeEditorManager.spawnableObjects == null)
+                runtimeEditorManager.spawnableObjects = new List<SpawnableObject>();
             runtimeEditorManager.spawnableObjects.Clear();
-            runtimeEditorManager.spawnableObjects.Add(new SpawnableObject { id = "0", prefab = mailboxPrefab, spawnButton = null });
-            runtimeEditorManager.spawnableObjects.Add(new SpawnableObject { id = "1", prefab = boxPrefab, spawnButton = null });
-            runtimeEditorManager.spawnableObjects.Add(new SpawnableObject { id = "2", prefab = wheelchairPrefab, spawnButton = null });
+            foreach (SpawnableObject entry in built)
+            {
+                if (entry == null || entry.prefab == null)
+                    continue;
+                runtimeEditorManager.spawnableObjects.Add(new SpawnableObject
+                {
+                    id = entry.id,
+                    prefab = entry.prefab,
+                    spawnButton = null
+                });
+            }
         }
 
         private bool EnsureRuntimeEditorReady()
@@ -1686,6 +1778,10 @@ namespace SessionReview
         {
             showTrialStartPrompt = true;
             bypassRosBackendForTrialStart = false;
+            var planVisualizer = FindObjectOfType<SEAN.Display.PlanVisualizer>();
+            if (planVisualizer != null)
+                planVisualizer.ClearCurrentPlan();
+
             if (IsTrialPreviewReady())
             {
                 trialStartReady = true;
@@ -1813,13 +1909,17 @@ namespace SessionReview
 
             var pwdControllers = FindObjectsOfType<IVI.ManualWheelchairController>();
             bool pwdManual = selectedPwdStartupControl == StartupControlMode.Manual;
+            bool allowPwdMovement = ShouldAllowPwdMovement();
             foreach (var pwdController in pwdControllers)
             {
                 if (pwdController == null)
                     continue;
 
                 pwdController.startInManualMode = pwdManual;
-                pwdController.ApplyStartupControlMode(pwdManual);
+                if (allowPwdMovement)
+                    UnfreezePwdController(pwdController, pwdManual);
+                else
+                    FreezePwdController(pwdController);
             }
 
             bool usePwdAsMainCamera =
@@ -1830,6 +1930,52 @@ namespace SessionReview
                 ActivatePwdCameraAsMain();
             else
                 RestoreRobotGameplayCameras();
+        }
+
+        private bool ShouldAllowPwdMovement()
+        {
+            var sean = SEAN.SEAN.instance;
+            return !showOnboarding &&
+                   !showTrialStartPrompt &&
+                   !trialWarmupPending &&
+                   sean != null &&
+                   sean.robotTask != null &&
+                   sean.robotTask.isRunning;
+        }
+
+        private static void FreezePwdController(IVI.ManualWheelchairController pwdController)
+        {
+            if (pwdController == null)
+                return;
+
+            var sfpwdAgent = pwdController.GetComponent<IVI.SFPWDAgent>();
+            if (sfpwdAgent != null)
+            {
+                sfpwdAgent.KillNavigationCoroutine();
+                sfpwdAgent.enabled = false;
+            }
+
+            foreach (var rb in pwdController.GetComponentsInChildren<Rigidbody>(true))
+            {
+                if (rb == null)
+                    continue;
+
+                rb.velocity = Vector3.zero;
+                rb.angularVelocity = Vector3.zero;
+            }
+
+            pwdController.enabled = false;
+        }
+
+        private static void UnfreezePwdController(IVI.ManualWheelchairController pwdController, bool pwdManual)
+        {
+            if (pwdController == null)
+                return;
+
+            if (!pwdController.enabled)
+                pwdController.enabled = true;
+
+            pwdController.ApplyStartupControlMode(pwdManual);
         }
 
         private static readonly HashSet<string> pwdCameraNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -1877,6 +2023,8 @@ namespace SessionReview
 
         private void RestoreRobotGameplayCameras()
         {
+            DestroyLegacyStandaloneMainCamera();
+
             // Disable ALL PWD cameras (including disabled ones that allCameras would miss)
             foreach (Camera cam in FindObjectsOfType<Camera>(true))
             {
@@ -1920,6 +2068,47 @@ namespace SessionReview
 
             EnableRobotCam(sean.robot.camera_first, "camera_first");
             EnableRobotCam(sean.robot.camera_third, "camera_third");
+        }
+
+        private void DestroyLegacyStandaloneMainCamera()
+        {
+            Camera legacyMain = Camera.main;
+            if (legacyMain == null)
+                return;
+
+            var sean = SEAN.SEAN.instance;
+            if (IsManagedGameplayCamera(legacyMain, sean))
+                return;
+
+            Debug.Log($"[SessionReview] Destroying legacy standalone main camera '{legacyMain.name}'");
+            Destroy(legacyMain.gameObject);
+        }
+
+        private bool IsManagedGameplayCamera(Camera cam, SEAN.SEAN sean)
+        {
+            if (cam == null)
+                return false;
+
+            if (IsPwdCamera(cam))
+                return true;
+
+            if (worldBuildingCamera != null && cam == worldBuildingCamera)
+                return true;
+
+            if (sean?.environment?.topViewCamera != null && cam == sean.environment.topViewCamera)
+                return true;
+
+            if (sean?.robot != null)
+            {
+                if (cam == sean.robot.camera_first ||
+                    cam == sean.robot.camera_third ||
+                    cam == sean.robot.camera_overhead)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private void ActivatePwdCameraAsMain()

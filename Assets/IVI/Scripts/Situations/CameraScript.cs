@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 
 namespace IVI
@@ -5,6 +6,9 @@ namespace IVI
     public class CameraScript : MonoBehaviour
     {
         private ComfortMotionBlur comfortMotionBlur;
+        private bool warnedMissingMouseX;
+        private bool warnedMissingMouseY;
+        private bool warnedMissingMouseScroll;
 
         /// <summary>
         /// Normal speed of camera movement.
@@ -149,15 +153,15 @@ namespace IVI
 
             if (looking)
             {
-                float newRotationX = transform.localEulerAngles.y + Input.GetAxis("Mouse X") * freeLookSensitivity;
-                float newRotationY = transform.localEulerAngles.x - Input.GetAxis("Mouse Y") * freeLookSensitivity;
+                float newRotationX = transform.localEulerAngles.y + GetAxisSafely("Mouse X", ref warnedMissingMouseX) * freeLookSensitivity;
+                float newRotationY = transform.localEulerAngles.x - GetAxisSafely("Mouse Y", ref warnedMissingMouseY) * freeLookSensitivity;
                 transform.localEulerAngles = new Vector3(newRotationY, newRotationX, 0f);
             }
 
             if (!lockPosition && allowMouseScrollZoom)
             {
                 bool fastZoom = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
-                float axis = Input.GetAxis("Mouse ScrollWheel");
+                float axis = GetAxisSafely("Mouse ScrollWheel", ref warnedMissingMouseScroll);
                 if (axis != 0)
                 {
                     var zoomSensitivity = fastZoom ? this.fastZoomSensitivity : this.zoomSensitivity;
@@ -200,6 +204,24 @@ namespace IVI
             looking = false;
             Cursor.visible = true;
             Cursor.lockState = CursorLockMode.None;
+        }
+
+        private float GetAxisSafely(string axisName, ref bool warnedMissingAxis)
+        {
+            try
+            {
+                return Input.GetAxis(axisName);
+            }
+            catch (Exception)
+            {
+                if (!warnedMissingAxis)
+                {
+                    Debug.LogWarning($"[CameraScript] Input axis '{axisName}' is not configured. Defaulting to 0.", this);
+                    warnedMissingAxis = true;
+                }
+
+                return 0f;
+            }
         }
     }
 }
