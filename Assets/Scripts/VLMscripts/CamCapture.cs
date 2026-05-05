@@ -234,10 +234,21 @@ public class CamCapture : MonoBehaviour
     private string BuildPrompt(string prompt, string movementStatus)
     {
         string effectivePrompt = string.IsNullOrWhiteSpace(prompt)
-            ? "Describe the scene briefly and generate a natural spoken safety message for nearby pedestrians."
+            ? "You are the voice of a sidewalk delivery robot. Infer the scene, nearby pedestrian context, and the robot's current movement or behavior from the image and movement status, then decide the most appropriate robot signal internally. Output only the short spoken robot response that pedestrians should hear."
             : prompt.Trim();
 
-        return effectivePrompt + "\nMovement Status: " + movementStatus;
+        return effectivePrompt
+            + "\nMovement Status: " + movementStatus
+            + "\nRules:"
+            + "\n- Use the visual scene and movement status as internal reasoning only."
+            + "\n- Simulate the robot's response based on the current context and movement/behavior."
+            + "\n- Output exactly one brief robot utterance for display and audio."
+            + "\n- Do not output scene descriptions, movement summaries, labels, headings, JSON, bullets, or explanations."
+            + "\n- Do not include prefixes like Context, Movement, Behavior, Signal, or Robot Response."
+            + "\n- Keep it intuitive, friendly, and safety-aware."
+            + "\n- Prefer 4 to 12 words, and never exceed 16 words."
+            + "\n- Gentle robot onomatopoeia like beep-beep or boop may be used when natural."
+            + "\n- Output spoken words only.";
     }
 
     private string ParseGeminiResponse(string jsonResponse)
@@ -260,7 +271,7 @@ public class CamCapture : MonoBehaviour
                     }
 
                     if (textParts.Count > 0)
-                        return string.Join("\n", textParts).Trim();
+                        return RefineRobotResponse(string.Join("\n", textParts).Trim());
                 }
             }
 
@@ -274,6 +285,137 @@ public class CamCapture : MonoBehaviour
         }
 
         return "Unable to parse Gemini response.";
+    }
+
+    private string RefineRobotResponse(string rawResponse)
+    {
+        if (string.IsNullOrWhiteSpace(rawResponse))
+            return "Beep-beep, passing by.";
+
+        string cleaned = rawResponse
+            .Replace("```", " ")
+            .Replace("\r\n", "\n")
+            .Replace("\r", "\n")
+            .Trim();
+
+        string[] lines = cleaned.Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
+        List<string> candidates = new List<string>();
+
+        foreach (string rawLine in lines)
+        {
+            string line = rawLine.Trim().TrimStart('-', '*').Trim();
+            if (string.IsNullOrWhiteSpace(line))
+                continue;
+
+            int colonIndex = line.IndexOf(':');
+            if (colonIndex > 0)
+            {
+                string label = line.Substring(0, colonIndex).Trim().ToLowerInvariant();
+                string value = line.Substring(colonIndex + 1).Trim();
+
+                if (IsMetadataLabel(label))
+                    continue;
+
+                if (IsRobotResponseLabel(label) && !string.IsNullOrWhiteSpace(value))
+                {
+                    candidates.Add(value);
+                    continue;
+                }
+            }
+
+            candidates.Add(line);
+        }
+
+        string response = candidates.Count > 0 ? candidates[candidates.Count - 1] : cleaned;
+        response = StripWrapperQuotes(response);
+        response = CollapseWhitespace(response);
+
+        string[] words = response.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length > 16)
+            response = string.Join(" ", words, 0, 16).TrimEnd(',', ';', ':') + ".";
+
+        return string.IsNullOrWhiteSpace(response) ? "Beep-beep, passing by." : response;
+    }
+
+    private bool IsMetadataLabel(string label)
+    {
+        switch (label)
+        {
+            case "context":
+            case "scene":
+            case "scene context":
+            case "movement":
+            case "movement status":
+            case "behavior":
+            case "robot behavior":
+            case "signal":
+            case "robot signal":
+            case "reasoning":
+            case "analysis":
+            case "situation":
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private bool IsRobotResponseLabel(string label)
+    {
+        switch (label)
+        {
+            case "response":
+            case "robot response":
+            case "spoken response":
+            case "utterance":
+            case "message":
+            case "robot message":
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private string StripWrapperQuotes(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return string.Empty;
+
+        string trimmed = value.Trim().Trim('*').Trim();
+        if (trimmed.Length >= 2)
+        {
+            bool hasDoubleQuotes = trimmed.StartsWith("\"", StringComparison.Ordinal) && trimmed.EndsWith("\"", StringComparison.Ordinal);
+            bool hasSingleQuotes = trimmed.StartsWith("'", StringComparison.Ordinal) && trimmed.EndsWith("'", StringComparison.Ordinal);
+            if (hasDoubleQuotes || hasSingleQuotes)
+                trimmed = trimmed.Substring(1, trimmed.Length - 2).Trim();
+        }
+
+        return trimmed;
+    }
+
+    private string CollapseWhitespace(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return string.Empty;
+
+        StringBuilder builder = new StringBuilder(value.Length);
+        bool previousWasWhitespace = false;
+        foreach (char character in value)
+        {
+            if (char.IsWhiteSpace(character))
+            {
+                if (previousWasWhitespace)
+                    continue;
+
+                builder.Append(' ');
+                previousWasWhitespace = true;
+                continue;
+            }
+
+            builder.Append(character);
+            previousWasWhitespace = false;
+        }
+
+        return builder.ToString().Trim();
     }
 
     private void SaveResponseToLog(string rawResponse, string parsedResponse, string imageName, string movementStatus, bool isSuccess)

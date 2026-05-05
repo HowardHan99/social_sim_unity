@@ -452,7 +452,7 @@ namespace SEAN.Tasks
         private static IVI.ManualWheelchairController FindPwdPlayerController()
         {
             IVI.ManualWheelchairController fallback = null;
-            foreach (IVI.ManualWheelchairController controller in FindObjectsOfType<IVI.ManualWheelchairController>())
+            foreach (IVI.ManualWheelchairController controller in FindObjectsOfType<IVI.ManualWheelchairController>(true))
             {
                 if (controller == null)
                     continue;

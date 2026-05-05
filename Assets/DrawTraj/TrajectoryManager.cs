@@ -57,14 +57,38 @@ public class TrajectoryManager : MonoBehaviour
     [Tooltip("How many of the most-recent saved sessions to show in scene. 0 = all.")]
     [Min(0)] public int visibleSessionCount = 1;
 
+    [Header("Post-processing")]
+    [Tooltip("Drop points whose jump to the prior kept point exceeds median-step * this multiplier. 0 to disable.")]
+    [Min(0f)] public float outlierJumpMultiplier = 4f;
+
+    [Tooltip("Moving-average window size for smoothing (odd numbers recommended). <=1 to disable.")]
+    [Min(1)] public int smoothingWindow = 15;
+
+    [Tooltip("Number of smoothing passes. 0 to disable.")]
+    [Min(0)] public int smoothingPasses = 5;
+
     [Header("Follow Trajectory")]
-    [Tooltip("When enabled in review, the robot follows the displayed trajectory at this speed.")]
-    [Min(0.1f)] public float followRobotSpeed = 0.6f;
+    [Tooltip("Base speed (m/s) the robot uses when following the drawn trajectory.")]
+    [Min(0.01f)] public float followRobotSpeed = 0.6f;
+
+    [Tooltip("Runtime multiplier on top of followRobotSpeed (adjustable from UI / keys).")]
+    [Range(0.05f, 5f)] public float followSpeedMultiplier = 1f;
+
+    [Tooltip("Min / max allowed values for the runtime speed multiplier.")]
+    public float followSpeedMultiplierMin = 0.1f;
+    public float followSpeedMultiplierMax = 3f;
 
     // ── Public state (read by TrajectoryUI) ──────────────────────────────────
     public bool IsDrawMode { get; private set; }
     public bool IsFollowMode { get; private set; }
     public bool HasFollowTrajectory => _followTrajectoryPoints.Count >= 2 && _followTrajectoryLength > 0.01f;
+    public float EffectiveFollowSpeed => Mathf.Max(0f, followRobotSpeed * followSpeedMultiplier);
+
+    public float FollowSpeedMultiplier
+    {
+        get => followSpeedMultiplier;
+        set => followSpeedMultiplier = Mathf.Clamp(value, followSpeedMultiplierMin, followSpeedMultiplierMax);
+    }
 
     // ── Private state ────────────────────────────────────────────────────────
     private TrajectoryRenderer _activeRenderer;
@@ -81,6 +105,9 @@ public class TrajectoryManager : MonoBehaviour
     private readonly List<TrajectoryRenderer> _displayedRenderers = new List<TrajectoryRenderer>();
     private readonly List<Vector3> _followTrajectoryPoints = new List<Vector3>();
     private float _followTrajectoryLength;
+    private float _followDistance;      // arc-length already traversed
+    private float _followLastElapsed;   // last elapsedSeconds we saw
+    private bool _followSessionActive;  // accumulator initialised?
 
     // ── Unity Lifecycle ──────────────────────────────────────────────────────
 
@@ -164,19 +191,101 @@ public class TrajectoryManager : MonoBehaviour
             return;
 
         IsFollowMode = !IsFollowMode;
+        _followSessionActive = false;
+    }
+
+    public string LastFollowSkipReason { get; private set; } = "";
+    public float LastFollowDistance => _followDistance;
+    public float LastFollowElapsed => _followLastElapsed;
+
+    public bool ReviewIsPlaying
+    {
+        get
+        {
+            var rc = GetReviewController();
+            return rc != null && rc.IsPlaying;
+        }
+    }
+    public float ReviewPlaybackSpeed
+    {
+        get
+        {
+            var rc = GetReviewController();
+            return rc != null ? rc.PlaybackSpeed : 0f;
+        }
+    }
+    public float ReviewNormalizedTime
+    {
+        get
+        {
+            var rc = GetReviewController();
+            return rc != null ? rc.NormalizedTime : 0f;
+        }
+    }
+    public int ReviewToggleCount
+    {
+        get
+        {
+            var rc = GetReviewController();
+            return rc != null ? rc.TogglePlayPauseCount : 0;
+        }
     }
 
     public bool ApplyFollowTrajectoryToRobot(float elapsedSeconds)
     {
-        if (!IsFollowMode || !HasFollowTrajectory)
+        if (!IsFollowMode)
+        {
+            LastFollowSkipReason = "IsFollowMode=false";
+            _followSessionActive = false;
             return false;
+        }
+        if (!HasFollowTrajectory)
+        {
+            LastFollowSkipReason = $"HasFollowTrajectory=false (pts={_followTrajectoryPoints.Count} len={_followTrajectoryLength:F2})";
+            _followSessionActive = false;
+            LogFollowSkipOnce();
+            return false;
+        }
 
         var sean = SEAN.SEAN.instance;
         if (sean == null || sean.robot == null || sean.robot.base_link == null)
+        {
+            LastFollowSkipReason = "SEAN robot/base_link null";
+            LogFollowSkipOnce();
             return false;
+        }
 
-        if (!TryEvaluateFollowPose(elapsedSeconds, out Vector3 followPosition, out Quaternion followRotation))
+        // Accumulate distance from delta elapsed × current speed so speed changes
+        // take effect from the current point onward (no position jump on slider).
+        if (!_followSessionActive)
+        {
+            _followSessionActive = true;
+            _followDistance = 0f;
+            _followLastElapsed = Mathf.Max(0f, elapsedSeconds);
+        }
+        else
+        {
+            float dt = elapsedSeconds - _followLastElapsed;
+            _followLastElapsed = elapsedSeconds;
+            if (dt < 0f) // review scrubbed backwards — reset
+            {
+                _followDistance = 0f;
+            }
+            else
+            {
+                _followDistance += dt * EffectiveFollowSpeed;
+            }
+        }
+        _followDistance = Mathf.Clamp(_followDistance, 0f, _followTrajectoryLength);
+
+        if (!TryEvaluateFollowPoseAtDistance(_followDistance, out Vector3 followPosition, out Quaternion followRotation))
+        {
+            LastFollowSkipReason = "TryEvaluateFollowPoseAtDistance failed";
+            LogFollowSkipOnce();
             return false;
+        }
+
+        LastFollowSkipReason = "";
 
         Transform robotTransform = sean.robot.base_link.transform;
         followPosition.y = robotTransform.position.y;
@@ -307,6 +416,12 @@ public class TrajectoryManager : MonoBehaviour
 
         if (_activeRenderer.Points.Count >= 2)
         {
+            var processed = FilterOutliers(_activeRenderer.Points, outlierJumpMultiplier);
+            for (int i = 0; i < smoothingPasses; i++)
+                processed = SmoothMovingAverage(processed, smoothingWindow);
+            if (processed.Count >= 2)
+                _activeRenderer.ReplacePoints(processed);
+
             var data = _activeRenderer.ExportData();
             _sessionCollection.trajectories.Add(data);
             _activeRenderer.gameObject.name = "Stroke_Session";
@@ -318,6 +433,83 @@ public class TrajectoryManager : MonoBehaviour
         }
 
         _activeRenderer = null;
+    }
+
+    /// <summary>
+    /// True iff a Follow call in the current frame would actually move the
+    /// robot. Callers (e.g. RewindController) should skip their own "apply
+    /// recorded robot pose" step when this is true, so the recording can't
+    /// fight with the drawn trajectory.
+    /// </summary>
+    public bool WillApplyFollowThisFrame()
+    {
+        if (!IsFollowMode || !HasFollowTrajectory)
+            return false;
+        var sean = SEAN.SEAN.instance;
+        if (sean == null || sean.robot == null || sean.robot.base_link == null)
+            return false;
+        return true;
+    }
+
+    private string _lastLoggedSkipReason = "";
+    private void LogFollowSkipOnce()
+    {
+        if (LastFollowSkipReason == _lastLoggedSkipReason) return;
+        _lastLoggedSkipReason = LastFollowSkipReason;
+        Debug.LogWarning($"[TrajectoryManager] Follow skipped: {LastFollowSkipReason}");
+    }
+
+    // ── Post-processing ──────────────────────────────────────────────────────
+
+    private static List<Vector3> FilterOutliers(List<Vector3> pts, float jumpMultiplier)
+    {
+        var result = new List<Vector3>(pts.Count);
+        if (pts == null || pts.Count == 0) return result;
+        if (jumpMultiplier <= 0f || pts.Count < 3)
+        {
+            result.AddRange(pts);
+            return result;
+        }
+
+        var lengths = new List<float>(pts.Count - 1);
+        for (int i = 1; i < pts.Count; i++)
+            lengths.Add(Vector3.Distance(pts[i - 1], pts[i]));
+        lengths.Sort();
+        float median = lengths[lengths.Count / 2];
+        if (median < 1e-4f) median = 0.05f;
+        float threshold = median * jumpMultiplier;
+
+        result.Add(pts[0]);
+        for (int i = 1; i < pts.Count - 1; i++)
+        {
+            if (Vector3.Distance(result[result.Count - 1], pts[i]) <= threshold)
+                result.Add(pts[i]);
+        }
+        // Always keep the last point so the stroke endpoint is preserved.
+        result.Add(pts[pts.Count - 1]);
+        return result;
+    }
+
+    private static List<Vector3> SmoothMovingAverage(List<Vector3> pts, int window)
+    {
+        if (pts == null || pts.Count < 3 || window <= 1)
+            return new List<Vector3>(pts ?? new List<Vector3>());
+
+        int half = window / 2;
+        var result = new List<Vector3>(pts.Count);
+        for (int i = 0; i < pts.Count; i++)
+        {
+            int s = Mathf.Max(0, i - half);
+            int e = Mathf.Min(pts.Count - 1, i + half);
+            Vector3 sum = Vector3.zero;
+            int n = 0;
+            for (int j = s; j <= e; j++) { sum += pts[j]; n++; }
+            result.Add(sum / n);
+        }
+        // Anchor endpoints to keep start/end exactly where drawn.
+        result[0] = pts[0];
+        result[result.Count - 1] = pts[pts.Count - 1];
+        return result;
     }
 
     private void SaveSession()
@@ -340,6 +532,7 @@ public class TrajectoryManager : MonoBehaviour
         _displayedRenderers.Clear();
         _followTrajectoryPoints.Clear();
         _followTrajectoryLength = 0f;
+        _followSessionActive = false;
 
         foreach (var r in _sessionRenderers)
             if (r != null) Destroy(r.gameObject);
@@ -380,7 +573,7 @@ public class TrajectoryManager : MonoBehaviour
             _followTrajectoryLength += Vector3.Distance(_followTrajectoryPoints[i - 1], _followTrajectoryPoints[i]);
     }
 
-    private bool TryEvaluateFollowPose(float elapsedSeconds, out Vector3 position, out Quaternion rotation)
+    private bool TryEvaluateFollowPoseAtDistance(float targetDistance, out Vector3 position, out Quaternion rotation)
     {
         position = Vector3.zero;
         rotation = Quaternion.identity;
@@ -388,7 +581,7 @@ public class TrajectoryManager : MonoBehaviour
         if (!HasFollowTrajectory)
             return false;
 
-        float targetDistance = Mathf.Clamp(Mathf.Max(0f, elapsedSeconds) * followRobotSpeed, 0f, _followTrajectoryLength);
+        targetDistance = Mathf.Clamp(targetDistance, 0f, _followTrajectoryLength);
         float traversedDistance = 0f;
 
         for (int i = 1; i < _followTrajectoryPoints.Count; i++)

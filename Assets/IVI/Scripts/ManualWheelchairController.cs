@@ -8,16 +8,17 @@ namespace IVI
     {
         [Header("Control Settings")]
         public float moveSpeed = 0.7f;
-        public float rotationSpeed = 60f;
+        public float rotationSpeed = 100f;
         public KeyCode toggleModeKey = KeyCode.RightShift;
         public bool useWASD = true;
         public bool startInManualMode = false;
         public bool enableJoystick = true;
-        public string joystickHorizontalAxis = "RHorizontal";
-        public string joystickVerticalAxis = "Vertical";
+        public string joystickHorizontalAxis = "LogitechTwist";
+        public string joystickVerticalAxis = "joystickVerticalAxis";
         public string joystickStartAxis = "L1";
         public string joystickToggleModeAxis = string.Empty;
-        public float joystickDeadzone = 0.05f;
+        public float joystickDeadzone = 0.03f;
+        public float joystickStartupDeadzone = 0.03f;
         public bool invertJoystickHorizontal = false;
         public bool invertJoystickVertical = true;
 
@@ -27,15 +28,21 @@ namespace IVI
         public float sPressWindowSec = 0.6f;
 
         [Header("Manual Smoothing")]
-        public float manualAcceleration = 0.12f;
-        public float manualDeceleration = 1.2f;
-        public float manualAngularAcceleration = 90f;
+        public float manualAcceleration = 2.5f;
+        public float manualDeceleration = 3.0f;
+        public float manualAngularAcceleration = 720f;
 
         [Header("Debug Manual Brake (read-only)")]
         public int debugSBrakePressCount;
 
         [Header("Status (read-only)")]
         public bool isManualMode = false;
+        public float debugJoystickRawHorizontal;
+        public float debugJoystickRawVertical;
+        public float debugJoystickHorizontalCenter;
+        public float debugJoystickVerticalCenter;
+        public float debugJoystickProcessedHorizontal;
+        public float debugJoystickProcessedVertical;
 
         private SFPWDAgent sfpwdAgent;
         private Rigidbody rb;
@@ -49,6 +56,10 @@ namespace IVI
         private bool JoystickPresent => enableJoystick && Input.GetJoystickNames().Length > 0;
         private bool lastJoystickStartPressed;
         private bool lastJoystickTogglePressed;
+        private float joystickHorizontalCenter;
+        private float joystickVerticalCenter;
+        private bool joystickCenterCaptured;
+        private bool warnedMissingJoystickAxis;
         private float lastSBrakePressRealtime = -1f;
         private float currentManualLinearSpeed;
         private float currentManualAngularSpeed;
@@ -129,10 +140,25 @@ namespace IVI
 
             if (JoystickPresent)
             {
-                float h = ReadJoystickAxis(joystickHorizontalAxis, invertJoystickHorizontal);
-                float v = ReadJoystickAxis(joystickVerticalAxis, invertJoystickVertical);
+                if (!joystickCenterCaptured)
+                    CaptureJoystickCenter();
+
+                float h = ReadJoystickAxis(joystickHorizontalAxis, invertJoystickHorizontal, joystickHorizontalCenter);
+                float v = ReadJoystickAxis(joystickVerticalAxis, invertJoystickVertical, joystickVerticalCenter);
+                debugJoystickProcessedHorizontal = h;
+                debugJoystickProcessedVertical = v;
                 manualDesiredLin = moveSpeed * v;
                 manualDesiredAng = rotationSpeed * h;
+            }
+            else
+            {
+                joystickCenterCaptured = false;
+                debugJoystickRawHorizontal = 0f;
+                debugJoystickRawVertical = 0f;
+                debugJoystickHorizontalCenter = 0f;
+                debugJoystickVerticalCenter = 0f;
+                debugJoystickProcessedHorizontal = 0f;
+                debugJoystickProcessedVertical = 0f;
             }
 
             bool wHeld = Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow);
@@ -248,6 +274,7 @@ namespace IVI
             currentManualAngularSpeed = 0f;
             debugSBrakePressCount = 0;
             lastSBrakePressRealtime = -1f;
+            CaptureJoystickCenter();
 
             if (sfpwdAgent != null)
             {
@@ -272,6 +299,7 @@ namespace IVI
             currentManualAngularSpeed = 0f;
             debugSBrakePressCount = 0;
             lastSBrakePressRealtime = -1f;
+            joystickCenterCaptured = false;
 
             // Keep root motion OFF -- ManualWheelchairController drives position
             // directly using the SFPWDAgent's computed velocity.
@@ -325,15 +353,81 @@ namespace IVI
                 $"[{mode}] Pos:{pos} Vel:{vel}\n{controlHint}");
         }
 
-        private float ReadJoystickAxis(string axisName, bool invert)
+        private float ReadJoystickAxis(string axisName, bool invert, float center)
         {
             if (!JoystickPresent || string.IsNullOrWhiteSpace(axisName))
                 return 0f;
 
-            float value = Input.GetAxis(axisName);
-            if (invert)
-                value = -value;
-            return Mathf.Abs(value) >= joystickDeadzone ? value : 0f;
+            float value = ReadJoystickRawAxis(axisName, invert);
+
+            value -= center;
+            return Mathf.Abs(value) >= EffectiveJoystickDeadzone() ? value : 0f;
+        }
+
+        private void CaptureJoystickCenter()
+        {
+            if (!JoystickPresent)
+            {
+                joystickHorizontalCenter = 0f;
+                joystickVerticalCenter = 0f;
+                joystickCenterCaptured = false;
+                return;
+            }
+
+            joystickHorizontalCenter = ReadJoystickRawAxis(joystickHorizontalAxis, invertJoystickHorizontal);
+            joystickVerticalCenter = ReadJoystickRawAxis(joystickVerticalAxis, invertJoystickVertical);
+            debugJoystickHorizontalCenter = joystickHorizontalCenter;
+            debugJoystickVerticalCenter = joystickVerticalCenter;
+            joystickCenterCaptured = true;
+        }
+
+        private float ReadJoystickRawAxis(string axisName, bool invert)
+        {
+            if (!JoystickPresent || string.IsNullOrWhiteSpace(axisName))
+                return 0f;
+
+            axisName = ResolveJoystickAxisName(axisName);
+            float value = GetAxisSafely(axisName);
+            value = invert ? -value : value;
+            if (axisName == ResolveJoystickAxisName(joystickHorizontalAxis))
+                debugJoystickRawHorizontal = value;
+            if (axisName == ResolveJoystickAxisName(joystickVerticalAxis))
+                debugJoystickRawVertical = value;
+            return value;
+        }
+
+        private string ResolveJoystickAxisName(string axisName)
+        {
+            if (axisName == "RHorizontal")
+                return "LogitechTwist";
+            if (axisName == "RVertical")
+                return "LogitechThrottle";
+            return axisName;
+        }
+
+        private float GetAxisSafely(string axisName)
+        {
+            if (string.IsNullOrWhiteSpace(axisName))
+                return 0f;
+
+            try
+            {
+                return Input.GetAxis(axisName);
+            }
+            catch (System.ArgumentException)
+            {
+                if (!warnedMissingJoystickAxis)
+                {
+                    Debug.LogWarning($"[PWD] Input axis '{axisName}' is not configured. Joystick value forced to 0.", this);
+                    warnedMissingJoystickAxis = true;
+                }
+                return 0f;
+            }
+        }
+
+        private float EffectiveJoystickDeadzone()
+        {
+            return Mathf.Max(joystickDeadzone, joystickStartupDeadzone);
         }
 
         private bool ReadJoystickButtonDown(string axisName)
@@ -341,7 +435,7 @@ namespace IVI
             if (!JoystickPresent || string.IsNullOrWhiteSpace(axisName))
                 return false;
 
-            bool isPressed = Input.GetAxis(axisName) >= 0.5f;
+            bool isPressed = GetAxisSafely(ResolveJoystickAxisName(axisName)) >= 0.5f;
             if (axisName == joystickStartAxis)
             {
                 bool buttonDown = isPressed && !lastJoystickStartPressed;

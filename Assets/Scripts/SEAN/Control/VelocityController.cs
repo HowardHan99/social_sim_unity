@@ -28,18 +28,18 @@ namespace SEAN.Control
         // Manual control variables
         private bool manualControlActive = false;
         public bool ManualControlActive => manualControlActive;
-        public float manualLinearSpeed = 0.7f;
-        public float manualAngularSpeed = 0.7f;
+        public float manualLinearSpeed = 1.0f;
+        public float manualAngularSpeed = 2.4f;
 
         [Header("Startup Control")]
         public bool startInManualMode = false;
 
         [Header("Manual Joystick")]
         public bool enableJoystickManualControl = true;
-        public string joystickLinearAxis = "Vertical";
-        public string joystickAngularAxis = "RHorizontal";
-        public float joystickLinearDeadzone = 0.08f;
-        public float joystickAngularDeadzone = 0.2f;
+        public string joystickLinearAxis = "joystickLinearAxis";
+        public string joystickAngularAxis = "LogitechTwist";
+        public float joystickLinearDeadzone = 0.03f;
+        public float joystickAngularDeadzone = 0.03f;
         public bool invertJoystickLinear = true;
         public bool invertJoystickAngular = false;
 
@@ -58,8 +58,8 @@ namespace SEAN.Control
 
         [Header("Unity Velocity Post-Processing")]
         public bool bypassUnityVelocityPostProcessing = true;
-        public bool preserveManualVelocitySmoothing = true;
-        public float manualVelocityDamping = 0.997f;
+        public bool preserveManualVelocitySmoothing = false;
+        public float manualVelocityDamping = 0.85f;
         public bool enforceManualSpeedLimit = true;
         public float manualMaxPlanarSpeed = 0.7f;
 
@@ -208,6 +208,7 @@ namespace SEAN.Control
         private float joystickLinearCenter;
         private float joystickAngularCenter;
         private bool joystickCenterCaptured;
+        private bool warnedMissingJoystickAxis;
 
         protected void Start()
         {
@@ -674,7 +675,7 @@ namespace SEAN.Control
             if (!JoystickPresent || string.IsNullOrWhiteSpace(axisName))
                 return 0f;
 
-            float value = UnityEngine.Input.GetAxis(axisName);
+            float value = GetAxisSafely(ResolveJoystickAxisName(axisName));
             if (invert)
                 value = -value;
             return value;
@@ -687,10 +688,39 @@ namespace SEAN.Control
 
         private void UpdateNamedAxisDebug()
         {
-            DebugAxisHorizontal = UnityEngine.Input.GetAxis("Horizontal");
-            DebugAxisVertical = UnityEngine.Input.GetAxis("Vertical");
-            DebugAxisRHorizontal = UnityEngine.Input.GetAxis("RHorizontal");
-            DebugAxisRVertical = UnityEngine.Input.GetAxis("RVertical");
+            DebugAxisHorizontal = GetAxisSafely("Horizontal");
+            DebugAxisVertical = GetAxisSafely("Vertical");
+            DebugAxisRHorizontal = GetAxisSafely("LogitechTwist");
+            DebugAxisRVertical = GetAxisSafely("LogitechThrottle");
+        }
+
+        private string ResolveJoystickAxisName(string axisName)
+        {
+            if (axisName == "RHorizontal")
+                return "LogitechTwist";
+            if (axisName == "RVertical")
+                return "LogitechThrottle";
+            return axisName;
+        }
+
+        private float GetAxisSafely(string axisName)
+        {
+            if (string.IsNullOrWhiteSpace(axisName))
+                return 0f;
+
+            try
+            {
+                return UnityEngine.Input.GetAxis(axisName);
+            }
+            catch (System.ArgumentException)
+            {
+                if (!warnedMissingJoystickAxis)
+                {
+                    Debug.LogWarning($"[VelocityController] Input axis '{axisName}' is not configured. Joystick value forced to 0.", this);
+                    warnedMissingJoystickAxis = true;
+                }
+                return 0f;
+            }
         }
 
         private void CaptureJoystickCenter()

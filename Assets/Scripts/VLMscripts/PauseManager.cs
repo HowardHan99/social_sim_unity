@@ -45,6 +45,13 @@ public class PauseManager : MonoBehaviour
             if (RuntimeEditorManager.Instance != null && RuntimeEditorManager.Instance.isEditorActive)
                 return;
 
+            // Don't hijack Space during session review — SessionReviewManager
+            // owns play/pause there, and letting PauseManager flip Time.timeScale
+            // un-freezes live physics and makes the robot drift.
+            var reviewManager = SessionReview.SessionReviewManager.Instance;
+            if (reviewManager != null && reviewManager.IsReviewUiActive)
+                return;
+
             if (isPaused)
             {
                 UnpauseGame();

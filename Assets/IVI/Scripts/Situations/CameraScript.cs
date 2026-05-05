@@ -1,5 +1,8 @@
 using System;
 using UnityEngine;
+#if ENABLE_INPUT_SYSTEM
+using UnityEngine.InputSystem;
+#endif
 
 namespace IVI
 {
@@ -153,8 +156,15 @@ namespace IVI
 
             if (looking)
             {
-                float newRotationX = transform.localEulerAngles.y + GetAxisSafely("Mouse X", ref warnedMissingMouseX) * freeLookSensitivity;
-                float newRotationY = transform.localEulerAngles.x - GetAxisSafely("Mouse Y", ref warnedMissingMouseY) * freeLookSensitivity;
+                if (!IsRightMouseButtonPressed())
+                {
+                    StopLooking();
+                    return;
+                }
+
+                Vector2 mouseDelta = GetMouseLookDelta();
+                float newRotationX = transform.localEulerAngles.y + mouseDelta.x * freeLookSensitivity;
+                float newRotationY = transform.localEulerAngles.x - mouseDelta.y * freeLookSensitivity;
                 transform.localEulerAngles = new Vector3(newRotationY, newRotationX, 0f);
             }
 
@@ -169,11 +179,11 @@ namespace IVI
                 }
             }
 
-            if (Input.GetKeyDown(KeyCode.Mouse1))
+            if (IsRightMouseButtonPressed() && !looking)
             {
                 StartLooking();
             }
-            else if (Input.GetKeyUp(KeyCode.Mouse1))
+            else if (IsRightMouseButtonUp())
             {
                 StopLooking();
             }
@@ -222,6 +232,44 @@ namespace IVI
 
                 return 0f;
             }
+        }
+
+        private bool IsRightMouseButtonDown()
+        {
+#if ENABLE_INPUT_SYSTEM
+            return Mouse.current != null && Mouse.current.rightButton.wasPressedThisFrame;
+#else
+            return Input.GetMouseButtonDown(1);
+#endif
+        }
+
+        private bool IsRightMouseButtonUp()
+        {
+#if ENABLE_INPUT_SYSTEM
+            return Mouse.current != null && Mouse.current.rightButton.wasReleasedThisFrame;
+#else
+            return Input.GetMouseButtonUp(1);
+#endif
+        }
+
+        private bool IsRightMouseButtonPressed()
+        {
+#if ENABLE_INPUT_SYSTEM
+            return Mouse.current != null && Mouse.current.rightButton.isPressed;
+#else
+            return Input.GetMouseButton(1);
+#endif
+        }
+
+        private Vector2 GetMouseLookDelta()
+        {
+#if ENABLE_INPUT_SYSTEM
+            return Mouse.current != null ? Mouse.current.delta.ReadValue() * 0.05f : Vector2.zero;
+#else
+            return new Vector2(
+                GetAxisSafely("Mouse X", ref warnedMissingMouseX),
+                GetAxisSafely("Mouse Y", ref warnedMissingMouseY));
+#endif
         }
     }
 }

@@ -85,6 +85,15 @@ public class TrajectoryRenderer : MonoBehaviour
 
     public List<Vector3> Points => _points;
 
+    /// <summary>Replace all points (used after post-processing like smoothing).</summary>
+    public void ReplacePoints(List<Vector3> newPoints)
+    {
+        _points.Clear();
+        if (newPoints != null) _points.AddRange(newPoints);
+        _line.positionCount = _points.Count;
+        if (_points.Count > 0) _line.SetPositions(_points.ToArray());
+    }
+
     public void ApplyVisualSettings()
     {
         if (_line == null)

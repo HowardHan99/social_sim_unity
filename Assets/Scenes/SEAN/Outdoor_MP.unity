@@ -782,12 +782,12 @@ PrefabInstance:
     - target: {fileID: 861788005649229999, guid: 0303bdb201b5e44c5ad3c7bf43ff670e,
         type: 3}
       propertyPath: manualLinearSpeed
-      value: 0.75
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 861788005649229999, guid: 0303bdb201b5e44c5ad3c7bf43ff670e,
         type: 3}
       propertyPath: manualAngularSpeed
-      value: 0.75
+      value: 2.4
       objectReference: {fileID: 0}
     - target: {fileID: 1312503935111706884, guid: 0303bdb201b5e44c5ad3c7bf43ff670e,
         type: 3}

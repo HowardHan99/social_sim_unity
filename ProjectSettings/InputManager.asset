@@ -6,7 +6,7 @@ InputManager:
   serializedVersion: 2
   m_Axes:
   - serializedVersion: 3
-    m_Name: RHorizontal
+    m_Name: LogitechThrottle
     descriptiveName: 
     descriptiveNegativeName: 
     negativeButton: left
@@ -22,7 +22,7 @@ InputManager:
     axis: 3
     joyNum: 0
   - serializedVersion: 3
-    m_Name: RVertical
+    m_Name: LogitechAuxAxis
     descriptiveName: 
     descriptiveNegativeName: 
     negativeButton: down
@@ -214,7 +214,7 @@ InputManager:
     axis: 0
     joyNum: 0
   - serializedVersion: 3
-    m_Name: RHorizontal
+    m_Name: LogitechTwist
     descriptiveName: 
     descriptiveNegativeName: 
     negativeButton: 

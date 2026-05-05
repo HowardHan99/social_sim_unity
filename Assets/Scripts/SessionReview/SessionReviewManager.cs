@@ -399,7 +399,14 @@ namespace SessionReview
             }
 
             if (Input.GetKeyDown(playPauseKey))
+            {
+                // Clear any IMGUI keyboard focus (e.g. progress-bar slider) so
+                // Space reliably toggles play even right after scrubbing.
+                GUIUtility.keyboardControl = 0;
+                bool before = rewindController.IsPlaying;
                 rewindController.TogglePlayPause();
+                Debug.Log($"[SessionReview] Space pressed. isPlaying {before} -> {rewindController.IsPlaying}  speed={rewindController.PlaybackSpeed:F2}");
+            }
 
             if (Input.GetKeyDown(KeyCode.LeftArrow))
                 rewindController.StepBackward();
@@ -1082,7 +1089,13 @@ namespace SessionReview
                 EnterWorldBuildingModeFromPostTrial();
 
             if (GUI.Button(new Rect(rect.x + 176f, rect.y + 148f, 168f, 32f), "Keep Reviewing"))
+            {
                 showReviewCompletionPrompt = false;
+                // EndReviewAndShowNextStepMenu() zeroed playbackSpeed to fully
+                // freeze the review while the prompt was up. Restore the
+                // previously selected speed so Space actually advances time.
+                rewindController?.SetPlaybackSpeed(speedSteps[currentSpeedIndex]);
+            }
         }
 
         private void DrawWorldBuildingOverlay()
@@ -1533,9 +1546,27 @@ namespace SessionReview
             if (sean.player != null)
                 ZeroRigidbodies(sean.player.transform);
 
-            var manualWheelchair = FindObjectOfType<IVI.ManualWheelchairController>();
+            var manualWheelchair = FindPwdPlayerControllerIncludingInactive();
             if (manualWheelchair != null)
                 ZeroRigidbodies(manualWheelchair.transform);
+        }
+
+        private static IVI.ManualWheelchairController FindPwdPlayerControllerIncludingInactive()
+        {
+            IVI.ManualWheelchairController fallback = null;
+            foreach (var controller in FindObjectsOfType<IVI.ManualWheelchairController>(true))
+            {
+                if (controller == null)
+                    continue;
+
+                if (controller.gameObject != null && controller.gameObject.name == "PWDPlayer")
+                    return controller;
+
+                if (fallback == null)
+                    fallback = controller;
+            }
+
+            return fallback;
         }
 
         private static void ZeroRigidbodies(Transform root)
@@ -1907,7 +1938,7 @@ namespace SessionReview
                 velocityController.SetManualControlActive(robotManual);
             }
 
-            var pwdControllers = FindObjectsOfType<IVI.ManualWheelchairController>();
+            var pwdControllers = FindObjectsOfType<IVI.ManualWheelchairController>(true);
             bool pwdManual = selectedPwdStartupControl == StartupControlMode.Manual;
             bool allowPwdMovement = ShouldAllowPwdMovement();
             foreach (var pwdController in pwdControllers)

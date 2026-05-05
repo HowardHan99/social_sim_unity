@@ -2092,19 +2092,29 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   moveSpeed: 2
-  rotationSpeed: 90
+  rotationSpeed: 110
   toggleModeKey: 303
   useWASD: 1
   startInManualMode: 1
   enableJoystick: 1
-  joystickHorizontalAxis: RHorizontal
-  joystickVerticalAxis: Vertical
+  joystickHorizontalAxis: LogitechTwist
+  joystickVerticalAxis: joystickVerticalAxis
   joystickStartAxis: L1
   joystickToggleModeAxis: 
-  joystickDeadzone: 0.05
+  joystickDeadzone: 0.03
+  joystickStartupDeadzone: 0.03
   invertJoystickHorizontal: 0
   invertJoystickVertical: 1
+  manualAcceleration: 2.5
+  manualDeceleration: 3
+  manualAngularAcceleration: 720
   isManualMode: 0
+  debugJoystickRawHorizontal: 0
+  debugJoystickRawVertical: 0
+  debugJoystickHorizontalCenter: 0
+  debugJoystickVerticalCenter: 0
+  debugJoystickProcessedHorizontal: 0
+  debugJoystickProcessedVertical: 0
 --- !u!1 &6061559745281181226
 GameObject:
   m_ObjectHideFlags: 0

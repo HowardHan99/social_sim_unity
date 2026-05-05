@@ -12,6 +12,7 @@ namespace SEAN.Input
     public class InputPublisher : MonoBehaviour
     {
         private ROSConnection ros;
+        private SEAN sean;
         public string TopicCmdVel = "/social_sim/cmd_vel";
         public string TopicTrigger = "/social_sim/trigger";
 
@@ -19,6 +20,7 @@ namespace SEAN.Input
         ///  enable local joystick input
         /// </summary>
         public bool EnableJoystick = true;
+        public bool PublishOnlyWhenRobotControlled = true;
         /// <summary>
         ///  enable local keyboard input
         /// </summary>
@@ -28,7 +30,7 @@ namespace SEAN.Input
         {
             get
             {
-                return EnableJoystick || EnableKeyboard;
+                return RobotLocalInputAllowed() && (EnableJoystick || EnableKeyboard);
             }
         }
 
@@ -37,6 +39,10 @@ namespace SEAN.Input
         /// </summary>
         public float JoystickScaleLinear = -0.5f;
         public float JoystickScaleAngular = -1.7f;
+        public string JoystickLinearAxis = "joystickLinearAxis";
+        public string JoystickAngularAxis = "LogitechTwist";
+        public string JoystickStartAxis = "L1";
+        public float JoystickDeadzone = 0.03f;
 
         /// <summary>
         ///  keyboard inputs translate directly to this output value
@@ -50,21 +56,43 @@ namespace SEAN.Input
         public float Vertical { get { return _vertical; } }
         private bool _l1 = false;
         public bool L1 { get { return _l1; } }
+        private float joystickLinearCenter;
+        private float joystickAngularCenter;
+        private bool joystickCenterCaptured;
+        private bool warnedMissingJoystickAxis;
 
         void Start()
         {
             ros = ROSConnection.instance;
+            sean = SEAN.instance;
         }
 
         void Update()
         {
+            if (!RobotLocalInputAllowed())
+            {
+                joystickCenterCaptured = false;
+                _horizontal = 0f;
+                _vertical = 0f;
+                _l1 = false;
+                return;
+            }
+
             if (EnableJoystick && UnityEngine.Input.GetJoystickNames().Length > 0)
             {
                 ReadJoystick();
             }
             else if (EnableKeyboard)
             {
+                joystickCenterCaptured = false;
                 ReadKeyboard();
+            }
+            else
+            {
+                joystickCenterCaptured = false;
+                _horizontal = 0f;
+                _vertical = 0f;
+                _l1 = false;
             }
         }
 
@@ -124,10 +152,79 @@ namespace SEAN.Input
 
             // Button mapping (linux?):
             // 4: l1
-            _horizontal = UnityEngine.Input.GetAxis("RHorizontal") * JoystickScaleAngular;
-            _vertical = UnityEngine.Input.GetAxis("RVertical") * JoystickScaleLinear;
-            _l1 = UnityEngine.Input.GetAxis("L1") != 0;
+            if (!joystickCenterCaptured)
+            {
+                joystickLinearCenter = ReadJoystickRawAxis(JoystickLinearAxis);
+                joystickAngularCenter = ReadJoystickRawAxis(JoystickAngularAxis);
+                joystickCenterCaptured = true;
+            }
+
+            _horizontal = ApplyJoystickDeadzone(ReadJoystickRawAxis(JoystickAngularAxis) - joystickAngularCenter) * JoystickScaleAngular;
+            _vertical = ApplyJoystickDeadzone(ReadJoystickRawAxis(JoystickLinearAxis) - joystickLinearCenter) * JoystickScaleLinear;
+            _l1 = GetAxisSafely(ResolveJoystickAxisName(JoystickStartAxis)) != 0;
             Send();
+        }
+
+        private bool RobotLocalInputAllowed()
+        {
+            if (!PublishOnlyWhenRobotControlled)
+                return true;
+
+            if (sean == null)
+                sean = SEAN.instance;
+
+            return sean != null &&
+                   sean.ControlledAgent == Scenario.Agents.ControlledAgent.Robot &&
+                   !HumanPwdManualSessionActive();
+        }
+
+        private bool HumanPwdManualSessionActive()
+        {
+            return SessionReview.SessionOnboardingSettings.HasCompletedOnboarding &&
+                   SessionReview.SessionOnboardingSettings.PlayerMode == SessionReview.OnboardingPlayerMode.Human &&
+                   SessionReview.SessionOnboardingSettings.PwdStartupControl == SessionReview.StartupControlMode.Manual;
+        }
+
+        private float ReadJoystickRawAxis(string axisName)
+        {
+            if (string.IsNullOrWhiteSpace(axisName))
+                return 0f;
+
+            return GetAxisSafely(ResolveJoystickAxisName(axisName));
+        }
+
+        private string ResolveJoystickAxisName(string axisName)
+        {
+            if (axisName == "RHorizontal")
+                return "LogitechTwist";
+            if (axisName == "RVertical")
+                return "LogitechThrottle";
+            return axisName;
+        }
+
+        private float GetAxisSafely(string axisName)
+        {
+            if (string.IsNullOrWhiteSpace(axisName))
+                return 0f;
+
+            try
+            {
+                return UnityEngine.Input.GetAxis(axisName);
+            }
+            catch (System.ArgumentException)
+            {
+                if (!warnedMissingJoystickAxis)
+                {
+                    Debug.LogWarning($"[InputPublisher] Input axis '{axisName}' is not configured. Joystick value forced to 0.", this);
+                    warnedMissingJoystickAxis = true;
+                }
+                return 0f;
+            }
+        }
+
+        private float ApplyJoystickDeadzone(float value)
+        {
+            return Mathf.Abs(value) >= JoystickDeadzone ? value : 0f;
         }
 
         public RosMessageTypes.Geometry.MTwist CmdVel

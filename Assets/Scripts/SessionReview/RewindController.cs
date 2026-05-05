@@ -2,6 +2,9 @@ using System.Collections.Generic;
 using UnityEngine;
 using Rerun;
 using System;
+#if ENABLE_INPUT_SYSTEM
+using UnityEngine.InputSystem;
+#endif
 
 namespace SessionReview
 {
@@ -26,6 +29,8 @@ namespace SessionReview
 
         [Header("PWD Camera")]
         [SerializeField] private float pwdEyeHeight = 1.2f;
+        [SerializeField] private Vector3 pwdFollowOffset = new Vector3(0f, 1.4f, -2.2f);
+        [SerializeField] private float pwdLookAtHeight = 1.0f;
 
         [Header("Trail Overlay")]
         [SerializeField] private float trailLineWidth = 0.05f;
@@ -59,6 +64,8 @@ namespace SessionReview
         private ComfortMotionBlur rewindComfortBlur;
         private Camera robotFirstPersonCam;
         private Camera pwdFirstPersonCam;
+        private IVI.ManualWheelchairController pwdController;
+        private Transform pwdViewTarget;
         private readonly Dictionary<Behaviour, bool> disabledCameraBehaviours = new Dictionary<Behaviour, bool>();
         private Vector3 savedCameraPos;
         private Quaternion savedCameraRot;
@@ -68,6 +75,8 @@ namespace SessionReview
         private bool freeCamLooking;
         private bool freeCamPanning;
         private Vector3 lastFreeCamMousePosition;
+        private bool warnedMissingMouseX;
+        private bool warnedMissingMouseY;
 
         private GameObject trailParent;
         private Dictionary<string, LineRenderer> trailRenderers = new Dictionary<string, LineRenderer>();
@@ -259,6 +268,16 @@ namespace SessionReview
                 UpdateFreeCam();
         }
 
+        void LateUpdate()
+        {
+            if (!isRewinding) return;
+
+            // Source follow cameras update in LateUpdate, so copy them after
+            // they have reacted to the rewound avatar pose for this frame.
+            if (perspectiveMode == PerspectiveMode.PWDFirstPerson)
+                UpdatePwdFPCamera();
+        }
+
         public void SetNormalizedTime(float t)
         {
             if (currentTrial == null) return;
@@ -280,9 +299,27 @@ namespace SessionReview
             ApplyStateAtCurrentTime();
         }
 
+        private int togglePlayPauseCount;
+        private int lastToggleFrame = -1;
+        public int TogglePlayPauseCount => togglePlayPauseCount;
+        public int LastToggleFrame => lastToggleFrame;
+
         public void TogglePlayPause()
         {
+            togglePlayPauseCount++;
+            int frame = Time.frameCount;
+            int sincePrev = lastToggleFrame >= 0 ? (frame - lastToggleFrame) : -1;
+            lastToggleFrame = frame;
             isPlaying = !isPlaying;
+            // Guard: if something left playbackSpeed at 0 (e.g. the review-
+            // completion prompt zeroed it), pressing play would silently freeze
+            // because currentTime += dt * 0. Snap back to 1x on resume.
+            if (isPlaying && Mathf.Abs(playbackSpeed) < 1e-4f)
+            {
+                playbackSpeed = 1f;
+                Debug.LogWarning("[Rewind] TogglePlayPause: playbackSpeed was 0, restored to 1x.");
+            }
+            Debug.Log($"[Rewind] TogglePlayPause #{togglePlayPauseCount} frame={frame} (Δ={sincePrev}) -> isPlaying={isPlaying} speed={playbackSpeed:F2} t={currentTime:F2}\n{System.Environment.StackTrace}");
         }
 
         public void SetPlaybackSpeed(float speed)
@@ -415,8 +452,20 @@ namespace SessionReview
             var states = liveRecorder.GetStateAtTime(currentTime);
             if (states == null || states.Count == 0) return;
 
+            // When the drawn-trajectory follow mode is active, don't let the
+            // recorded robot pose fight with the Follow pose — skip the robot
+            // transform here and let ApplyDrawTrajectoryFollowState own it.
+            if (drawTrajectoryManager == null)
+                drawTrajectoryManager = FindObjectOfType<TrajectoryManager>();
+            bool followOwnsRobot = drawTrajectoryManager != null && drawTrajectoryManager.WillApplyFollowThisFrame();
+            var sean = SEAN.SEAN.instance;
+            string robotId = (sean != null && sean.robot != null && sean.robot.base_link != null)
+                ? SessionTracker.GetObjectId(sean.robot.base_link) : null;
+
             foreach (var kvp in states)
             {
+                if (followOwnsRobot && robotId != null && kvp.Key == robotId)
+                    continue;
                 Transform t = FindTransformForId(kvp.Key);
                 if (t == null) continue;
                 t.position = kvp.Value.position;
@@ -767,6 +816,8 @@ namespace SessionReview
         {
             robotFirstPersonCam = null;
             pwdFirstPersonCam = null;
+            pwdController = null;
+            pwdViewTarget = null;
 
             var sean = SEAN.SEAN.instance;
             if (sean != null && sean.robot != null)
@@ -775,10 +826,43 @@ namespace SessionReview
             var mwc = FindObjectOfType<IVI.ManualWheelchairController>();
             if (mwc != null)
             {
-                var cam = mwc.GetComponentInChildren<Camera>(true);
-                if (cam != null)
-                    pwdFirstPersonCam = cam;
+                pwdController = mwc;
+                pwdViewTarget = SessionTracker.ResolveTrackingTransform(mwc.gameObject);
+                pwdFirstPersonCam = FindPwdCameraForController(mwc);
             }
+        }
+
+        private Camera FindPwdCameraForController(IVI.ManualWheelchairController mwc)
+        {
+            if (mwc == null)
+                return null;
+
+            var childCam = mwc.GetComponentInChildren<Camera>(true);
+            if (childCam != null)
+                return childCam;
+
+            foreach (var smoothing in FindObjectsOfType<IVI.WheelchairCameraSmoothing>(true))
+            {
+                if (smoothing == null || smoothing.FollowAvatarRoot != mwc.transform)
+                    continue;
+
+                var cam = smoothing.GetComponent<Camera>();
+                if (cam != null)
+                    return cam;
+            }
+
+            foreach (Camera cam in FindObjectsOfType<Camera>(true))
+            {
+                if (cam == null)
+                    continue;
+
+                if (cam.name == "wheelchairCamera" ||
+                    cam.name == "PWDThirdPersonCamera" ||
+                    cam.name == "PWDFirstPersonCamera")
+                    return cam;
+            }
+
+            return null;
         }
 
         private void DisableLiveCameraDrivers()
@@ -787,6 +871,9 @@ namespace SessionReview
             CacheAndDisableCameraBehaviours(savedMainCamera);
             CacheAndDisableCameraBehaviours(robotFirstPersonCam);
             CacheAndDisableCameraBehaviours(pwdFirstPersonCam);
+
+            foreach (var smoothing in FindObjectsOfType<IVI.WheelchairCameraSmoothing>(true))
+                CacheAndDisableBehaviour(smoothing);
         }
 
         private void RestoreLiveCameraDrivers()
@@ -822,7 +909,7 @@ namespace SessionReview
         {
             rewindCamera.enabled = false;
             rewindCamera.orthographic = false;
-            freeCamPanning = false;
+            StopFreeCamInteraction();
             if (robotFirstPersonCam != null) robotFirstPersonCam.enabled = false;
             if (pwdFirstPersonCam != null) pwdFirstPersonCam.enabled = false;
         }
@@ -848,19 +935,16 @@ namespace SessionReview
 
         private void ActivatePWDFP()
         {
-            if (pwdFirstPersonCam != null)
-            {
-                ConfigureRewindFromSourceCamera(pwdFirstPersonCam);
-                rewindCamera.enabled = true;
+            if (UpdatePwdFollowCamera())
                 return;
-            }
 
             var mwc = FindObjectOfType<IVI.ManualWheelchairController>();
             if (mwc != null)
             {
-                rewindCamera.transform.position = mwc.transform.position + Vector3.up * pwdEyeHeight;
-                rewindCamera.transform.rotation = mwc.transform.rotation;
-                rewindCamera.enabled = true;
+                pwdController = mwc;
+                pwdViewTarget = SessionTracker.ResolveTrackingTransform(mwc.gameObject);
+                if (UpdatePwdFollowCamera())
+                    return;
             }
         }
 
@@ -923,11 +1007,87 @@ namespace SessionReview
 
         private void UpdatePwdFPCamera()
         {
-            if (pwdFirstPersonCam != null)
+            if (UpdatePwdFollowCamera())
+                return;
+
+            if (pwdController == null)
+                pwdController = FindObjectOfType<IVI.ManualWheelchairController>();
+
+            if (pwdController != null)
             {
-                ConfigureRewindFromSourceCamera(pwdFirstPersonCam);
-                rewindCamera.enabled = true;
+                pwdViewTarget = SessionTracker.ResolveTrackingTransform(pwdController.gameObject);
+                UpdatePwdFollowCamera();
             }
+        }
+
+        private bool UpdatePwdFollowCamera()
+        {
+            Transform target = ResolvePwdViewTarget();
+            if (target == null || rewindCamera == null)
+                return false;
+
+            Vector3 targetPosition = target.position;
+            Vector3 targetEuler = target.eulerAngles;
+            if (!IsFinite(targetPosition) || !IsFinite(targetEuler))
+                return false;
+
+            Quaternion yawRotation = Quaternion.Euler(0f, targetEuler.y, 0f);
+            Vector3 desiredPosition = targetPosition + yawRotation * pwdFollowOffset;
+            Vector3 lookTarget = targetPosition + Vector3.up * pwdLookAtHeight;
+            Vector3 lookDirection = lookTarget - desiredPosition;
+
+            if (!IsFinite(desiredPosition) || !IsFinite(lookDirection) || lookDirection.sqrMagnitude < 0.0001f)
+                return false;
+
+            rewindCamera.transform.position = desiredPosition;
+            rewindCamera.transform.rotation = Quaternion.LookRotation(lookDirection, Vector3.up);
+            rewindCamera.orthographic = false;
+            rewindCamera.fieldOfView = pwdFirstPersonCam != null ? pwdFirstPersonCam.fieldOfView : 60f;
+            rewindCamera.enabled = true;
+            return true;
+        }
+
+        private Transform ResolvePwdViewTarget()
+        {
+            if (pwdViewTarget != null)
+                return pwdViewTarget;
+
+            if (currentTrial != null)
+            {
+                foreach (var role in currentTrial.agentRoles)
+                {
+                    if (role.role != AgentRole.PWDPlayer)
+                        continue;
+
+                    Transform target = FindTransformForId(role.objectId);
+                    if (target != null)
+                    {
+                        pwdViewTarget = target;
+                        return pwdViewTarget;
+                    }
+                }
+
+                foreach (var role in currentTrial.agentRoles)
+                {
+                    if (role.role != AgentRole.BackgroundPWD)
+                        continue;
+
+                    Transform target = FindTransformForId(role.objectId);
+                    if (target != null)
+                    {
+                        pwdViewTarget = target;
+                        return pwdViewTarget;
+                    }
+                }
+            }
+
+            if (pwdController == null)
+                pwdController = FindObjectOfType<IVI.ManualWheelchairController>();
+
+            if (pwdController != null)
+                pwdViewTarget = SessionTracker.ResolveTrackingTransform(pwdController.gameObject);
+
+            return pwdViewTarget;
         }
 
         private void ActivateTopDown()
@@ -983,6 +1143,8 @@ namespace SessionReview
             freeCamPitch = NormalizePitch(euler.x);
             freeCamLooking = false;
             freeCamPanning = false;
+            Cursor.visible = true;
+            Cursor.lockState = CursorLockMode.None;
         }
 
         private void UpdateFreeCam()
@@ -990,50 +1152,57 @@ namespace SessionReview
             if (rewindCamera == null || !rewindCamera.enabled)
                 return;
 
-            if (Input.GetKeyDown(KeyCode.Mouse1))
+            if (IsRightMouseButtonPressed() && !freeCamLooking)
             {
                 freeCamLooking = true;
                 freeCamPanning = false;
                 Cursor.visible = false;
                 Cursor.lockState = CursorLockMode.Locked;
-                lastFreeCamMousePosition = Input.mousePosition;
                 if (rewindComfortBlur != null)
                     rewindComfortBlur.TriggerTransitionBlur();
             }
-            else if (Input.GetKeyUp(KeyCode.Mouse1))
+            else if (IsRightMouseButtonUp())
             {
                 freeCamLooking = false;
                 Cursor.visible = true;
                 Cursor.lockState = CursorLockMode.None;
             }
 
-            if (!freeCamLooking && Input.GetKeyDown(KeyCode.Mouse2))
+            if (!freeCamLooking && IsMiddleMouseButtonPressed() && !freeCamPanning)
             {
                 freeCamPanning = true;
-                lastFreeCamMousePosition = Input.mousePosition;
+                lastFreeCamMousePosition = GetMousePosition();
             }
-            else if (Input.GetKeyUp(KeyCode.Mouse2))
+            else if (!IsMiddleMouseButtonPressed())
             {
                 freeCamPanning = false;
             }
 
             if (freeCamLooking)
             {
-                Vector3 mouseDelta = Input.mousePosition - lastFreeCamMousePosition;
-                freeCamYaw += mouseDelta.x * freeCamLookSensitivity * 0.02f;
-                freeCamPitch -= mouseDelta.y * freeCamLookSensitivity * 0.02f;
+                if (!IsRightMouseButtonPressed())
+                {
+                    StopFreeCamInteraction();
+                    return;
+                }
+
+                Vector2 mouseDelta = GetMouseLookDelta();
+                float mouseX = mouseDelta.x;
+                float mouseY = mouseDelta.y;
+                freeCamYaw += mouseX * freeCamLookSensitivity;
+                freeCamPitch -= mouseY * freeCamLookSensitivity;
                 freeCamPitch = Mathf.Clamp(freeCamPitch, -85f, 85f);
                 rewindCamera.transform.rotation = Quaternion.Euler(freeCamPitch, freeCamYaw, 0f);
-                lastFreeCamMousePosition = Input.mousePosition;
             }
             else if (freeCamPanning)
             {
-                Vector3 mouseDelta = Input.mousePosition - lastFreeCamMousePosition;
+                Vector3 mousePosition = GetMousePosition();
+                Vector3 mouseDelta = mousePosition - lastFreeCamMousePosition;
                 float panScale = 0.02f;
                 Vector3 panOffset =
                     (-rewindCamera.transform.right * mouseDelta.x + -rewindCamera.transform.up * mouseDelta.y) * panScale;
                 rewindCamera.transform.position += panOffset;
-                lastFreeCamMousePosition = Input.mousePosition;
+                lastFreeCamMousePosition = mousePosition;
             }
 
             float speed = freeCamMoveSpeed;
@@ -1060,7 +1229,7 @@ namespace SessionReview
                 rewindCamera.transform.position += move * speed * Time.unscaledDeltaTime;
             }
 
-            float scroll = Input.mouseScrollDelta.y;
+            float scroll = GetMouseScrollDelta();
             if (Mathf.Abs(scroll) > 0.01f)
                 rewindCamera.transform.position += rewindCamera.transform.forward * (scroll * freeCamZoomSpeed);
         }
@@ -1070,6 +1239,107 @@ namespace SessionReview
             while (pitch > 180f)
                 pitch -= 360f;
             return pitch;
+        }
+
+        private void StopFreeCamInteraction()
+        {
+            freeCamLooking = false;
+            freeCamPanning = false;
+            Cursor.visible = true;
+            Cursor.lockState = CursorLockMode.None;
+        }
+
+        private float GetAxisSafely(string axisName, ref bool warnedMissingAxis)
+        {
+            try
+            {
+                return Input.GetAxis(axisName);
+            }
+            catch (Exception)
+            {
+                if (!warnedMissingAxis)
+                {
+                    Debug.LogWarning($"[Rewind] Input axis '{axisName}' is not configured. Defaulting to 0.", this);
+                    warnedMissingAxis = true;
+                }
+
+                return 0f;
+            }
+        }
+
+        private bool IsRightMouseButtonDown()
+        {
+#if ENABLE_INPUT_SYSTEM
+            return Mouse.current != null && Mouse.current.rightButton.wasPressedThisFrame;
+#else
+            return Input.GetMouseButtonDown(1);
+#endif
+        }
+
+        private bool IsRightMouseButtonUp()
+        {
+#if ENABLE_INPUT_SYSTEM
+            return Mouse.current != null && Mouse.current.rightButton.wasReleasedThisFrame;
+#else
+            return Input.GetMouseButtonUp(1);
+#endif
+        }
+
+        private bool IsRightMouseButtonPressed()
+        {
+#if ENABLE_INPUT_SYSTEM
+            return Mouse.current != null && Mouse.current.rightButton.isPressed;
+#else
+            return Input.GetMouseButton(1);
+#endif
+        }
+
+        private bool IsMiddleMouseButtonPressed()
+        {
+#if ENABLE_INPUT_SYSTEM
+            return Mouse.current != null && Mouse.current.middleButton.isPressed;
+#else
+            return Input.GetMouseButton(2);
+#endif
+        }
+
+        private Vector3 GetMousePosition()
+        {
+#if ENABLE_INPUT_SYSTEM
+            return Mouse.current != null ? (Vector3)Mouse.current.position.ReadValue() : Vector3.zero;
+#else
+            return Input.mousePosition;
+#endif
+        }
+
+        private Vector2 GetMouseLookDelta()
+        {
+#if ENABLE_INPUT_SYSTEM
+            return Mouse.current != null ? Mouse.current.delta.ReadValue() * 0.05f : Vector2.zero;
+#else
+            return new Vector2(
+                GetAxisSafely("Mouse X", ref warnedMissingMouseX),
+                GetAxisSafely("Mouse Y", ref warnedMissingMouseY));
+#endif
+        }
+
+        private float GetMouseScrollDelta()
+        {
+#if ENABLE_INPUT_SYSTEM
+            return Mouse.current != null ? Mouse.current.scroll.ReadValue().y / 120f : 0f;
+#else
+            return Input.mouseScrollDelta.y;
+#endif
+        }
+
+        private static bool IsFinite(float value)
+        {
+            return !float.IsNaN(value) && !float.IsInfinity(value);
+        }
+
+        private static bool IsFinite(Vector3 value)
+        {
+            return IsFinite(value.x) && IsFinite(value.y) && IsFinite(value.z);
         }
 
         private void ConfigureRewindFromSourceCamera(Camera sourceCamera)

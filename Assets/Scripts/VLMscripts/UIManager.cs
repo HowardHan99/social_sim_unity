@@ -235,15 +235,15 @@ public class UIManager : MonoBehaviour
 
     string GeneratePromptString(List<string> options)
     {
-        string basePrompt = "The delivery robot is navigating on a sidewalk. The image is a real-time capture from the robot's perspective. Generate a brief, natural, and friendly spoken message that the robot would say to nearby pedestrians. The message should be conversational and intuitive to prevent accidents and guarantee pedestrian safety.";
+        string basePrompt = "The delivery robot is navigating on a sidewalk. The image is a real-time capture from the robot's perspective. Understand the surrounding context and the robot's current movement or behavior, then internally choose the appropriate robot signal. Output only the brief spoken robot response for nearby pedestrians. The response should be natural, intuitive, friendly, and safety-aware.";
 
         if (options.Count > 0)
         {
-            basePrompt += " The message should include the following information: ";
+            basePrompt += " Prioritize these response qualities: ";
             basePrompt += string.Join(", ", options) + ".";
         }
 
-        basePrompt += " Keep it under 30 words and speak naturally as if the robot is politely communicating with people around it.";
+        basePrompt += " Keep it under 16 words. Do not include scene descriptions, movement labels, context summaries, or headings. Robot onomatopoeia like beep-beep can be included if it feels natural.";
 
         return basePrompt;
     }

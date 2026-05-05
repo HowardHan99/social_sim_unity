@@ -56,7 +56,9 @@ public class TrajectoryUI : MonoBehaviour
         string drawLabel = "Draw Traj";
         string followLabel = manager.IsFollowMode ? "Stop Follow" : "Follow Traj";
 
-        float panelHeightButtons = buttonHeight * 3f + buttonSpacing * 2f + 24f;
+        bool showSpeedRow = manager.IsFollowMode && hasFollowTrajectory;
+        float speedRowHeight = showSpeedRow ? (buttonHeight + buttonSpacing) : 0f;
+        float panelHeightButtons = buttonHeight * 3f + buttonSpacing * 2f + 24f + speedRowHeight;
         GUI.Box(new Rect(x - 12f, y - 12f, buttonWidth + 24f, panelHeightButtons), GUIContent.none, panelStyle);
 
         if (GUI.Button(new Rect(x, y, buttonWidth, buttonHeight), showHideLabel, buttonStyle))
@@ -74,6 +76,41 @@ public class TrajectoryUI : MonoBehaviour
             manager.ToggleFollowMode();
         }
         GUI.enabled = true;
+
+        // Diagnostic HUD — positioned below the Export ROI panel (panel occupies
+        // y=70..450 on the right edge), so it stays visible whether Export is open or not.
+        {
+            float hudW = 360f;
+            float hudH = 120f;
+            Rect hudRect = new Rect(Screen.width - hudW - 20f, 470f, hudW, hudH);
+            GUI.Box(hudRect, GUIContent.none, panelStyle);
+            string skip = string.IsNullOrEmpty(manager.LastFollowSkipReason) ? "follow OK" : $"follow SKIP: {manager.LastFollowSkipReason}";
+            GUI.Label(new Rect(hudRect.x + 8f, hudRect.y + 4f, hudRect.width - 16f, 22f),
+                $"Play={manager.ReviewIsPlaying}  t={manager.ReviewNormalizedTime:P0}  rate={manager.ReviewPlaybackSpeed:F2}x  toggles={manager.ReviewToggleCount}", hintStyle);
+            GUI.Label(new Rect(hudRect.x + 8f, hudRect.y + 24f, hudRect.width - 16f, 22f),
+                $"FollowMode={manager.IsFollowMode}  HasTraj={manager.HasFollowTrajectory}", hintStyle);
+            GUI.Label(new Rect(hudRect.x + 8f, hudRect.y + 44f, hudRect.width - 16f, 22f),
+                $"dist={manager.LastFollowDistance:F2}m  speed={manager.EffectiveFollowSpeed:F2}m/s", hintStyle);
+            GUI.Label(new Rect(hudRect.x + 8f, hudRect.y + 64f, hudRect.width - 16f, 22f),
+                $"elapsed={manager.LastFollowElapsed:F2}s", hintStyle);
+            GUI.Label(new Rect(hudRect.x + 8f, hudRect.y + 86f, hudRect.width - 16f, 30f),
+                skip, hintStyle);
+        }
+
+        if (showSpeedRow)
+        {
+            float rowY = y + (buttonHeight + buttonSpacing) * 3f;
+            float labelW = 70f;
+            float sliderW = buttonWidth - labelW;
+            float speed = manager.EffectiveFollowSpeed;
+            GUI.Label(new Rect(x, rowY, labelW, buttonHeight), $"{speed:0.00} m/s", hintStyle);
+            float mult = GUI.HorizontalSlider(
+                new Rect(x + labelW, rowY + buttonHeight * 0.35f, sliderW, buttonHeight),
+                manager.FollowSpeedMultiplier,
+                manager.followSpeedMultiplierMin,
+                manager.followSpeedMultiplierMax);
+            manager.FollowSpeedMultiplier = mult;
+        }
     }
 
     private void EnsureStyles()

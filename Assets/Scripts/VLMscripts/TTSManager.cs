@@ -11,7 +11,16 @@ public class TTSManager : MonoBehaviour
     private const string GeminiApiBaseUrl = "https://generativelanguage.googleapis.com/v1beta/models/";
     private const int AudioSampleRate = 24000;
     private const int AudioChannels = 1;
-    private const string DefaultVoiceName = "Kore";
+
+    [Header("Voice")]
+    [SerializeField] private string robotVoiceName = "Charon";
+    [SerializeField, TextArea(2, 4)]
+    private string speechStyleInstruction = "Speak clearly at a moderately fast pace in a low, clean, flat, synthetic robot voice. Do not sound childlike, raspy, hoarse, breathy, or distorted. Keep words intelligible.";
+    [SerializeField, Range(1f, 1.8f)] private float intelligibleSpeechSpeed = 1.72f;
+    [SerializeField, Range(0.85f, 1.2f)] private float intelligiblePlaybackPitch = 0.94f;
+
+    [Header("Clean Robot")]
+    [SerializeField] private bool forceCleanRobotMode = true;
 
     private string geminiApiKey;
     private AudioClip savedAudioClip;
@@ -44,7 +53,8 @@ public class TTSManager : MonoBehaviour
 
         ConfigureAudioSource();
 
-        if (clipCache.TryGetValue(text, out AudioClip cachedClip) && cachedClip != null)
+        string cacheKey = BuildCacheKey(text);
+        if (clipCache.TryGetValue(cacheKey, out AudioClip cachedClip) && cachedClip != null)
         {
             audioSource.Stop();
             audioSource.clip = cachedClip;
@@ -99,12 +109,12 @@ public class TTSManager : MonoBehaviour
             }
 
             byte[] pcmData = Convert.FromBase64String(base64Audio);
-            savedAudioClip = CreateAudioClipFromPcm(pcmData);
-            SaveAudioFile(pcmData);
+            savedAudioClip = CreateAudioClipFromPcm(pcmData, out byte[] processedPcmData);
 
             if (savedAudioClip != null)
             {
-                clipCache[text] = savedAudioClip;
+                SaveAudioFile(processedPcmData);
+                clipCache[BuildCacheKey(text)] = savedAudioClip;
                 Debug.Log("[TTSManager] AudioClip created successfully. Duration: " + savedAudioClip.length + " seconds");
                 if (playWhenReady)
                 {
@@ -133,6 +143,7 @@ public class TTSManager : MonoBehaviour
         audioSource.loop = false;
         audioSource.spatialBlend = 0f;
         audioSource.volume = 1f;
+        audioSource.pitch = intelligiblePlaybackPitch;
         audioSource.ignoreListenerPause = true;
     }
 
@@ -149,7 +160,10 @@ public class TTSManager : MonoBehaviour
 
     private string BuildTtsRequest(string text)
     {
-        string escapedText = EscapeJson(text);
+        string ttsPrompt = string.IsNullOrWhiteSpace(speechStyleInstruction)
+            ? text
+            : speechStyleInstruction.Trim() + " Say: " + text;
+        string escapedText = EscapeJson(ttsPrompt);
 
         return "{"
             + "\"contents\":[{"
@@ -162,7 +176,7 @@ public class TTSManager : MonoBehaviour
             + "\"speechConfig\":{"
             + "\"voiceConfig\":{"
             + "\"prebuiltVoiceConfig\":{"
-            + "\"voiceName\":\"" + DefaultVoiceName + "\""
+            + "\"voiceName\":\"" + EscapeJson(robotVoiceName) + "\""
             + "}"
             + "}"
             + "}"
@@ -220,8 +234,9 @@ public class TTSManager : MonoBehaviour
         return fullPath;
     }
 
-    private AudioClip CreateAudioClipFromPcm(byte[] pcmData)
+    private AudioClip CreateAudioClipFromPcm(byte[] pcmData, out byte[] processedPcmData)
     {
+        processedPcmData = null;
         if (pcmData == null || pcmData.Length < 2)
             return null;
 
@@ -234,9 +249,82 @@ public class TTSManager : MonoBehaviour
             audioSamples[i] = sample / 32768f;
         }
 
-        AudioClip clip = AudioClip.Create("GeminiTTS", sampleCount, AudioChannels, AudioSampleRate, false);
+        if (forceCleanRobotMode)
+            audioSamples = RemoveLongSilences(audioSamples);
+
+        audioSamples = SpeedUpSpeech(audioSamples, intelligibleSpeechSpeed);
+
+        AudioClip clip = AudioClip.Create("GeminiTTS", audioSamples.Length, AudioChannels, AudioSampleRate, false);
         clip.SetData(audioSamples, 0);
+        processedPcmData = ConvertSamplesToPcm(audioSamples);
         return clip;
+    }
+
+    private byte[] ConvertSamplesToPcm(float[] samples)
+    {
+        byte[] pcmData = new byte[samples.Length * 2];
+        for (int i = 0; i < samples.Length; i++)
+        {
+            short sample = (short)Mathf.Clamp(Mathf.RoundToInt(samples[i] * 32767f), short.MinValue, short.MaxValue);
+            byte[] bytes = BitConverter.GetBytes(sample);
+            pcmData[i * 2] = bytes[0];
+            pcmData[i * 2 + 1] = bytes[1];
+        }
+
+        return pcmData;
+    }
+
+    private float[] SpeedUpSpeech(float[] inputSamples, float speed)
+    {
+        if (inputSamples == null || inputSamples.Length == 0)
+            return inputSamples;
+
+        speed = Mathf.Clamp(speed, 1f, 1.8f);
+        if (Mathf.Approximately(speed, 1f))
+            return inputSamples;
+
+        int outputLength = Mathf.Max(1, Mathf.FloorToInt(inputSamples.Length / speed));
+        float[] outputSamples = new float[outputLength];
+        for (int i = 0; i < outputLength; i++)
+        {
+            float sourcePosition = i * speed;
+            int sourceIndex = Mathf.FloorToInt(sourcePosition);
+            int nextIndex = Mathf.Min(sourceIndex + 1, inputSamples.Length - 1);
+            float blend = sourcePosition - sourceIndex;
+
+            outputSamples[i] = Mathf.Lerp(inputSamples[sourceIndex], inputSamples[nextIndex], blend);
+        }
+
+        return outputSamples;
+    }
+
+    private float[] RemoveLongSilences(float[] samples)
+    {
+        if (samples == null || samples.Length == 0)
+            return samples;
+
+        int maxSilentSamples = Mathf.RoundToInt(AudioSampleRate * 0.08f);
+        int silentRun = 0;
+        System.Collections.Generic.List<float> compacted = new System.Collections.Generic.List<float>(samples.Length);
+
+        for (int i = 0; i < samples.Length; i++)
+        {
+            bool silent = Mathf.Abs(samples[i]) < 0.006f;
+            if (silent)
+            {
+                silentRun++;
+                if (silentRun > maxSilentSamples)
+                    continue;
+            }
+            else
+            {
+                silentRun = 0;
+            }
+
+            compacted.Add(samples[i]);
+        }
+
+        return compacted.ToArray();
     }
 
     private byte[] ConvertPcmToWav(byte[] pcmData, int sampleRate, short channels, short bitsPerSample)
@@ -277,5 +365,15 @@ public class TTSManager : MonoBehaviour
             .Replace("\n", "\\n")
             .Replace("\r", "\\r")
             .Replace("\t", "\\t");
+    }
+
+    private string BuildCacheKey(string text)
+    {
+        return robotVoiceName + "|"
+            + speechStyleInstruction + "|"
+            + intelligibleSpeechSpeed.ToString("0.###") + "|"
+            + intelligiblePlaybackPitch.ToString("0.###") + "|"
+            + forceCleanRobotMode + "|"
+            + text;
     }
 }
