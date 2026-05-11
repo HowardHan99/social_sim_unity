@@ -37,18 +37,25 @@ namespace SEAN.Input
         /// <summary>
         ///  scale joystick input by this amount
         /// </summary>
-        public float JoystickScaleLinear = -0.5f;
-        public float JoystickScaleAngular = -1.7f;
+        public float JoystickScaleLinear = -0.8f;
+        public float JoystickScaleAngular = -2.4f;
         public string JoystickLinearAxis = "joystickLinearAxis";
         public string JoystickAngularAxis = "LogitechTwist";
         public string JoystickStartAxis = "L1";
         public float JoystickDeadzone = 0.03f;
+        public float JoystickLinearFullThrow = 0.1f;
+        public float JoystickAngularFullThrow = 1.0f;
+        public float JoystickLinearResponseExponent = 1.6f;
+        public float JoystickAngularResponseExponent = 1.2f;
+        public float JoystickLinearAcceleration = 4.0f;
+        public float JoystickLinearDeceleration = 3.0f;
+        public float JoystickAngularAcceleration = 10.0f;
 
         /// <summary>
         ///  keyboard inputs translate directly to this output value
         /// </summary>
-        public float FixedScaleLinear = -0.5f;
-        public float FixedScaleAngular = 0.5f;
+        public float FixedScaleLinear = -0.8f;
+        public float FixedScaleAngular = 0.8f;
 
         private float _horizontal = 0;
         public float Horizontal { get { return _horizontal; } }
@@ -60,11 +67,14 @@ namespace SEAN.Input
         private float joystickAngularCenter;
         private bool joystickCenterCaptured;
         private bool warnedMissingJoystickAxis;
+        private float currentJoystickLinear;
+        private float currentJoystickAngular;
 
         void Start()
         {
             ros = ROSConnection.instance;
             sean = SEAN.instance;
+            ApplyJoystickResponseDefaults();
         }
 
         void Update()
@@ -72,6 +82,8 @@ namespace SEAN.Input
             if (!RobotLocalInputAllowed())
             {
                 joystickCenterCaptured = false;
+                currentJoystickLinear = 0f;
+                currentJoystickAngular = 0f;
                 _horizontal = 0f;
                 _vertical = 0f;
                 _l1 = false;
@@ -85,11 +97,15 @@ namespace SEAN.Input
             else if (EnableKeyboard)
             {
                 joystickCenterCaptured = false;
+                currentJoystickLinear = 0f;
+                currentJoystickAngular = 0f;
                 ReadKeyboard();
             }
             else
             {
                 joystickCenterCaptured = false;
+                currentJoystickLinear = 0f;
+                currentJoystickAngular = 0f;
                 _horizontal = 0f;
                 _vertical = 0f;
                 _l1 = false;
@@ -159,8 +175,21 @@ namespace SEAN.Input
                 joystickCenterCaptured = true;
             }
 
-            _horizontal = ApplyJoystickDeadzone(ReadJoystickRawAxis(JoystickAngularAxis) - joystickAngularCenter) * JoystickScaleAngular;
-            _vertical = ApplyJoystickDeadzone(ReadJoystickRawAxis(JoystickLinearAxis) - joystickLinearCenter) * JoystickScaleLinear;
+            float targetAngular = ProcessJoystickInput(ReadJoystickRawAxis(JoystickAngularAxis) - joystickAngularCenter, JoystickAngularFullThrow, JoystickAngularResponseExponent) * JoystickScaleAngular;
+            float targetLinear = ProcessJoystickInput(ReadJoystickRawAxis(JoystickLinearAxis) - joystickLinearCenter, JoystickLinearFullThrow, JoystickLinearResponseExponent) * JoystickScaleLinear;
+            float linearStep = Mathf.Abs(targetLinear) > Mathf.Abs(currentJoystickLinear)
+                ? JoystickLinearAcceleration
+                : JoystickLinearDeceleration;
+            currentJoystickAngular = Mathf.MoveTowards(
+                currentJoystickAngular,
+                targetAngular,
+                Mathf.Max(0f, JoystickAngularAcceleration) * Time.deltaTime);
+            currentJoystickLinear = Mathf.MoveTowards(
+                currentJoystickLinear,
+                targetLinear,
+                Mathf.Max(0f, linearStep) * Time.deltaTime);
+            _horizontal = currentJoystickAngular;
+            _vertical = currentJoystickLinear;
             _l1 = GetAxisSafely(ResolveJoystickAxisName(JoystickStartAxis)) != 0;
             Send();
         }
@@ -209,7 +238,7 @@ namespace SEAN.Input
 
             try
             {
-                return UnityEngine.Input.GetAxis(axisName);
+                return UnityEngine.Input.GetAxisRaw(axisName);
             }
             catch (System.ArgumentException)
             {
@@ -225,6 +254,33 @@ namespace SEAN.Input
         private float ApplyJoystickDeadzone(float value)
         {
             return Mathf.Abs(value) >= JoystickDeadzone ? value : 0f;
+        }
+
+        private float NormalizeJoystickThrow(float value, float fullThrow)
+        {
+            return Mathf.Clamp(value / Mathf.Max(0.01f, Mathf.Abs(fullThrow)), -1f, 1f);
+        }
+
+        private float ProcessJoystickInput(float value, float fullThrow, float responseExponent)
+        {
+            float normalized = NormalizeJoystickThrow(ApplyJoystickDeadzone(value), fullThrow);
+            return ApplyJoystickResponseCurve(normalized, responseExponent);
+        }
+
+        private float ApplyJoystickResponseCurve(float value, float responseExponent)
+        {
+            float exponent = Mathf.Max(0.25f, responseExponent);
+            return Mathf.Sign(value) * Mathf.Pow(Mathf.Abs(value), exponent);
+        }
+
+        private void ApplyJoystickResponseDefaults()
+        {
+            if (Mathf.Approximately(JoystickLinearFullThrow, 0.25f))
+                JoystickLinearFullThrow = 0.1f;
+            if (JoystickLinearResponseExponent <= 0f)
+                JoystickLinearResponseExponent = 1.6f;
+            if (JoystickAngularResponseExponent <= 0f)
+                JoystickAngularResponseExponent = 1.2f;
         }
 
         public RosMessageTypes.Geometry.MTwist CmdVel
