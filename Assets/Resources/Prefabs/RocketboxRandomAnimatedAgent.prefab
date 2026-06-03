@@ -95,6 +95,10 @@ MonoBehaviour:
     type: 3}
   pwdAvatarPrefabFemale: {fileID: 4123353721614615874, guid: bba6774b950b2c843ad5d47502eaa9d4,
     type: 3}
+  pwdAvatarPrefabScooteruser: {fileID: 6787443626245204790, guid: f64558dc6aaeb5345b83f3d0bac88893,
+    type: 3}
+  pwdAvatarPrefabDogwalker: {fileID: 7040208758660078004, guid: 7e27c02e3f9d2324b9474bbc379db951,
+    type: 3}
   startObjectName: start
   goalObjectName: end
   bgPwdGender: 2

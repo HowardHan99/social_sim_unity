@@ -53,6 +53,13 @@ namespace SessionReview
             SelectedSceneIndex = sceneIndex;
             SelectedSceneName = sceneName ?? string.Empty;
             PendingTrialStart = true;
+            Debug.Log("SelectedPwdGender in Apply: " + SelectedPwdGender);
+            Debug.Log("HasCompletedOnboarding" + HasCompletedOnboarding);
+        }
+
+        public static void UpdatePwdGender(SEAN.Scenario.Agents.PwdGender pwdGender)
+        {
+            SelectedPwdGender = pwdGender;
         }
 
         public static void UpdateStartupControls(OnboardingPlayerMode playerMode,

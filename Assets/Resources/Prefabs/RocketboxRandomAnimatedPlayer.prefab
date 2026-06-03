@@ -84,7 +84,8 @@ MonoBehaviour:
   - {fileID: 5740475629495303944, guid: f723404bf5e79afdc9e64e322f5571cf, type: 3}
   - {fileID: 5502001187223423140, guid: 326181d652a8632a7a59d32a45a7fb38, type: 3}
   - {fileID: 4535516779831726438, guid: 8d984c9104b977beb85ded9b4d3edc19, type: 3}
-  pwdAvatarPrefab: {fileID: 0}
+  pwdAvatarPrefab: {fileID: 4123353721614615874, guid: bba6774b950b2c843ad5d47502eaa9d4,
+    type: 3}
   controller: 0
   isPlayer: 0
   isPwdPlayer: 1
@@ -92,6 +93,10 @@ MonoBehaviour:
   pwdAvatarPrefabMale: {fileID: 6004020823855633571, guid: 82f2e314ed765164ea3ea7903adc22a6,
     type: 3}
   pwdAvatarPrefabFemale: {fileID: 4123353721614615874, guid: bba6774b950b2c843ad5d47502eaa9d4,
+    type: 3}
+  pwdAvatarPrefabScooteruser: {fileID: 6787443626245204790, guid: f64558dc6aaeb5345b83f3d0bac88893,
+    type: 3}
+  pwdAvatarPrefabDogwalker: {fileID: 7040208758660078004, guid: 7e27c02e3f9d2324b9474bbc379db951,
     type: 3}
   startObjectName: start
   goalObjectName: end

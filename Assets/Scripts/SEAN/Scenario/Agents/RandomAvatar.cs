@@ -4,7 +4,7 @@ using UnityEngine.SceneManagement;
 
 namespace SEAN.Scenario.Agents
 {
-    public enum PwdGender { Male, Female, Random }
+    public enum PwdGender { Male, Female, Random, Scooteruser, Dogwalker }
 
     public class RandomAvatar : MonoBehaviour
     {
@@ -35,6 +35,8 @@ namespace SEAN.Scenario.Agents
         public PwdGender pwdGender = PwdGender.Male;
         public GameObject pwdAvatarPrefabMale;
         public GameObject pwdAvatarPrefabFemale;
+        public GameObject pwdAvatarPrefabScooteruser;
+        public GameObject pwdAvatarPrefabDogwalker;
 
         [Header("PWD Start / Goal")]
         [Tooltip("Scene object name for spawn point. Searches entire hierarchy by name.")]
@@ -71,6 +73,10 @@ namespace SEAN.Scenario.Agents
                 avatarsList.Remove(pwdAvatarPrefabMale);
             if (pwdAvatarPrefabFemale != null)
                 avatarsList.Remove(pwdAvatarPrefabFemale);
+            if (pwdAvatarPrefabScooteruser != null)
+                avatarsList.Remove(pwdAvatarPrefabScooteruser);
+            if (pwdAvatarPrefabDogwalker != null)
+                avatarsList.Remove(pwdAvatarPrefabDogwalker);
         }
 
         private GameObject GetFallbackAvatarPrefab()
@@ -79,7 +85,7 @@ namespace SEAN.Scenario.Agents
             {
                 foreach (var avatar in avatars)
                 {
-                    if (avatar != null && avatar != pwdAvatarPrefab && avatar != pwdAvatarPrefabMale && avatar != pwdAvatarPrefabFemale)
+                    if (avatar != null && avatar != pwdAvatarPrefab && avatar != pwdAvatarPrefabMale && avatar != pwdAvatarPrefabFemale && avatar != pwdAvatarPrefabScooteruser && avatar != pwdAvatarPrefabDogwalker)
                         return avatar;
                 }
 
@@ -123,8 +129,11 @@ namespace SEAN.Scenario.Agents
                 controller = SEAN.instance.AgentController;
             }
 
+            Debug.Log("Awake: HasCompletedOnboarding " + SessionReview.SessionOnboardingSettings.HasCompletedOnboarding);
+
             if (SessionReview.SessionOnboardingSettings.HasCompletedOnboarding)
             {
+                Debug.Log("ApplyOnboardingOverrides in Awake");
                 ApplyOnboardingOverrides();
             }
 
@@ -191,9 +200,11 @@ namespace SEAN.Scenario.Agents
 
         private void ApplyOnboardingOverrides()
         {
+            Debug.Log("ApplyOnboardingOverrides");
             if (!isPwdPlayer)
                 return;
             pwdGender = SessionReview.SessionOnboardingSettings.SelectedPwdGender;
+            Debug.Log("pwdGender in ApplyOnboardingOverrides: " + pwdGender);
             spawnAutonomousPwdFromOnboarding = false;
         }
 
@@ -206,7 +217,7 @@ namespace SEAN.Scenario.Agents
             {
                 RebuildAvatarPoolIfNeeded();
             }
-
+            Debug.Log("SpawnPwdPlayer: " + pwdGender);
             avatarPrefab = ResolvePwdPrefab(pwdGender);
             if (avatarPrefab == null)
             {
@@ -466,6 +477,10 @@ namespace SEAN.Scenario.Agents
                     return pwdAvatarPrefabMale != null ? pwdAvatarPrefabMale : pwdAvatarPrefab;
                 case PwdGender.Female:
                     return pwdAvatarPrefabFemale != null ? pwdAvatarPrefabFemale : pwdAvatarPrefab;
+                case PwdGender.Scooteruser:
+                    return pwdAvatarPrefabScooteruser != null ? pwdAvatarPrefabScooteruser : pwdAvatarPrefab;
+                case PwdGender.Dogwalker:
+                    return pwdAvatarPrefabDogwalker != null ? pwdAvatarPrefabDogwalker : pwdAvatarPrefab;
                 case PwdGender.Random:
                     bool pickMale = Random.value > 0.5f;
                     if (pickMale)

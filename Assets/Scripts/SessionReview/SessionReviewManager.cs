@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System;
@@ -203,6 +204,13 @@ namespace SessionReview
                 vlmCaptureButton.onClick.AddListener(RecordVLMCapture);
 
             InitializeOnboardingSelection();
+
+            StartCoroutine(DelayedStart());
+        }
+
+        private IEnumerator DelayedStart()
+        {
+            yield return new WaitForSeconds(0.1f);
 
             if (showOnboardingOnStart && !SessionOnboardingSettings.HasCompletedOnboarding)
                 SetOnboardingVisible(true);
@@ -2334,22 +2342,43 @@ namespace SessionReview
                     selectedPwdGender == SEAN.Scenario.Agents.PwdGender.Female,
                     () => selectedPwdGender = SEAN.Scenario.Agents.PwdGender.Female);
 
-                if (DrawChipButton(new Rect(x, y + 208f, 160f, 40f), "Male", selectedPwdGender == SEAN.Scenario.Agents.PwdGender.Male))
+                if (DrawChipButton(new Rect(x, y + 208f, 160f, 40f), "Male", selectedPwdGender == SEAN.Scenario.Agents.PwdGender.Male)) {
                     selectedPwdGender = SEAN.Scenario.Agents.PwdGender.Male;
-                if (DrawChipButton(new Rect(x + 176f, y + 208f, 160f, 40f), "Female", selectedPwdGender == SEAN.Scenario.Agents.PwdGender.Female))
+                    SessionOnboardingSettings.UpdatePwdGender(SEAN.Scenario.Agents.PwdGender.Male);
+                }
+                if (DrawChipButton(new Rect(x + 176f, y + 208f, 160f, 40f), "Female", selectedPwdGender == SEAN.Scenario.Agents.PwdGender.Female)) {
                     selectedPwdGender = SEAN.Scenario.Agents.PwdGender.Female;
+                    SessionOnboardingSettings.UpdatePwdGender(SEAN.Scenario.Agents.PwdGender.Female);
+                }
                 y += 266f;
 
                 GUI.Label(new Rect(x, y, width, 30f), "Other Community-Informed Characters", onboardingSectionStyle);
                 y += 42f;
 
-                DrawPreviewCard(new Rect(x, y, 188f, 150f), "Dogwalker", dogwalkerPreview,
-                    "Shown here for UI preview only.");
-                DrawPreviewCard(new Rect(x + 204f, y, 188f, 150f), "Scooter User", scooterUserPreview,
-                    "Shown here for UI preview only.");
+                // DrawPreviewCard(new Rect(x, y, 188f, 150f), "Dogwalker", dogwalkerPreview,
+                //     "Shown here for UI preview only.");
+                // DrawPreviewCard(new Rect(x + 204f, y, 188f, 150f), "Scooter User", scooterUserPreview,
+                //     "Shown here for UI preview only.");
+                DrawGenderPreviewCard(new Rect(x, y, 188f, 150f), "Dogwalker", dogwalkerPreview,
+                    selectedPwdGender == SEAN.Scenario.Agents.PwdGender.Dogwalker,
+                    () => selectedPwdGender = SEAN.Scenario.Agents.PwdGender.Dogwalker);
+
+                DrawGenderPreviewCard(new Rect(x + 204f, y, 188f, 150f), "Scooter User", scooterUserPreview,
+                    selectedPwdGender == SEAN.Scenario.Agents.PwdGender.Scooteruser,
+                    () => selectedPwdGender = SEAN.Scenario.Agents.PwdGender.Scooteruser);
+
+                if (DrawChipButton(new Rect(x, y + 168f, 160f, 40f), "Dogwalker", selectedPwdGender == SEAN.Scenario.Agents.PwdGender.Dogwalker)) {
+                    selectedPwdGender = SEAN.Scenario.Agents.PwdGender.Dogwalker;
+                    SessionOnboardingSettings.UpdatePwdGender(SEAN.Scenario.Agents.PwdGender.Dogwalker);
+                }
+                if (DrawChipButton(new Rect(x + 176f, y + 168f, 160f, 40f), "Scooter User", selectedPwdGender == SEAN.Scenario.Agents.PwdGender.Scooteruser)) {
+                    selectedPwdGender = SEAN.Scenario.Agents.PwdGender.Scooteruser;
+                    SessionOnboardingSettings.UpdatePwdGender(SEAN.Scenario.Agents.PwdGender.Scooteruser);
+                }
+
                 DrawPreviewCard(new Rect(x + 408f, y, 188f, 150f), "More To Be Built", null,
                     "Additional characters coming soon.");
-                y += 172f;
+                y += 222f;
             }
 
             GUI.Label(new Rect(x, y, width, 30f), "Session To Play", onboardingSectionStyle);
@@ -2473,6 +2502,8 @@ namespace SessionReview
                 targetSceneIndex = 0;
             }
 
+            Debug.Log("selectedPwdGender in ApplyOnboardingSelection: " + selectedPwdGender);
+
             SessionOnboardingSettings.Apply(
                 selectedPlayerMode,
                 selectedPwdGender,
@@ -2484,21 +2515,21 @@ namespace SessionReview
 
             if (sceneChange != null && sceneChange.SceneCount > 0)
             {
-                if (targetSceneName == currentSceneName)
-                {
-                    ShowTrialStartPrompt();
-                    return;
-                }
+                // if (targetSceneName == currentSceneName)
+                // {
+                //     ShowTrialStartPrompt();
+                //     return;
+                // }
 
                 sceneChange.LoadSceneAtIndex(targetSceneIndex);
                 return;
             }
 
-            if (targetSceneName == currentSceneName)
-            {
-                ShowTrialStartPrompt();
-                return;
-            }
+            // if (targetSceneName == currentSceneName)
+            // {
+            //     ShowTrialStartPrompt();
+            //     return;
+            // }
 
             SceneManager.LoadScene(targetSceneName);
         }
