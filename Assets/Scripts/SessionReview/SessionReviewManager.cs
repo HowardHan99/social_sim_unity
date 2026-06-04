@@ -149,6 +149,7 @@ namespace SessionReview
         private Texture2D maleWheelchairPreview;
         private Texture2D dogwalkerPreview;
         private Texture2D scooterUserPreview;
+        private Texture2D cyclistPreview;
 
         void Awake()
         {
@@ -2346,7 +2347,7 @@ namespace SessionReview
                     selectedPwdGender = SEAN.Scenario.Agents.PwdGender.Male;
                     SessionOnboardingSettings.UpdatePwdGender(SEAN.Scenario.Agents.PwdGender.Male);
                 }
-                if (DrawChipButton(new Rect(x + 176f, y + 208f, 160f, 40f), "Female", selectedPwdGender == SEAN.Scenario.Agents.PwdGender.Female)) {
+                if (DrawChipButton(new Rect(x + 236f, y + 208f, 160f, 40f), "Female", selectedPwdGender == SEAN.Scenario.Agents.PwdGender.Female)) {
                     selectedPwdGender = SEAN.Scenario.Agents.PwdGender.Female;
                     SessionOnboardingSettings.UpdatePwdGender(SEAN.Scenario.Agents.PwdGender.Female);
                 }
@@ -2367,16 +2368,24 @@ namespace SessionReview
                     selectedPwdGender == SEAN.Scenario.Agents.PwdGender.Scooteruser,
                     () => selectedPwdGender = SEAN.Scenario.Agents.PwdGender.Scooteruser);
 
+                DrawGenderPreviewCard(new Rect(x + 408f, y, 188f, 150f), "Cyclist", cyclistPreview,
+                    selectedPwdGender == SEAN.Scenario.Agents.PwdGender.Cyclist,
+                    () => selectedPwdGender = SEAN.Scenario.Agents.PwdGender.Cyclist);
+
                 if (DrawChipButton(new Rect(x, y + 168f, 160f, 40f), "Dogwalker", selectedPwdGender == SEAN.Scenario.Agents.PwdGender.Dogwalker)) {
                     selectedPwdGender = SEAN.Scenario.Agents.PwdGender.Dogwalker;
                     SessionOnboardingSettings.UpdatePwdGender(SEAN.Scenario.Agents.PwdGender.Dogwalker);
                 }
-                if (DrawChipButton(new Rect(x + 176f, y + 168f, 160f, 40f), "Scooter User", selectedPwdGender == SEAN.Scenario.Agents.PwdGender.Scooteruser)) {
+                if (DrawChipButton(new Rect(x + 204f, y + 168f, 160f, 40f), "Scooter User", selectedPwdGender == SEAN.Scenario.Agents.PwdGender.Scooteruser)) {
                     selectedPwdGender = SEAN.Scenario.Agents.PwdGender.Scooteruser;
                     SessionOnboardingSettings.UpdatePwdGender(SEAN.Scenario.Agents.PwdGender.Scooteruser);
                 }
+                if (DrawChipButton(new Rect(x + 408f, y + 168f, 160f, 40f), "Cyclist", selectedPwdGender == SEAN.Scenario.Agents.PwdGender.Cyclist)) {
+                    selectedPwdGender = SEAN.Scenario.Agents.PwdGender.Cyclist;
+                    SessionOnboardingSettings.UpdatePwdGender(SEAN.Scenario.Agents.PwdGender.Cyclist);
+                }
 
-                DrawPreviewCard(new Rect(x + 408f, y, 188f, 150f), "More To Be Built", null,
+                DrawPreviewCard(new Rect(x + 612f, y, 188f, 150f), "More To Be Built", null,
                     "Additional characters coming soon.");
                 y += 222f;
             }
@@ -2736,6 +2745,7 @@ namespace SessionReview
             maleWheelchairPreview = LoadTextureFromAssets("UIResources/male_wheelchair_user.png");
             dogwalkerPreview = LoadTextureFromAssets("UIResources/dogwalker.png");
             scooterUserPreview = LoadTextureFromAssets("UIResources/scooteruser.png");
+            cyclistPreview = LoadTextureFromAssets("UIResources/cyclist.png");
         }
 
         private Texture2D LoadTextureFromAssets(string relativeAssetPath)

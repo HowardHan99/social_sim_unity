@@ -1176,6 +1176,12 @@ PrefabInstance:
         type: 3}
     - target: {fileID: 3717891458362209814, guid: 0303bdb201b5e44c5ad3c7bf43ff670e,
         type: 3}
+      propertyPath: pwdAvatarPrefabCyclist
+      value: 
+      objectReference: {fileID: 3275696151480316356, guid: affac2d88f888e045bdbc979cdaf4e01,
+        type: 3}
+    - target: {fileID: 3717891458362209814, guid: 0303bdb201b5e44c5ad3c7bf43ff670e,
+        type: 3}
       propertyPath: pwdAvatarPrefabScooter
       value: 
       objectReference: {fileID: 6787443626245204790, guid: f64558dc6aaeb5345b83f3d0bac88893,

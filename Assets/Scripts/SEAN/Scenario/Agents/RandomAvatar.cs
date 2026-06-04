@@ -4,7 +4,7 @@ using UnityEngine.SceneManagement;
 
 namespace SEAN.Scenario.Agents
 {
-    public enum PwdGender { Male, Female, Random, Scooteruser, Dogwalker }
+    public enum PwdGender { Male, Female, Random, Scooteruser, Dogwalker, Cyclist }
 
     public class RandomAvatar : MonoBehaviour
     {
@@ -37,6 +37,7 @@ namespace SEAN.Scenario.Agents
         public GameObject pwdAvatarPrefabFemale;
         public GameObject pwdAvatarPrefabScooteruser;
         public GameObject pwdAvatarPrefabDogwalker;
+        public GameObject pwdAvatarPrefabCyclist;
 
         [Header("PWD Start / Goal")]
         [Tooltip("Scene object name for spawn point. Searches entire hierarchy by name.")]
@@ -481,6 +482,8 @@ namespace SEAN.Scenario.Agents
                     return pwdAvatarPrefabScooteruser != null ? pwdAvatarPrefabScooteruser : pwdAvatarPrefab;
                 case PwdGender.Dogwalker:
                     return pwdAvatarPrefabDogwalker != null ? pwdAvatarPrefabDogwalker : pwdAvatarPrefab;
+                case PwdGender.Cyclist:
+                    return pwdAvatarPrefabCyclist != null ? pwdAvatarPrefabCyclist : pwdAvatarPrefab;
                 case PwdGender.Random:
                     bool pickMale = Random.value > 0.5f;
                     if (pickMale)

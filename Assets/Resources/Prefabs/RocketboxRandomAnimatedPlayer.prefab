@@ -98,6 +98,8 @@ MonoBehaviour:
     type: 3}
   pwdAvatarPrefabDogwalker: {fileID: 7040208758660078004, guid: 7e27c02e3f9d2324b9474bbc379db951,
     type: 3}
+  pwdAvatarPrefabCyclist: {fileID: 3275696151480316356, guid: affac2d88f888e045bdbc979cdaf4e01,
+    type: 3}
   startObjectName: start
   goalObjectName: end
   bgPwdGender: 2
