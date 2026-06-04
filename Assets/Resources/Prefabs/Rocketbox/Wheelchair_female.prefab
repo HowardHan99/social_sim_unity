@@ -10,7 +10,7 @@ PrefabInstance:
     - target: {fileID: 1280350423056408754, guid: 39228eb5c126c89418b1bccd87102c89,
         type: 3}
       propertyPath: m_Name
-      value: Wheelchair (1)
+      value: Wheelchair_female
       objectReference: {fileID: 0}
     - target: {fileID: 1913861897690298888, guid: 39228eb5c126c89418b1bccd87102c89,
         type: 3}
@@ -25,7 +25,7 @@ PrefabInstance:
     - target: {fileID: 1913861897690298888, guid: 39228eb5c126c89418b1bccd87102c89,
         type: 3}
       propertyPath: m_LocalPosition.y
-      value: -0.5640011
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 1913861897690298888, guid: 39228eb5c126c89418b1bccd87102c89,
         type: 3}

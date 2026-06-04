@@ -1157,6 +1157,41 @@ PrefabInstance:
       propertyPath: m_IsActive
       value: 1
       objectReference: {fileID: 0}
+    - target: {fileID: 3717891458362209814, guid: 0303bdb201b5e44c5ad3c7bf43ff670e,
+        type: 3}
+      propertyPath: isPwdPlayer
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 3717891458362209814, guid: 0303bdb201b5e44c5ad3c7bf43ff670e,
+        type: 3}
+      propertyPath: pwdAvatarPrefab
+      value: 
+      objectReference: {fileID: 4123353721614615874, guid: bba6774b950b2c843ad5d47502eaa9d4,
+        type: 3}
+    - target: {fileID: 3717891458362209814, guid: 0303bdb201b5e44c5ad3c7bf43ff670e,
+        type: 3}
+      propertyPath: pwdAvatarPrefabDog
+      value: 
+      objectReference: {fileID: 7040208758660078004, guid: 7e27c02e3f9d2324b9474bbc379db951,
+        type: 3}
+    - target: {fileID: 3717891458362209814, guid: 0303bdb201b5e44c5ad3c7bf43ff670e,
+        type: 3}
+      propertyPath: pwdAvatarPrefabScooter
+      value: 
+      objectReference: {fileID: 6787443626245204790, guid: f64558dc6aaeb5345b83f3d0bac88893,
+        type: 3}
+    - target: {fileID: 3717891458362209814, guid: 0303bdb201b5e44c5ad3c7bf43ff670e,
+        type: 3}
+      propertyPath: pwdAvatarPrefabDogwalker
+      value: 
+      objectReference: {fileID: 7040208758660078004, guid: 7e27c02e3f9d2324b9474bbc379db951,
+        type: 3}
+    - target: {fileID: 3717891458362209814, guid: 0303bdb201b5e44c5ad3c7bf43ff670e,
+        type: 3}
+      propertyPath: pwdAvatarPrefabScooteruser
+      value: 
+      objectReference: {fileID: 6787443626245204790, guid: f64558dc6aaeb5345b83f3d0bac88893,
+        type: 3}
     - target: {fileID: 3727510540664106606, guid: 0303bdb201b5e44c5ad3c7bf43ff670e,
         type: 3}
       propertyPath: m_IsActive
