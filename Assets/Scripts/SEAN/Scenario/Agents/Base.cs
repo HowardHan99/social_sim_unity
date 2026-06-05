@@ -50,8 +50,15 @@ namespace SEAN.Scenario.Agents
             rb.mass = MASS;
             rb.constraints = RigidbodyConstraints.FreezeRotation;
 
-            var agentMeshBounds = GetComponentInChildren<SkinnedMeshRenderer>().bounds;
-            print("agentMeshBounds: " + agentMeshBounds);
+            var agentMeshBounds = new Bounds();
+            if (GetComponentInChildren<SkinnedMeshRenderer>() != null) {
+                agentMeshBounds = GetComponentInChildren<SkinnedMeshRenderer>().bounds;
+                print("skinned mesh renderer bounds: " + agentMeshBounds);
+            }
+            else {
+                agentMeshBounds = GetComponentInChildren<MeshRenderer>().bounds;
+                print("mesh renderer bounds: " + agentMeshBounds);
+            }
             var agentHeight = agentMeshBounds.extents.y * 2;
             collisionCapsule = gameObject.GetComponent<CapsuleCollider>();
             if (collisionCapsule == null)

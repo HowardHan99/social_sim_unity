@@ -1176,6 +1176,18 @@ PrefabInstance:
         type: 3}
     - target: {fileID: 3717891458362209814, guid: 0303bdb201b5e44c5ad3c7bf43ff670e,
         type: 3}
+      propertyPath: pwdAvatarPrefabCane
+      value: 
+      objectReference: {fileID: 2200227089297583399, guid: 7b38c2813001b174898803a80ec42753,
+        type: 3}
+    - target: {fileID: 3717891458362209814, guid: 0303bdb201b5e44c5ad3c7bf43ff670e,
+        type: 3}
+      propertyPath: pwdAvatarPrefabWalker
+      value: 
+      objectReference: {fileID: 2200227089297583399, guid: 7b38c2813001b174898803a80ec42753,
+        type: 3}
+    - target: {fileID: 3717891458362209814, guid: 0303bdb201b5e44c5ad3c7bf43ff670e,
+        type: 3}
       propertyPath: pwdAvatarPrefabCyclist
       value: 
       objectReference: {fileID: 3275696151480316356, guid: affac2d88f888e045bdbc979cdaf4e01,
@@ -1191,6 +1203,12 @@ PrefabInstance:
       propertyPath: pwdAvatarPrefabDogwalker
       value: 
       objectReference: {fileID: 7040208758660078004, guid: 7e27c02e3f9d2324b9474bbc379db951,
+        type: 3}
+    - target: {fileID: 3717891458362209814, guid: 0303bdb201b5e44c5ad3c7bf43ff670e,
+        type: 3}
+      propertyPath: pwdAvatarPrefabWhiteCane
+      value: 
+      objectReference: {fileID: 742184929041735514, guid: 3561bacf700da72409092d060c6eabd3,
         type: 3}
     - target: {fileID: 3717891458362209814, guid: 0303bdb201b5e44c5ad3c7bf43ff670e,
         type: 3}

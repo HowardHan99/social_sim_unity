@@ -4,7 +4,7 @@ using UnityEngine.SceneManagement;
 
 namespace SEAN.Scenario.Agents
 {
-    public enum PwdGender { Male, Female, Random, Scooteruser, Dogwalker, Cyclist }
+    public enum PwdGender { Male, Female, Random, Scooteruser, Dogwalker, Cyclist, Walker, WhiteCane, Cane }
 
     public class RandomAvatar : MonoBehaviour
     {
@@ -38,6 +38,9 @@ namespace SEAN.Scenario.Agents
         public GameObject pwdAvatarPrefabScooteruser;
         public GameObject pwdAvatarPrefabDogwalker;
         public GameObject pwdAvatarPrefabCyclist;
+        public GameObject pwdAvatarPrefabWalker;
+        public GameObject pwdAvatarPrefabWhiteCane;
+        public GameObject pwdAvatarPrefabCane;
 
         [Header("PWD Start / Goal")]
         [Tooltip("Scene object name for spawn point. Searches entire hierarchy by name.")]
@@ -484,6 +487,12 @@ namespace SEAN.Scenario.Agents
                     return pwdAvatarPrefabDogwalker != null ? pwdAvatarPrefabDogwalker : pwdAvatarPrefab;
                 case PwdGender.Cyclist:
                     return pwdAvatarPrefabCyclist != null ? pwdAvatarPrefabCyclist : pwdAvatarPrefab;
+                case PwdGender.Walker:
+                    return pwdAvatarPrefabWalker != null ? pwdAvatarPrefabWalker : pwdAvatarPrefab;
+                case PwdGender.WhiteCane:
+                    return pwdAvatarPrefabWhiteCane != null ? pwdAvatarPrefabWhiteCane : pwdAvatarPrefab;
+                case PwdGender.Cane:
+                    return pwdAvatarPrefabCane != null ? pwdAvatarPrefabCane : pwdAvatarPrefab;
                 case PwdGender.Random:
                     bool pickMale = Random.value > 0.5f;
                     if (pickMale)

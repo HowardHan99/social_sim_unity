@@ -101,6 +101,12 @@ MonoBehaviour:
     type: 3}
   pwdAvatarPrefabCyclist: {fileID: 3275696151480316356, guid: affac2d88f888e045bdbc979cdaf4e01,
     type: 3}
+  pwdAvatarPrefabWalker: {fileID: 2200227089297583399, guid: 7b38c2813001b174898803a80ec42753,
+    type: 3}
+  pwdAvatarPrefabWhiteCane: {fileID: 742184929041735514, guid: 3561bacf700da72409092d060c6eabd3,
+    type: 3}
+  pwdAvatarPrefabCane: {fileID: 8939702436063834965, guid: dc94580c4e15b0b489ccf89cc514836d,
+    type: 3}
   startObjectName: start
   goalObjectName: end
   bgPwdGender: 2
