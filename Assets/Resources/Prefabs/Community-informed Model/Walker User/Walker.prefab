@@ -32,7 +32,7 @@ Transform:
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_Children:
-  - {fileID: 42516136564181018}
+  - {fileID: 4469463293450903734}
   m_Father: {fileID: 0}
   m_RootOrder: 0
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
@@ -146,7 +146,7 @@ Rigidbody:
   m_Interpolate: 0
   m_Constraints: 0
   m_CollisionDetection: 0
---- !u!1001 &512765279464075249
+--- !u!1001 &4146689709498992477
 PrefabInstance:
   m_ObjectHideFlags: 0
   serializedVersion: 2
@@ -166,7 +166,7 @@ PrefabInstance:
     - target: {fileID: -8679921383154817045, guid: 64383fb9afc4a944b9f9380fc319a6d8,
         type: 3}
       propertyPath: m_LocalPosition.y
-      value: 0.8
+      value: 0.75
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 64383fb9afc4a944b9f9380fc319a6d8,
         type: 3}
@@ -211,13 +211,13 @@ PrefabInstance:
     - target: {fileID: 919132149155446097, guid: 64383fb9afc4a944b9f9380fc319a6d8,
         type: 3}
       propertyPath: m_Name
-      value: Meshy_AI_generate_3d_model_for_0605161447_texture
+      value: man with walker
       objectReference: {fileID: 0}
     m_RemovedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: 64383fb9afc4a944b9f9380fc319a6d8, type: 3}
---- !u!4 &42516136564181018 stripped
+--- !u!4 &4469463293450903734 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: -8679921383154817045, guid: 64383fb9afc4a944b9f9380fc319a6d8,
     type: 3}
-  m_PrefabInstance: {fileID: 512765279464075249}
+  m_PrefabInstance: {fileID: 4146689709498992477}
   m_PrefabAsset: {fileID: 0}
