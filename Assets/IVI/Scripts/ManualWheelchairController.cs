@@ -77,6 +77,8 @@ namespace IVI
             sfpwdAgent = GetComponent<SFPWDAgent>();
             rb = GetComponent<Rigidbody>();
             animator = GetComponent<Animator>();
+            if (animator == null)
+                animator = GetComponentInChildren<Animator>(true);
             StartCoroutine(InitAfterBase());
         }
 
@@ -85,7 +87,10 @@ namespace IVI
             yield return null;
 
             if (animator != null)
+            {
                 animator.applyRootMotion = false;
+                animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+            }
 
             if (rb != null)
                 rb.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
@@ -266,9 +271,12 @@ namespace IVI
             if (animator == null) return;
             float speed = manualVelocity.magnitude;
             Vector3 local = Quaternion.Euler(0, -transform.eulerAngles.y, 0) * manualVelocity;
+            const float animSmoothing = 0.6f;
             animator.SetBool("Idling", speed < 0.1f);
-            animator.SetFloat("Forward", local.z / 0.6f);
-            animator.SetFloat("Strafe", local.x / 0.6f);
+            animator.SetFloat("Forward", local.z / animSmoothing);
+            animator.SetFloat("Strafe", local.x / animSmoothing);
+            if (rotationSpeed > 0.01f)
+                animator.SetFloat("Turn", Mathf.Clamp(currentManualAngularSpeed / rotationSpeed, -1f, 1f));
             animator.speed = speed > 0.1f ? speed : 1f;
         }
 

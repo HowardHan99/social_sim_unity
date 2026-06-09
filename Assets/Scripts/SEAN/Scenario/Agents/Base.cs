@@ -69,7 +69,7 @@ namespace SEAN.Scenario.Agents
             collisionCapsule.height = agentHeight;
             collisionCapsule.center = Vector3.up * agentHeight / 2f;
 
-            animator = GetComponent<Animator>();
+            animator = GetComponentInChildren<Animator>();
             animator.applyRootMotion = applyRootMotion;
             animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
             base.Start();

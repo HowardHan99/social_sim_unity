@@ -2774,8 +2774,8 @@ namespace SessionReview
             dogwalkerPreview = LoadTextureFromAssets("UIResources/dogwalker.png");
             scooterUserPreview = LoadTextureFromAssets("UIResources/scooteruser.png");
             cyclistPreview = LoadTextureFromAssets("UIResources/cyclist.png");
-            walkerPreview = LoadTextureFromAssets("UIResources/walker.png");
-            whiteCanePreview = LoadTextureFromAssets("UIResources/blindman.png");
+            walkerPreview = LoadTextureFromAssets("UIResources/walkerman2.png");
+            whiteCanePreview = LoadTextureFromAssets("UIResources/blindman2.png");
             canePreview = LoadTextureFromAssets("UIResources/caneuser.png");
         }
 
