@@ -135,13 +135,16 @@ namespace IVI
             }
             else if (sfpwdAgent != null && sfpwdAgent.enabled)
             {
-                // SFPWDAgent (Base.Update) computes velocity, handles rotation
-                // and animator params, but doesn't drive position when root motion
-                // is off. Apply the computed velocity as a direct position update.
+                // SFPWDAgent (Base.Update) computes velocity and rotation.
+                // Apply velocity directly when root motion is off, and keep the
+                // animator in sync for BlindController / PlayerAnimatorController.
                 Vector3 vel = sfpwdAgent.velocity;
                 vel.y = 0f;
                 if (vel.sqrMagnitude > 0.001f)
                     transform.position += vel * Time.deltaTime;
+
+                manualVelocity = vel;
+                UpdateAnimator();
             }
         }
 
@@ -275,8 +278,10 @@ namespace IVI
             animator.SetBool("Idling", speed < 0.1f);
             animator.SetFloat("Forward", local.z / animSmoothing);
             animator.SetFloat("Strafe", local.x / animSmoothing);
-            if (rotationSpeed > 0.01f)
-                animator.SetFloat("Turn", Mathf.Clamp(currentManualAngularSpeed / rotationSpeed, -1f, 1f));
+            float turn = rotationSpeed > 0.01f
+                ? Mathf.Clamp(currentManualAngularSpeed / rotationSpeed, -1f, 1f)
+                : 0f;
+            animator.SetFloat("Turn", turn);
             animator.speed = speed > 0.1f ? speed : 1f;
         }
 

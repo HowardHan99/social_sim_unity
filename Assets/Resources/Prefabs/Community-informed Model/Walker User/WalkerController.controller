@@ -8,7 +8,7 @@ AnimatorState:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_Name: Holding Walk
-  m_Speed: 8
+  m_Speed: 1
   m_CycleOffset: 0
   m_Transitions: []
   m_StateMachineBehaviours: []
@@ -65,7 +65,7 @@ AnimatorController:
   - serializedVersion: 5
     m_Name: Base Layer
     m_StateMachine: {fileID: -6466394866449530308}
-    m_Mask: {fileID: 31900000, guid: 94f0b1f2be06aeb4da371a8cd03243e6, type: 2}
+    m_Mask: {fileID: 31900000, guid: 1820b5abc7c1745469e7d281a9ca7358, type: 2}
     m_Motions: []
     m_Behaviours: []
     m_BlendingMode: 0
