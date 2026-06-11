@@ -41,6 +41,13 @@ namespace IVI
         [Header("Debug Manual Brake (read-only)")]
         public int debugSBrakePressCount;
 
+        [Header("Debug Locomotion (read-only)")]
+        public bool debugAnimatorFound;
+        public string debugAnimatorTarget;
+        public float debugForward;
+        public float debugStrafe;
+        public float debugTurn;
+
         [Header("Status (read-only)")]
         public bool isManualMode = false;
         public float debugJoystickRawHorizontal;
@@ -76,9 +83,11 @@ namespace IVI
             ApplyJoystickResponseDefaults();
             sfpwdAgent = GetComponent<SFPWDAgent>();
             rb = GetComponent<Rigidbody>();
-            animator = GetComponent<Animator>();
+            animator = AvatarAnimatorUtility.GetLocomotionAnimator(gameObject);
+            debugAnimatorFound = animator != null;
+            debugAnimatorTarget = animator != null ? animator.gameObject.name : "(none)";
             if (animator == null)
-                animator = GetComponentInChildren<Animator>(true);
+                Debug.LogWarning("[PWD] No locomotion Animator found on avatar.", this);
             StartCoroutine(InitAfterBase());
         }
 
@@ -133,12 +142,16 @@ namespace IVI
                 transform.position += manualVelocity * Time.deltaTime;
                 UpdateAnimator();
             }
-            else if (sfpwdAgent != null && sfpwdAgent.enabled)
+            else
             {
-                // SFPWDAgent (Base.Update) computes velocity and rotation.
-                // Apply velocity directly when root motion is off, and keep the
-                // animator in sync for BlindController / PlayerAnimatorController.
-                Vector3 vel = sfpwdAgent.velocity;
+                // SFPWDAgent (Base.Update) computes velocity and rotation when present.
+                // Fall back to rigidbody velocity for prefabs tested without an agent.
+                Vector3 vel = Vector3.zero;
+                if (sfpwdAgent != null && sfpwdAgent.enabled)
+                    vel = sfpwdAgent.velocity;
+                else if (rb != null)
+                    vel = rb.velocity;
+
                 vel.y = 0f;
                 if (vel.sqrMagnitude > 0.001f)
                     transform.position += vel * Time.deltaTime;
@@ -146,6 +159,22 @@ namespace IVI
                 manualVelocity = vel;
                 UpdateAnimator();
             }
+        }
+
+        void LateUpdate()
+        {
+            if (!initialized || isManualMode || animator == null)
+                return;
+
+            Vector3 vel = Vector3.zero;
+            if (sfpwdAgent != null && sfpwdAgent.enabled)
+                vel = sfpwdAgent.velocity;
+            else if (rb != null)
+                vel = rb.velocity;
+
+            vel.y = 0f;
+            manualVelocity = vel;
+            UpdateAnimator();
         }
 
         void HandleInput()
@@ -275,14 +304,21 @@ namespace IVI
             float speed = manualVelocity.magnitude;
             Vector3 local = Quaternion.Euler(0, -transform.eulerAngles.y, 0) * manualVelocity;
             const float animSmoothing = 0.6f;
-            animator.SetBool("Idling", speed < 0.1f);
-            animator.SetFloat("Forward", local.z / animSmoothing);
-            animator.SetFloat("Strafe", local.x / animSmoothing);
+            float forward = local.z / animSmoothing;
+            float strafe = local.x / animSmoothing;
             float turn = rotationSpeed > 0.01f
                 ? Mathf.Clamp(currentManualAngularSpeed / rotationSpeed, -1f, 1f)
                 : 0f;
+
+            animator.SetBool("Idling", speed < 0.1f);
+            animator.SetFloat("Forward", forward);
+            animator.SetFloat("Strafe", strafe);
             animator.SetFloat("Turn", turn);
             animator.speed = speed > 0.1f ? speed : 1f;
+
+            debugForward = forward;
+            debugStrafe = strafe;
+            debugTurn = turn;
         }
 
 
@@ -369,8 +405,8 @@ namespace IVI
             string controlHint = JoystickPresent
                 ? "Joystick + keyboard active"
                 : "RShift: toggle | W/S brake+reverse | A/D turn | H stop";
-            GUI.Box(new Rect(10, 10, 300, 60),
-                $"[{mode}] Pos:{pos} Vel:{vel}\n{controlHint}");
+            GUI.Box(new Rect(10, 10, 340, 78),
+                $"[{mode}] Pos:{pos} Vel:{vel} Fwd:{debugForward:F2}\nAnim:{debugAnimatorTarget}\n{controlHint}");
         }
 
         private float ReadJoystickAxis(string axisName, bool invert, float center)

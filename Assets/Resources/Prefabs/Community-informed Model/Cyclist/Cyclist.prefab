@@ -75,7 +75,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 82986ae7dfa33654295162cffcb1b085, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  moveSpeed: 0.8
+  moveSpeed: 4
   rotationSpeed: 180
   toggleModeKey: 303
   useWASD: 1
@@ -102,6 +102,11 @@ MonoBehaviour:
   manualDeceleration: 3
   manualAngularAcceleration: 1200
   debugSBrakePressCount: 0
+  debugAnimatorFound: 0
+  debugAnimatorTarget: 
+  debugForward: 0
+  debugStrafe: 0
+  debugTurn: 0
   isManualMode: 0
   debugJoystickRawHorizontal: 0
   debugJoystickRawVertical: 0
@@ -121,7 +126,7 @@ Rigidbody:
   m_Drag: 0
   m_AngularDrag: 0.05
   m_UseGravity: 1
-  m_IsKinematic: 0
+  m_IsKinematic: 1
   m_Interpolate: 0
   m_Constraints: 0
   m_CollisionDetection: 0
@@ -1311,7 +1316,7 @@ PrefabInstance:
         type: 3}
       propertyPath: m_Controller
       value: 
-      objectReference: {fileID: 0}
+      objectReference: {fileID: 9100000, guid: 1141c9c56b64ada4c84554f0f8433ab4, type: 2}
     - target: {fileID: 5866666021909216657, guid: c7d4fa3e6c4a4714aa56dfab889c0eb8,
         type: 3}
       propertyPath: m_ApplyRootMotion

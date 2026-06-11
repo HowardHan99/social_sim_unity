@@ -69,9 +69,12 @@ namespace SEAN.Scenario.Agents
             collisionCapsule.height = agentHeight;
             collisionCapsule.center = Vector3.up * agentHeight / 2f;
 
-            animator = GetComponentInChildren<Animator>();
-            animator.applyRootMotion = applyRootMotion;
-            animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+            animator = IVI.AvatarAnimatorUtility.GetLocomotionAnimator(gameObject);
+            if (animator != null)
+            {
+                applyRootMotion = animator.applyRootMotion;
+                animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+            }
             base.Start();
         }
 
@@ -128,6 +131,8 @@ namespace SEAN.Scenario.Agents
 
         public void StopAnimator()
         {
+            if (animator == null)
+                return;
             //animator.SetBool("Idling", true);
             animator.SetFloat("Forward", 0);
             animator.SetFloat("Strafe", 0);
@@ -193,7 +198,7 @@ namespace SEAN.Scenario.Agents
                 // $$$ FIX: can't move to 0,0,0
                 if (destPos == Vector3.zero)
                 {
-                    //print(name + " destPos is zero");
+                    UpdateLocomotionAnimator();
                     return;
                 }
                 Vector3 goalDir = nearestGoalPoint - transform.position;
@@ -225,19 +230,7 @@ namespace SEAN.Scenario.Agents
             //angle = Mathf.Sign(angle) * Mathf.Min(angularSpeed, Mathf.Abs(angle)) * Time.deltaTime;
             transform.RotateAround(transform.position, Vector3.up, angle);
 
-            // Motion
-            Vector3 animParams = Quaternion.Euler(0, -transform.eulerAngles.y, 0) * velocity;
-            animParams *= animationScale;
-            var idle = animParams.magnitude < idleSpeed && !applyRootMotion;
-
-            animator.SetBool("Idling", idle);
-            if (!GetType().Equals(typeof(PlayerAgent)))
-            {
-                animator.speed = velocity.magnitude;
-
-            }
-            animator.SetFloat("Forward", animParams.z/ANIMATION_SMOOTHING);
-            animator.SetFloat("Strafe", animParams.x/ANIMATION_SMOOTHING);
+            UpdateLocomotionAnimator();
 
             if (ShowDebug)
             {
@@ -250,6 +243,24 @@ namespace SEAN.Scenario.Agents
                 }
             }
 
+        }
+
+        private void UpdateLocomotionAnimator()
+        {
+            if (animator == null)
+                return;
+
+            Vector3 animParams = Quaternion.Euler(0, -transform.eulerAngles.y, 0) * velocity;
+            animParams *= animationScale;
+            var idle = animParams.magnitude < idleSpeed && !applyRootMotion;
+
+            animator.SetBool("Idling", idle);
+            if (!GetType().Equals(typeof(PlayerAgent)))
+            {
+                animator.speed = velocity.magnitude > 0.1f ? velocity.magnitude : 1f;
+            }
+            animator.SetFloat("Forward", animParams.z / ANIMATION_SMOOTHING);
+            animator.SetFloat("Strafe", animParams.x / ANIMATION_SMOOTHING);
         }
 
         protected override void OnDrawGizmosSelected()

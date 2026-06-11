@@ -105,10 +105,7 @@ namespace SEAN.Scenario.Agents
 
         private Animator GetAvatarAnimator(GameObject avatarInstance)
         {
-            if (avatarInstance == null)
-                return null;
-
-            return avatarInstance.GetComponent<Animator>() ?? avatarInstance.GetComponentInChildren<Animator>(true);
+            return IVI.AvatarAnimatorUtility.GetLocomotionAnimator(avatarInstance);
         }
 
         private bool TrySpawnAvatarInstance(GameObject prefab, Vector3 position, Quaternion rotation, out GameObject instance)
@@ -248,8 +245,8 @@ namespace SEAN.Scenario.Agents
             avatarObject = Instantiate(avatarPrefab, spawnPos, spawnRot);
             avatarObject.name = "PWDPlayer";
 
-            Animator animator = avatarObject.GetComponent<Animator>();
-            if (animator != null && pwdAnimationController != null)
+            Animator animator = GetAvatarAnimator(avatarObject);
+            if (animator != null && pwdAnimationController != null && animator.runtimeAnimatorController == null)
                 animator.runtimeAnimatorController = pwdAnimationController;
 
             Vector3 goalPos = spawnPos;
@@ -317,8 +314,8 @@ namespace SEAN.Scenario.Agents
             avatarObject = Instantiate(avatarPrefab, spawnPos, spawnRot);
             avatarObject.name = "PWDAutonomous";
 
-            Animator animator = avatarObject.GetComponent<Animator>();
-            if (animator != null && pwdAnimationController != null)
+            Animator animator = GetAvatarAnimator(avatarObject);
+            if (animator != null && pwdAnimationController != null && animator.runtimeAnimatorController == null)
                 animator.runtimeAnimatorController = pwdAnimationController;
 
             Vector3 goalPos = spawnPos;
