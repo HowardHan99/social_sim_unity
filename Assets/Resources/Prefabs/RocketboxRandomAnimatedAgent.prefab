@@ -90,7 +90,7 @@ MonoBehaviour:
   controller: 0
   isPlayer: 0
   isPwdPlayer: 1
-  pwdGender: 0
+  pwdCharacter: 0
   pwdAvatarPrefabMale: {fileID: 6004020823855633571, guid: f9f89412d43f4f34d8dae9bdd5aa10d8,
     type: 3}
   pwdAvatarPrefabFemale: {fileID: 4123353721614615874, guid: bba6774b950b2c843ad5d47502eaa9d4,
@@ -107,6 +107,12 @@ MonoBehaviour:
     type: 3}
   pwdAvatarPrefabCane: {fileID: 8939702436063834965, guid: dc94580c4e15b0b489ccf89cc514836d,
     type: 3}
+  pwdAvatarPrefabFemaleChild: {fileID: 4075354288779685224, guid: cc130fd2fe5556c4ab1d50c80c8f10fc,
+    type: 3}
+  pwdAvatarPrefabMaleChild: {fileID: 3407353953912973396, guid: 00e093df8cf51194e893db066973f750,
+    type: 3}
+  pwdAvatarPrefabPhoneUser: {fileID: 5487155251517902103, guid: f12f42ce7d2167745967d4b85ba59943,
+    type: 3}
   startObjectName: start
   goalObjectName: end
-  bgPwdGender: 2
+  bgPwdCharacter: 2

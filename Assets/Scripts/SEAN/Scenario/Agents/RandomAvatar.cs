@@ -4,7 +4,7 @@ using UnityEngine.SceneManagement;
 
 namespace SEAN.Scenario.Agents
 {
-    public enum PwdGender { Male, Female, Random, Scooteruser, Dogwalker, Cyclist, Walker, WhiteCane, Cane }
+    public enum PwdCharacter { MaleWheelchair, FemaleWheelchair, Random, Scooteruser, Dogwalker, Cyclist, Walker, WhiteCane, Cane, FemaleChild, MaleChild, PhoneUser }
 
     public class RandomAvatar : MonoBehaviour
     {
@@ -32,7 +32,7 @@ namespace SEAN.Scenario.Agents
 
         [Header("PWD Player")]
         public bool isPwdPlayer = false;
-        public PwdGender pwdGender = PwdGender.Male;
+        public PwdCharacter pwdCharacter = PwdCharacter.MaleWheelchair;
         public GameObject pwdAvatarPrefabMale;
         public GameObject pwdAvatarPrefabFemale;
         public GameObject pwdAvatarPrefabScooteruser;
@@ -41,6 +41,9 @@ namespace SEAN.Scenario.Agents
         public GameObject pwdAvatarPrefabWalker;
         public GameObject pwdAvatarPrefabWhiteCane;
         public GameObject pwdAvatarPrefabCane;
+        public GameObject pwdAvatarPrefabFemaleChild;
+        public GameObject pwdAvatarPrefabMaleChild;
+        public GameObject pwdAvatarPrefabPhoneUser;
 
         [Header("PWD Start / Goal")]
         [Tooltip("Scene object name for spawn point. Searches entire hierarchy by name.")]
@@ -49,7 +52,7 @@ namespace SEAN.Scenario.Agents
         public string goalObjectName = "end";
 
         [Header("Background PWD Gender")]
-        public PwdGender bgPwdGender = PwdGender.Random;
+        public PwdCharacter bgPwdCharacter = PwdCharacter.Random;
 
         private GameObject avatarPrefab;
         private GameObject avatarObject;
@@ -204,8 +207,8 @@ namespace SEAN.Scenario.Agents
             Debug.Log("ApplyOnboardingOverrides");
             if (!isPwdPlayer)
                 return;
-            pwdGender = SessionReview.SessionOnboardingSettings.SelectedPwdGender;
-            Debug.Log("pwdGender in ApplyOnboardingOverrides: " + pwdGender);
+            pwdCharacter = SessionReview.SessionOnboardingSettings.SelectedPwdCharacter;
+            Debug.Log("pwdCharacter in ApplyOnboardingOverrides: " + pwdCharacter);
             spawnAutonomousPwdFromOnboarding = false;
         }
 
@@ -218,11 +221,11 @@ namespace SEAN.Scenario.Agents
             {
                 RebuildAvatarPoolIfNeeded();
             }
-            Debug.Log("SpawnPwdPlayer: " + pwdGender);
-            avatarPrefab = ResolvePwdPrefab(pwdGender);
+            Debug.Log("SpawnPwdPlayer: " + pwdCharacter);
+            avatarPrefab = ResolvePwdPrefab(pwdCharacter);
             if (avatarPrefab == null)
             {
-                Debug.LogError("No PWD avatar prefab assigned for gender: " + pwdGender, this);
+                Debug.LogError("No PWD avatar prefab assigned for gender: " + pwdCharacter, this);
                 return;
             }
 
@@ -291,7 +294,7 @@ namespace SEAN.Scenario.Agents
                 RebuildAvatarPoolIfNeeded();
             }
 
-            avatarPrefab = ResolvePwdPrefab(bgPwdGender);
+            avatarPrefab = ResolvePwdPrefab(bgPwdCharacter);
             if (avatarPrefab == null)
             {
                 Debug.LogError("No autonomous PWD avatar prefab assigned.", this);
@@ -470,27 +473,33 @@ namespace SEAN.Scenario.Agents
             return null;
         }
 
-        private GameObject ResolvePwdPrefab(PwdGender gender)
+        private GameObject ResolvePwdPrefab(PwdCharacter gender)
         {
             switch (gender)
             {
-                case PwdGender.Male:
+                case PwdCharacter.MaleWheelchair:
                     return pwdAvatarPrefabMale != null ? pwdAvatarPrefabMale : pwdAvatarPrefab;
-                case PwdGender.Female:
+                case PwdCharacter.FemaleWheelchair:
                     return pwdAvatarPrefabFemale != null ? pwdAvatarPrefabFemale : pwdAvatarPrefab;
-                case PwdGender.Scooteruser:
+                case PwdCharacter.Scooteruser:
                     return pwdAvatarPrefabScooteruser != null ? pwdAvatarPrefabScooteruser : pwdAvatarPrefab;
-                case PwdGender.Dogwalker:
+                case PwdCharacter.Dogwalker:
                     return pwdAvatarPrefabDogwalker != null ? pwdAvatarPrefabDogwalker : pwdAvatarPrefab;
-                case PwdGender.Cyclist:
+                case PwdCharacter.Cyclist:
                     return pwdAvatarPrefabCyclist != null ? pwdAvatarPrefabCyclist : pwdAvatarPrefab;
-                case PwdGender.Walker:
+                case PwdCharacter.Walker:
                     return pwdAvatarPrefabWalker != null ? pwdAvatarPrefabWalker : pwdAvatarPrefab;
-                case PwdGender.WhiteCane:
+                case PwdCharacter.WhiteCane:
                     return pwdAvatarPrefabWhiteCane != null ? pwdAvatarPrefabWhiteCane : pwdAvatarPrefab;
-                case PwdGender.Cane:
+                case PwdCharacter.Cane:
                     return pwdAvatarPrefabCane != null ? pwdAvatarPrefabCane : pwdAvatarPrefab;
-                case PwdGender.Random:
+                case PwdCharacter.FemaleChild:
+                    return pwdAvatarPrefabFemaleChild != null ? pwdAvatarPrefabFemaleChild : pwdAvatarPrefab;
+                case PwdCharacter.MaleChild:
+                    return pwdAvatarPrefabMaleChild != null ? pwdAvatarPrefabMaleChild : pwdAvatarPrefab;
+                case PwdCharacter.PhoneUser:
+                    return pwdAvatarPrefabPhoneUser != null ? pwdAvatarPrefabPhoneUser : pwdAvatarPrefab;
+                case PwdCharacter.Random:
                     bool pickMale = Random.value > 0.5f;
                     if (pickMale)
                         return pwdAvatarPrefabMale != null ? pwdAvatarPrefabMale : pwdAvatarPrefab;
@@ -508,7 +517,7 @@ namespace SEAN.Scenario.Agents
 
             if (numPWDSFAgentsInstantiated < numPWDSFAgentsToSpawn)
             {
-                avatarPrefab = ResolvePwdPrefab(bgPwdGender);
+                avatarPrefab = ResolvePwdPrefab(bgPwdCharacter);
                 if (avatarPrefab == null)
                     avatarPrefab = pwdAvatarPrefab;
 

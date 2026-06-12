@@ -16,6 +16,7 @@ TagManager:
   - Agent
   - SimTimeClock
   - Pedestrian
+  - Hand
   - Scenarios
   - GroupMember
   - NavAgent

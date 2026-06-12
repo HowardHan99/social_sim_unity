@@ -102,6 +102,11 @@ MonoBehaviour:
   manualDeceleration: 3
   manualAngularAcceleration: 1200
   debugSBrakePressCount: 0
+  debugAnimatorFound: 0
+  debugAnimatorTarget: 
+  debugForward: 0
+  debugStrafe: 0
+  debugTurn: 0
   isManualMode: 0
   debugJoystickRawHorizontal: 0
   debugJoystickRawVertical: 0
