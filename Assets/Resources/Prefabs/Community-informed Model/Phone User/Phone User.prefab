@@ -77,7 +77,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 82986ae7dfa33654295162cffcb1b085, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  moveSpeed: 1.5
+  moveSpeed: 1
   rotationSpeed: 180
   toggleModeKey: 303
   useWASD: 1
@@ -169,21 +169,21 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 8b5c3d0e2f4a4156b9c0d1e2f3a4b5c6, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  spineFrontBack: 0.83
-  chestFrontBack: 0.916
-  upperChestFrontBack: 0.9
-  neckNodDown: 0.942
-  headNodDown: 0.907
+  spineFrontBack: 1
+  chestFrontBack: 1
+  upperChestFrontBack: 1
+  neckNodDown: 1
+  headNodDown: 1
   leftArmFrontBack: 1
   leftArmDownUp: 1
+  leftArmInOut: 1
   leftForearmStretch: 1
   rightArmFrontBack: 1
-  rightArmDownUp: 0.761
-  rightForearmStretch: 0.968
+  rightArmDownUp: -1
+  rightArmInOut: -1
+  rightForearmStretch: 1
   poseWeight: 1
-  debugHandlerReady: 0
-  debugAnimatorTarget: 
-  debugMusclesApplied: 0
+  poseStrength: 5
 --- !u!1001 &569030731337167928
 PrefabInstance:
   m_ObjectHideFlags: 0

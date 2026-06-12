@@ -5,28 +5,31 @@ namespace IVI
     /// <summary>
     /// Adds a phone-looking pose on top of locomotion animation via HumanPose muscles.
     /// Works with Optimize Game Objects on Rocketbox Bip01 humanoid rigs.
-    /// Tune muscle offsets in Play mode on the Phone User prefab instance.
+    /// Tune muscle targets in Play mode on the Phone User prefab instance.
     /// </summary>
     [DefaultExecutionOrder(10000)]
     public class PhoneUserPose : MonoBehaviour
     {
-        [Header("Look down (muscle delta, roughly -1..1)")]
-        [Range(-1f, 1f)] public float spineFrontBack = 0.18f;
-        [Range(-1f, 1f)] public float chestFrontBack = 0.22f;
-        [Range(-1f, 1f)] public float upperChestFrontBack = 0.25f;
-        [Range(-1f, 1f)] public float neckNodDown = 0.35f;
-        [Range(-1f, 1f)] public float headNodDown = 0.55f;
+        [Header("Look down (muscle target, roughly -1..1)")]
+        [Range(-1f, 1f)] public float spineFrontBack = 1f;
+        [Range(-1f, 1f)] public float chestFrontBack = 1f;
+        [Range(-1f, 1f)] public float upperChestFrontBack = 1f;
+        [Range(-1f, 1f)] public float neckNodDown = 1f;
+        [Range(-1f, 1f)] public float headNodDown = 1f;
 
-        [Header("Arms inward / phone hold (muscle delta)")]
-        [Range(-1f, 1f)] public float leftArmFrontBack = -0.15f;
-        [Range(-1f, 1f)] public float leftArmDownUp = -0.1f;
-        [Range(-1f, 1f)] public float leftForearmStretch = 0.25f;
-        [Range(-1f, 1f)] public float rightArmFrontBack = 0.35f;
-        [Range(-1f, 1f)] public float rightArmDownUp = -0.25f;
-        [Range(-1f, 1f)] public float rightForearmStretch = 0.45f;
+        [Header("Arms inward / phone hold (muscle target)")]
+        [Range(-1f, 1f)] public float leftArmFrontBack = 1f;
+        [Range(-1f, 1f)] public float leftArmDownUp = 1f;
+        [Range(-1f, 1f)] public float leftArmInOut = 1f;
+        [Range(-1f, 1f)] public float leftForearmStretch = 1f;
+        [Range(-1f, 1f)] public float rightArmFrontBack = 1f;
+        [Range(-1f, 1f)] public float rightArmDownUp = -1f;
+        [Range(-1f, 1f)] public float rightArmInOut = -1f;
+        [Range(-1f, 1f)] public float rightForearmStretch = 1f;
 
         [Header("Optional")]
         [Range(0f, 1f)] public float poseWeight = 1f;
+        [Min(1f)] public float poseStrength = 5f;
 
         Animator animator;
         HumanPoseHandler poseHandler;
@@ -46,7 +49,6 @@ namespace IVI
         {
             poseHandler?.Dispose();
             poseHandler = null;
-            debugHandlerReady = false;
         }
 
         void LateUpdate()
@@ -68,38 +70,37 @@ namespace IVI
 
             poseHandler.GetHumanPose(ref humanPose);
 
-            int applied = 0;
-            applied += ApplyMuscle(HumanBodyBones.Spine, 0, spineFrontBack);
-            applied += ApplyMuscle(HumanBodyBones.Chest, 0, chestFrontBack);
-            applied += ApplyMuscle(HumanBodyBones.UpperChest, 0, upperChestFrontBack);
-            applied += ApplyMuscle(HumanBodyBones.Neck, 0, neckNodDown);
-            applied += ApplyMuscle(HumanBodyBones.Head, 0, headNodDown);
+            BlendMuscle(HumanBodyBones.Spine, 0, spineFrontBack);
+            BlendMuscle(HumanBodyBones.Chest, 0, chestFrontBack);
+            BlendMuscle(HumanBodyBones.UpperChest, 0, upperChestFrontBack);
+            BlendMuscle(HumanBodyBones.Neck, 0, neckNodDown);
+            BlendMuscle(HumanBodyBones.Head, 0, headNodDown);
 
-            applied += ApplyMuscle(HumanBodyBones.LeftUpperArm, 1, leftArmFrontBack);
-            applied += ApplyMuscle(HumanBodyBones.LeftUpperArm, 0, leftArmDownUp);
-            applied += ApplyMuscle(HumanBodyBones.LeftLowerArm, 0, leftForearmStretch);
-            applied += ApplyMuscle(HumanBodyBones.RightUpperArm, 1, rightArmFrontBack);
-            applied += ApplyMuscle(HumanBodyBones.RightUpperArm, 0, rightArmDownUp);
-            applied += ApplyMuscle(HumanBodyBones.RightLowerArm, 0, rightForearmStretch);
+            BlendMuscle(HumanBodyBones.LeftUpperArm, 1, leftArmFrontBack);
+            BlendMuscle(HumanBodyBones.LeftUpperArm, 0, leftArmDownUp);
+            BlendMuscle(HumanBodyBones.LeftUpperArm, 2, leftArmInOut);
+            BlendMuscle(HumanBodyBones.LeftLowerArm, 0, leftForearmStretch);
+            BlendMuscle(HumanBodyBones.RightUpperArm, 1, rightArmFrontBack);
+            BlendMuscle(HumanBodyBones.RightUpperArm, 0, rightArmDownUp);
+            BlendMuscle(HumanBodyBones.RightUpperArm, 2, rightArmInOut);
+            BlendMuscle(HumanBodyBones.RightLowerArm, 0, rightForearmStretch);
 
-            debugMusclesApplied = applied;
             poseHandler.SetHumanPose(ref humanPose);
         }
 
-        int ApplyMuscle(HumanBodyBones bone, int dof, float delta)
+        void BlendMuscle(HumanBodyBones bone, int dof, float target)
         {
-            if (Mathf.Approximately(delta, 0f) || poseWeight <= 0f)
-                return 0;
+            if (Mathf.Approximately(target, 0f) || poseWeight <= 0f)
+                return;
 
             int muscleIndex = HumanTrait.MuscleFromBone((int)bone, dof);
             if (muscleIndex < 0 || muscleIndex >= humanPose.muscles.Length)
-                return 0;
+                return;
 
-            humanPose.muscles[muscleIndex] = Mathf.Clamp(
-                humanPose.muscles[muscleIndex] + delta * poseWeight,
-                -1f,
-                1f);
-            return 1;
+            target = Mathf.Clamp(target, -1f, 1f);
+            float current = humanPose.muscles[muscleIndex];
+            float delta = (target - current) * poseWeight * poseStrength;
+            humanPose.muscles[muscleIndex] = Mathf.Clamp(current + delta, -1f, 1f);
         }
 
         void TryCreateHandler()
@@ -107,27 +108,18 @@ namespace IVI
             if (animator == null)
                 animator = AvatarAnimatorUtility.GetLocomotionAnimator(gameObject);
 
-            debugAnimatorTarget = animator != null ? animator.gameObject.name : "(none)";
-
             if (animator == null)
-            {
-                debugHandlerReady = false;
                 return;
-            }
 
             if (!animator.isInitialized && animator.runtimeAnimatorController != null)
                 animator.Rebind();
 
             Avatar avatar = animator.avatar;
             if (avatar == null || !avatar.isValid || !avatar.isHuman)
-            {
-                debugHandlerReady = false;
                 return;
-            }
 
             poseHandler?.Dispose();
             poseHandler = new HumanPoseHandler(avatar, animator.transform);
-            debugHandlerReady = poseHandler != null;
         }
     }
 }
