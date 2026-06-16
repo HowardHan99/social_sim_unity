@@ -2338,7 +2338,7 @@ namespace SessionReview
 
             if (selectedPwdStartupControl == StartupControlMode.Manual)
             {
-                GUI.Label(new Rect(x, y, width, 30f), "PWD Player Gender", onboardingSectionStyle);
+                GUI.Label(new Rect(x, y, width, 30f), "Wheelchair User", onboardingSectionStyle);
                 y += 42f;
 
                 DrawGenderPreviewCard(new Rect(x, y, 220f, 196f), "Male", maleWheelchairPreview,
@@ -2359,7 +2359,7 @@ namespace SessionReview
                 }
                 y += 266f;
 
-                GUI.Label(new Rect(x, y, width, 30f), "Other Community-Informed Characters", onboardingSectionStyle);
+                GUI.Label(new Rect(x, y, width, 30f), "Community-Informed Characters", onboardingSectionStyle);
                 y += 42f;
 
                 // DrawPreviewCard(new Rect(x, y, 188f, 150f), "Dogwalker", dogwalkerPreview,

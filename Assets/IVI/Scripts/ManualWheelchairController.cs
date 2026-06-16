@@ -76,6 +76,8 @@ namespace IVI
         private float lastSBrakePressRealtime = -1f;
         private float currentManualLinearSpeed;
         private float currentManualAngularSpeed;
+        private bool manualForwardInputHeld;
+        private bool manualReverseInputHeld;
 
         void Start()
         {
@@ -179,7 +181,7 @@ namespace IVI
 
         void HandleInput()
         {
-            float manualDesiredLin = currentManualLinearSpeed;
+            float manualDesiredLin = 0f;
             float manualDesiredAng = 0f;
 
             if (JoystickPresent)
@@ -276,6 +278,19 @@ namespace IVI
                 lastSBrakePressRealtime = -1f;
             }
 
+            bool joystickForward = JoystickPresent &&
+                debugJoystickProcessedVertical > EffectiveJoystickDeadzone();
+            bool joystickReverse = JoystickPresent &&
+                debugJoystickProcessedVertical < -EffectiveJoystickDeadzone();
+            manualForwardInputHeld = wHeld || joystickForward;
+            manualReverseInputHeld = manualDesiredLin < -brakeStopThreshold || joystickReverse;
+
+            if (!manualForwardInputHeld && !manualReverseInputHeld)
+            {
+                manualDesiredLin = 0f;
+                currentManualLinearSpeed = 0f;
+            }
+
             float linearStep = Mathf.Abs(manualDesiredLin) > Mathf.Abs(currentManualLinearSpeed)
                 ? manualAcceleration
                 : manualDeceleration;
@@ -310,10 +325,39 @@ namespace IVI
                 ? Mathf.Clamp(currentManualAngularSpeed / rotationSpeed, -1f, 1f)
                 : 0f;
 
-            animator.SetBool("Idling", speed < 0.1f);
-            animator.SetFloat("Forward", forward);
-            animator.SetFloat("Strafe", strafe);
-            animator.SetFloat("Turn", turn);
+            if (isManualMode)
+            {
+                if (!manualForwardInputHeld && !manualReverseInputHeld)
+                {
+                    forward = 0f;
+                    strafe = 0f;
+                }
+                else if (manualForwardInputHeld)
+                {
+                    forward = moveSpeed / animSmoothing;
+                }
+                else if (manualReverseInputHeld)
+                {
+                    forward = -moveSpeed / animSmoothing;
+                }
+            }
+
+            bool shouldIdle = isManualMode
+                ? !manualForwardInputHeld && !manualReverseInputHeld
+                : speed < 0.1f;
+
+            if (shouldIdle)
+            {
+                animator.SetFloat("Forward", 0f);
+                animator.SetFloat("Strafe", 0f);
+                animator.SetFloat("Turn", 0f);
+            }
+            else
+            {
+                animator.SetFloat("Forward", forward);
+                animator.SetFloat("Strafe", strafe);
+                animator.SetFloat("Turn", turn);
+            }
             animator.speed = speed > 0.1f ? speed : 1f;
 
             debugForward = forward;

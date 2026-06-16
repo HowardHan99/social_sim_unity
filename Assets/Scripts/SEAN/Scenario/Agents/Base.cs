@@ -250,17 +250,29 @@ namespace SEAN.Scenario.Agents
             if (animator == null)
                 return;
 
+            if (GetComponent<IVI.ManualWheelchairController>() is { enabled: true })
+                return;
+
             Vector3 animParams = Quaternion.Euler(0, -transform.eulerAngles.y, 0) * velocity;
             animParams *= animationScale;
-            var idle = animParams.magnitude < idleSpeed && !applyRootMotion;
+            var idle = velocity.magnitude < 0.1f;
 
             animator.SetBool("Idling", idle);
             if (!GetType().Equals(typeof(PlayerAgent)))
             {
                 animator.speed = velocity.magnitude > 0.1f ? velocity.magnitude : 1f;
             }
-            animator.SetFloat("Forward", animParams.z / ANIMATION_SMOOTHING);
-            animator.SetFloat("Strafe", animParams.x / ANIMATION_SMOOTHING);
+
+            if (idle)
+            {
+                animator.SetFloat("Forward", 0f);
+                animator.SetFloat("Strafe", 0f);
+            }
+            else
+            {
+                animator.SetFloat("Forward", animParams.z / ANIMATION_SMOOTHING);
+                animator.SetFloat("Strafe", animParams.x / ANIMATION_SMOOTHING);
+            }
         }
 
         protected override void OnDrawGizmosSelected()

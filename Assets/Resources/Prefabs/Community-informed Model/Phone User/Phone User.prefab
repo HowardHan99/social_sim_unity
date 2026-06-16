@@ -11,10 +11,10 @@ GameObject:
   - component: {fileID: 551154398347472472}
   - component: {fileID: 8862789908726947595}
   - component: {fileID: 1723106831847699698}
-  - component: {fileID: 3156656076057022880}
   - component: {fileID: 8532619045204469036}
   - component: {fileID: 8123456789012345678}
-  - component: {fileID: 9223372036854775807}
+  - component: {fileID: 959083787148873769}
+  - component: {fileID: 7123456789012345679}
   m_Layer: 0
   m_Name: Phone User
   m_TagString: Untagged
@@ -65,57 +65,6 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   objectId: 
---- !u!114 &3156656076057022880
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 5487155251517902103}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 82986ae7dfa33654295162cffcb1b085, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  moveSpeed: 1
-  rotationSpeed: 180
-  toggleModeKey: 303
-  useWASD: 1
-  startInManualMode: 0
-  enableJoystick: 1
-  joystickHorizontalAxis: LogitechTwist
-  joystickVerticalAxis: joystickVerticalAxis
-  joystickStartAxis: L1
-  joystickToggleModeAxis: 
-  joystickDeadzone: 0.03
-  joystickStartupDeadzone: 0.03
-  joystickLinearFullThrow: 0.1
-  joystickAngularFullThrow: 1
-  joystickLinearSensitivity: 1
-  joystickAngularSensitivity: 1
-  joystickLinearResponseExponent: 1.6
-  joystickAngularResponseExponent: 1.2
-  invertJoystickHorizontal: 0
-  invertJoystickVertical: 1
-  brakeStopThreshold: 0.02
-  sPressesToEnableReverse: 2
-  sPressWindowSec: 0.6
-  manualAcceleration: 4
-  manualDeceleration: 3
-  manualAngularAcceleration: 1200
-  debugSBrakePressCount: 0
-  debugAnimatorFound: 0
-  debugAnimatorTarget: 
-  debugForward: 0
-  debugStrafe: 0
-  debugTurn: 0
-  isManualMode: 0
-  debugJoystickRawHorizontal: 0
-  debugJoystickRawVertical: 0
-  debugJoystickHorizontalCenter: 0
-  debugJoystickVerticalCenter: 0
-  debugJoystickProcessedHorizontal: 0
-  debugJoystickProcessedVertical: 0
 --- !u!54 &8532619045204469036
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -157,7 +106,7 @@ MonoBehaviour:
   debugHandWorldPosition: {x: 0, y: 0, z: 0}
   debugPropWorldPositionBefore: {x: 0, y: 0, z: 0}
   debugPropWorldPositionAfter: {x: 0, y: 0, z: 0}
---- !u!114 &9223372036854775807
+--- !u!114 &959083787148873769
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -166,24 +115,74 @@ MonoBehaviour:
   m_GameObject: {fileID: 5487155251517902103}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 8b5c3d0e2f4a4156b9c0d1e2f3a4b5c6, type: 3}
+  m_Script: {fileID: 11500000, guid: 82986ae7dfa33654295162cffcb1b085, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  spineFrontBack: 1
-  chestFrontBack: 1
-  upperChestFrontBack: 1
-  neckNodDown: 1
-  headNodDown: 1
-  leftArmFrontBack: 1
-  leftArmDownUp: 1
-  leftArmInOut: 1
-  leftForearmStretch: 1
-  rightArmFrontBack: 1
-  rightArmDownUp: -1
-  rightArmInOut: -1
-  rightForearmStretch: 1
+  moveSpeed: 1.5
+  rotationSpeed: 180
+  toggleModeKey: 303
+  useWASD: 1
+  startInManualMode: 0
+  enableJoystick: 1
+  joystickHorizontalAxis: LogitechTwist
+  joystickVerticalAxis: joystickVerticalAxis
+  joystickStartAxis: L1
+  joystickToggleModeAxis: 
+  joystickDeadzone: 0.03
+  joystickStartupDeadzone: 0.03
+  joystickLinearFullThrow: 0.1
+  joystickAngularFullThrow: 1
+  joystickLinearSensitivity: 1
+  joystickAngularSensitivity: 1
+  joystickLinearResponseExponent: 1.6
+  joystickAngularResponseExponent: 1.2
+  invertJoystickHorizontal: 0
+  invertJoystickVertical: 1
+  brakeStopThreshold: 0.02
+  sPressesToEnableReverse: 2
+  sPressWindowSec: 0.6
+  manualAcceleration: 4
+  manualDeceleration: 3
+  manualAngularAcceleration: 1200
+  debugSBrakePressCount: 0
+  debugAnimatorFound: 0
+  debugAnimatorTarget: 
+  debugForward: 0
+  debugStrafe: 0
+  debugTurn: 0
+  isManualMode: 0
+  debugJoystickRawHorizontal: 0
+  debugJoystickRawVertical: 0
+  debugJoystickHorizontalCenter: 0
+  debugJoystickVerticalCenter: 0
+  debugJoystickProcessedHorizontal: 0
+  debugJoystickProcessedVertical: 0
+--- !u!114 &7123456789012345679
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5487155251517902103}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f3a8b2c1d4e5f60718293a4b5c6d7e8f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  armInward: 23.8
+  rightArmForward: 30
+  leftArmForward: 30
+  rightElbowBend: 56.6
+  leftElbowBend: 91.6
+  spineEuler: {x: -20, y: 0, z: 0}
+  chestEuler: {x: -12, y: 0, z: 0}
+  neckEuler: {x: 10, y: 0, z: 0}
   poseWeight: 1
-  poseStrength: 5
+  bonesReady: 0
+  debugAnimatorTarget: 
+  debugBonesAppliedLastFrame: 0
+  debugRightUpperArmFound: 0
+  debugLeftUpperArmFound: 0
 --- !u!1001 &569030731337167928
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -294,7 +293,7 @@ PrefabInstance:
     - target: {fileID: -8679921383154817045, guid: d31bdf2d2f631dc4e85fde015afc17dc,
         type: 3}
       propertyPath: m_LocalPosition.y
-      value: 0
+      value: -0.024
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: d31bdf2d2f631dc4e85fde015afc17dc,
         type: 3}
@@ -336,90 +335,10 @@ PrefabInstance:
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
       objectReference: {fileID: 0}
-    - target: {fileID: -7030842900008749454, guid: d31bdf2d2f631dc4e85fde015afc17dc,
-        type: 3}
-      propertyPath: m_LocalPosition.x
-      value: -0.12408265
-      objectReference: {fileID: 0}
-    - target: {fileID: -7030842900008749454, guid: d31bdf2d2f631dc4e85fde015afc17dc,
-        type: 3}
-      propertyPath: m_LocalPosition.y
-      value: -0.000097481694
-      objectReference: {fileID: 0}
-    - target: {fileID: -7030842900008749454, guid: d31bdf2d2f631dc4e85fde015afc17dc,
-        type: 3}
-      propertyPath: m_LocalPosition.z
-      value: -0.0000007624295
-      objectReference: {fileID: 0}
-    - target: {fileID: -7030842900008749454, guid: d31bdf2d2f631dc4e85fde015afc17dc,
-        type: 3}
-      propertyPath: m_LocalRotation.w
-      value: 0.9944061
-      objectReference: {fileID: 0}
-    - target: {fileID: -7030842900008749454, guid: d31bdf2d2f631dc4e85fde015afc17dc,
-        type: 3}
-      propertyPath: m_LocalRotation.x
-      value: 0.00000007585003
-      objectReference: {fileID: 0}
-    - target: {fileID: -7030842900008749454, guid: d31bdf2d2f631dc4e85fde015afc17dc,
-        type: 3}
-      propertyPath: m_LocalRotation.y
-      value: -0.000000106260345
-      objectReference: {fileID: 0}
-    - target: {fileID: -7030842900008749454, guid: d31bdf2d2f631dc4e85fde015afc17dc,
-        type: 3}
-      propertyPath: m_LocalRotation.z
-      value: -0.10562503
-      objectReference: {fileID: 0}
-    - target: {fileID: -7030842900008749454, guid: d31bdf2d2f631dc4e85fde015afc17dc,
-        type: 3}
-      propertyPath: m_LocalEulerAnglesHint.z
-      value: -12.126
-      objectReference: {fileID: 0}
     - target: {fileID: 919132149155446097, guid: d31bdf2d2f631dc4e85fde015afc17dc,
         type: 3}
       propertyPath: m_Name
       value: Female_Adult_05 1
-      objectReference: {fileID: 0}
-    - target: {fileID: 1686076462441692164, guid: d31bdf2d2f631dc4e85fde015afc17dc,
-        type: 3}
-      propertyPath: m_LocalPosition.x
-      value: -0.17153752
-      objectReference: {fileID: 0}
-    - target: {fileID: 1686076462441692164, guid: d31bdf2d2f631dc4e85fde015afc17dc,
-        type: 3}
-      propertyPath: m_LocalPosition.y
-      value: -0.02709005
-      objectReference: {fileID: 0}
-    - target: {fileID: 1686076462441692164, guid: d31bdf2d2f631dc4e85fde015afc17dc,
-        type: 3}
-      propertyPath: m_LocalPosition.z
-      value: 0.0000019860613
-      objectReference: {fileID: 0}
-    - target: {fileID: 1686076462441692164, guid: d31bdf2d2f631dc4e85fde015afc17dc,
-        type: 3}
-      propertyPath: m_LocalRotation.w
-      value: 0.94697386
-      objectReference: {fileID: 0}
-    - target: {fileID: 1686076462441692164, guid: d31bdf2d2f631dc4e85fde015afc17dc,
-        type: 3}
-      propertyPath: m_LocalRotation.x
-      value: 0.00000022688525
-      objectReference: {fileID: 0}
-    - target: {fileID: 1686076462441692164, guid: d31bdf2d2f631dc4e85fde015afc17dc,
-        type: 3}
-      propertyPath: m_LocalRotation.y
-      value: 0.0000005641481
-      objectReference: {fileID: 0}
-    - target: {fileID: 1686076462441692164, guid: d31bdf2d2f631dc4e85fde015afc17dc,
-        type: 3}
-      propertyPath: m_LocalRotation.z
-      value: -0.32131058
-      objectReference: {fileID: 0}
-    - target: {fileID: 1686076462441692164, guid: d31bdf2d2f631dc4e85fde015afc17dc,
-        type: 3}
-      propertyPath: m_LocalEulerAnglesHint.z
-      value: -37.484
       objectReference: {fileID: 0}
     - target: {fileID: 5189307308235825282, guid: d31bdf2d2f631dc4e85fde015afc17dc,
         type: 3}
@@ -430,7 +349,12 @@ PrefabInstance:
         type: 3}
       propertyPath: m_Controller
       value: 
-      objectReference: {fileID: 9100000, guid: 92db63c5cfc544658ae9c245c758169e, type: 2}
+      objectReference: {fileID: 9100000, guid: 8fca86a10026c274cbd7ad674ed8202d, type: 2}
+    - target: {fileID: 5866666021909216657, guid: d31bdf2d2f631dc4e85fde015afc17dc,
+        type: 3}
+      propertyPath: m_CullingMode
+      value: 2
+      objectReference: {fileID: 0}
     m_RemovedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: d31bdf2d2f631dc4e85fde015afc17dc, type: 3}
 --- !u!4 &2587444890316383642 stripped

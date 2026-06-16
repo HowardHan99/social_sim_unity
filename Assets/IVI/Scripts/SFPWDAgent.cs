@@ -28,6 +28,8 @@ namespace IVI
         public bool useWaypoints = false;
         public Vector3 waypointStart;
         public Vector3 waypointGoal;
+        [Tooltip("Seconds to hold idle at each waypoint before turning around.")]
+        public float waypointPauseSeconds = 1f;
         private bool headingToGoal = true;
 
         [Header("Robot Blocking Stop")]
@@ -110,6 +112,10 @@ namespace IVI
             {
                 if (CloseEnough())
                 {
+                    StopAnimator();
+                    if (waypointPauseSeconds > 0f)
+                        yield return new WaitForSeconds(waypointPauseSeconds);
+
                     headingToGoal = !headingToGoal;
                     Vector3 next = headingToGoal ? waypointGoal : waypointStart;
                     InitDest(next);
@@ -144,6 +150,9 @@ namespace IVI
         protected override Vector3 UpdateVelocity()
         {
             if (ShouldStopForRobotBlock())
+                return Vector3.zero;
+
+            if (useWaypoints && CloseEnough())
                 return Vector3.zero;
 
             SEAN.Scenario.Agents.SocialForce totalForce = ComputeForce();
