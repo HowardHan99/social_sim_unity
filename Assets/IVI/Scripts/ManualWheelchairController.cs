@@ -47,6 +47,7 @@ namespace IVI
         public float debugForward;
         public float debugStrafe;
         public float debugTurn;
+        public bool debugIsBiking;
 
         [Header("Status (read-only)")]
         public bool isManualMode = false;
@@ -78,6 +79,7 @@ namespace IVI
         private float currentManualAngularSpeed;
         private bool manualForwardInputHeld;
         private bool manualReverseInputHeld;
+        private bool useIsBikingAnimator;
 
         void Start()
         {
@@ -101,6 +103,7 @@ namespace IVI
             {
                 animator.applyRootMotion = false;
                 animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+                useIsBikingAnimator = HasAnimatorParameter("IsBiking");
             }
 
             if (rb != null)
@@ -346,6 +349,18 @@ namespace IVI
                 ? !manualForwardInputHeld && !manualReverseInputHeld
                 : speed < 0.1f;
 
+            if (useIsBikingAnimator)
+            {
+                bool isBiking = !shouldIdle;
+                animator.SetBool("IsBiking", isBiking);
+                animator.speed = isBiking ? Mathf.Max(speed / Mathf.Max(moveSpeed, 0.01f), 0.5f) : 1f;
+                debugIsBiking = isBiking;
+                debugForward = 0f;
+                debugStrafe = 0f;
+                debugTurn = 0f;
+                return;
+            }
+
             if (shouldIdle)
             {
                 animator.SetFloat("Forward", 0f);
@@ -358,11 +373,7 @@ namespace IVI
                 animator.SetFloat("Strafe", strafe);
                 animator.SetFloat("Turn", turn);
             }
-            var poseAdjust = GetComponent<CyclistPoseAdjust>();
-            if (poseAdjust != null)
-                animator.speed = poseAdjust.animationSpeed;
-            else
-                animator.speed = speed > 0.1f ? speed : 1f;
+            animator.speed = speed > 0.1f ? speed : 1f;
 
             debugForward = forward;
             debugStrafe = strafe;
@@ -597,6 +608,20 @@ namespace IVI
             }
 
             return isPressed;
+        }
+
+        bool HasAnimatorParameter(string parameterName)
+        {
+            if (animator == null)
+                return false;
+
+            foreach (AnimatorControllerParameter parameter in animator.parameters)
+            {
+                if (parameter.name == parameterName)
+                    return true;
+            }
+
+            return false;
         }
     }
 }
