@@ -233,14 +233,21 @@ namespace SEAN.Scenario.Agents
             GameObject goalObj = FindByName(goalObjectName);
 
             Vector3 rawPos = startObj != null ? startObj.transform.position : transform.position;
+            float yAngle = startObj != null ? startObj.transform.eulerAngles.y : transform.eulerAngles.y;
+            Quaternion spawnRot = Quaternion.Euler(0f, yAngle, 0f);
+
             UnityEngine.AI.NavMeshHit navHit;
             Vector3 spawnPos = rawPos;
             if (UnityEngine.AI.NavMesh.SamplePosition(rawPos, out navHit, 5f, UnityEngine.AI.NavMesh.AllAreas)
                 && Mathf.Abs(navHit.position.y - rawPos.y) < 1.5f)
                 spawnPos = navHit.position;
 
-            float yAngle = startObj != null ? startObj.transform.eulerAngles.y : transform.eulerAngles.y;
-            Quaternion spawnRot = Quaternion.Euler(0f, yAngle, 0f);
+            if (pwdCharacter == PwdCharacter.Cyclist)
+            {
+                Quaternion startFacing = Quaternion.Euler(0f, yAngle, 0f);
+                spawnPos += startFacing * Vector3.left * 10f;
+                spawnRot = Quaternion.Euler(0f, yAngle + 40f, 0f);
+            }
 
             // Instantiate as a ROOT object (no parent). This avoids all parent-child
             // Rigidbody issues. Background agents are parented because NavManager needs
@@ -249,7 +256,10 @@ namespace SEAN.Scenario.Agents
             avatarObject.name = "PWDPlayer";
 
             Animator animator = GetAvatarAnimator(avatarObject);
-            if (animator != null && pwdAnimationController != null && animator.runtimeAnimatorController == null)
+            if (animator != null
+                && pwdAnimationController != null
+                && PwdCharacterUtility.UsesWheelchairPlayerAnimation(pwdCharacter)
+                && animator.runtimeAnimatorController == null)
                 animator.runtimeAnimatorController = pwdAnimationController;
 
             Vector3 goalPos = spawnPos;
@@ -318,7 +328,10 @@ namespace SEAN.Scenario.Agents
             avatarObject.name = "PWDAutonomous";
 
             Animator animator = GetAvatarAnimator(avatarObject);
-            if (animator != null && pwdAnimationController != null && animator.runtimeAnimatorController == null)
+            if (animator != null
+                && pwdAnimationController != null
+                && PwdCharacterUtility.UsesWheelchairPlayerAnimation(pwdCharacter)
+                && animator.runtimeAnimatorController == null)
                 animator.runtimeAnimatorController = pwdAnimationController;
 
             Vector3 goalPos = spawnPos;
@@ -562,11 +575,13 @@ namespace SEAN.Scenario.Agents
                 {
                     Debug.LogWarning($"[RandomAvatar] No Animator found on spawned avatar '{avatarPrefab.name}' for '{name}'.", this);
                 }
-                else if (assignedController == LowLevelControl.PWDSF && pwdAnimationController != null)
+                else if (assignedController == LowLevelControl.PWDSF
+                    && pwdAnimationController != null
+                    && PwdCharacterUtility.UsesWheelchairPlayerAnimation(bgPwdCharacter))
                 {
                     animator.runtimeAnimatorController = pwdAnimationController;
                 }
-                else
+                else if (assignedController != LowLevelControl.PWDSF)
                 {
                     animator.runtimeAnimatorController = animationController;
                 }

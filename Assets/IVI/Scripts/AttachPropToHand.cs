@@ -4,10 +4,11 @@ using UnityEngine;
 namespace IVI
 {
     /// <summary>
-    /// Parents a prop to the animated hand and snaps it to the hand's world pose.
-    /// Resolves the hand via Animator.GetBoneTransform first, then a child tagged Hand.
+    /// Keeps a prop glued to an animated hand bone.
+    /// Uses world-space follow by default because parenting to GetBoneTransform bones
+    /// is unreliable when Optimize Game Objects is enabled on the model.
     /// </summary>
-    [DefaultExecutionOrder(1000)]
+    [DefaultExecutionOrder(10001)]
     public class AttachPropToHand : MonoBehaviour
     {
         public Transform prop;
@@ -17,10 +18,13 @@ namespace IVI
         [Tooltip("Optional: if nothing is tagged Hand yet, tag the first child with this name.")]
         public string autoTagBoneName = "Bip01 R Hand";
 
-        [Header("Local pose on the hand (applied after snapping to hand world pose)")]
-        public Vector3 localPosition = new Vector3(0.08f, 0.02f, 0.04f);
-        public Vector3 localEulerAngles = new Vector3(-75f, 15f, 95f);
+        [Header("Local pose relative to the hand bone")]
+        public Vector3 localPosition = new Vector3(0.006f, 0.002f, 0.004f);
+        public Vector3 localEulerAngles = new Vector3(-68f, 8f, 88f);
         public Vector3 localScale = new Vector3(4f, 4f, 4f);
+
+        [Tooltip("World-space follow each frame. Recommended when the avatar uses Optimize Game Objects.")]
+        public bool useWorldSpaceFollow = true;
 
         [Tooltip("When enabled, keeps the prop's current world pose instead of snapping to the hand.")]
         public bool preserveWorldPoseOnAttach = false;
@@ -28,89 +32,101 @@ namespace IVI
         [Header("Debug (read-only)")]
         public bool debugAttached;
         public string debugHandTarget;
+        public float debugDistanceToHand;
         public Vector3 debugHandWorldPosition;
-        public Vector3 debugPropWorldPositionBefore;
-        public Vector3 debugPropWorldPositionAfter;
+        public Vector3 debugPropWorldPosition;
 
+        Animator animator;
+        Transform followRoot;
         bool attached;
 
         void Start()
         {
+            followRoot = transform;
             StartCoroutine(AttachWhenReady());
         }
 
         IEnumerator AttachWhenReady()
         {
-            // Wait until the humanoid avatar/bones are initialized.
-            for (int i = 0; i < 30 && !attached; i++)
+            for (int i = 0; i < 90 && !attached; i++)
             {
-                if (Attach())
+                if (TryBindAnimator())
+                {
+                    attached = true;
                     yield break;
+                }
 
                 yield return null;
             }
 
             yield return new WaitForEndOfFrame();
-
-            if (!attached)
-                Attach();
+            attached = TryBindAnimator();
 
             if (!attached)
             {
                 Debug.LogWarning(
-                    $"[AttachPropToHand] Could not attach prop on '{name}'. " +
+                    $"[AttachPropToHand] Could not find hand on '{name}'. " +
                     $"No animated {handBone} bone and no child tagged '{handTag}'.",
                     this);
             }
         }
 
-        public bool Attach()
+        void LateUpdate()
         {
-            if (attached)
-                return true;
+            if (!attached || preserveWorldPoseOnAttach || prop == null)
+                return;
 
+            Transform hand = ResolveHandTransform();
+            if (hand == null)
+                return;
+
+            debugHandTarget = hand.name;
+            debugHandWorldPosition = hand.position;
+
+            if (useWorldSpaceFollow)
+            {
+                if (prop.parent != followRoot)
+                    prop.SetParent(followRoot, true);
+
+                prop.SetPositionAndRotation(
+                    hand.TransformPoint(localPosition),
+                    hand.rotation * Quaternion.Euler(localEulerAngles));
+                prop.localScale = localScale;
+            }
+            else
+            {
+                if (prop.parent != hand)
+                    prop.SetParent(hand, false);
+
+                prop.localPosition = localPosition;
+                prop.localRotation = Quaternion.Euler(localEulerAngles);
+                prop.localScale = localScale;
+            }
+
+            debugPropWorldPosition = prop.position;
+            debugDistanceToHand = Vector3.Distance(prop.position, hand.position);
+            debugAttached = true;
+        }
+
+        bool TryBindAnimator()
+        {
             if (prop == null)
             {
                 Debug.LogWarning("[AttachPropToHand] Prop is not assigned.", this);
                 return false;
             }
 
-            Transform hand = ResolveHandTransform();
-            if (hand == null)
-                return false;
+            animator = AvatarAnimatorUtility.GetLocomotionAnimator(gameObject);
+            if (animator != null && !animator.isInitialized && animator.runtimeAnimatorController != null)
+                animator.Rebind();
 
-            debugHandTarget = hand.name;
-            debugHandWorldPosition = hand.position;
-            debugPropWorldPositionBefore = prop.position;
-
-            if (preserveWorldPoseOnAttach)
-            {
-                prop.SetParent(hand, true);
-            }
-            else
-            {
-                prop.SetParent(hand, false);
-                prop.position = hand.position;
-                prop.rotation = hand.rotation;
-                // prop.localScale = localScale;
-                // prop.localPosition = localPosition;
-                // prop.localRotation = Quaternion.Euler(localEulerAngles);
-            }
-
-            debugPropWorldPositionAfter = prop.position;
-            attached = true;
-            debugAttached = true;
-            return true;
+            return ResolveHandTransform() != null;
         }
 
         Transform ResolveHandTransform()
         {
-            Animator animator = AvatarAnimatorUtility.GetLocomotionAnimator(gameObject);
             if (animator != null)
             {
-                if (!animator.isInitialized && animator.runtimeAnimatorController != null)
-                    animator.Rebind();
-
                 Transform bone = animator.GetBoneTransform(handBone);
                 if (bone != null)
                     return bone;

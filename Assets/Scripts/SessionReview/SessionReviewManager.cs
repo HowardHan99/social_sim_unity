@@ -127,7 +127,7 @@ namespace SessionReview
         private OnboardingPlayerMode selectedPlayerMode = OnboardingPlayerMode.Robot;
         private StartupControlMode selectedRobotStartupControl = StartupControlMode.Manual;
         private StartupControlMode selectedPwdStartupControl = StartupControlMode.Auto;
-        private SEAN.Scenario.Agents.PwdCharacter selectedPwdCharacter = SEAN.Scenario.Agents.PwdCharacter.MaleWheelchair;
+        private SEAN.Scenario.Agents.PwdCharacter selectedPwdCharacter = SEAN.Scenario.Agents.PwdCharacter.FemaleWheelchair;
         private int selectedSceneIndex = -1;
         private Vector2 onboardingSceneScroll;
         private Vector2 onboardingContentScroll;
@@ -156,6 +156,16 @@ namespace SessionReview
         private Texture2D femaleChildPreview;
         private Texture2D maleChildPreview;
         private Texture2D phoneUserPreview;
+
+        private struct CharacterOnboardingSlot
+        {
+            public Rect cardRect;
+        }
+
+        private readonly Dictionary<SEAN.Scenario.Agents.PwdCharacter, CharacterOnboardingSlot> characterOnboardingSlots =
+            new Dictionary<SEAN.Scenario.Agents.PwdCharacter, CharacterOnboardingSlot>();
+        private bool characterOnboardingSlotsInitialized;
+        private SEAN.Scenario.Agents.PwdCharacter currentUserSlotCharacter = SEAN.Scenario.Agents.PwdCharacter.FemaleWheelchair;
 
         void Awake()
         {
@@ -2187,7 +2197,15 @@ namespace SessionReview
             selectedPlayerMode = SessionOnboardingSettings.PlayerMode;
             selectedRobotStartupControl = SessionOnboardingSettings.RobotStartupControl;
             selectedPwdStartupControl = SessionOnboardingSettings.PwdStartupControl;
-            selectedPwdCharacter = SessionOnboardingSettings.SelectedPwdCharacter;
+            if (SessionOnboardingSettings.HasCompletedOnboarding)
+            {
+                selectedPwdCharacter = SessionOnboardingSettings.SelectedPwdCharacter;
+                SyncCurrentUserSlotToSelectedCharacter();
+            }
+            else
+            {
+                EnsureDefaultCurrentUserOnFirstOnboarding();
+            }
 
             var sceneChange = FindObjectOfType<SceneChange>();
             if (sceneChange != null && sceneChange.SceneCount > 0)
@@ -2218,6 +2236,15 @@ namespace SessionReview
                 onboardingSavedTimeScale = Time.timeScale;
                 onboardingPausedTime = false;
                 bypassRosBackendForTrialStart = false;
+                if (SessionOnboardingSettings.HasCompletedOnboarding)
+                {
+                    selectedPwdCharacter = SessionOnboardingSettings.SelectedPwdCharacter;
+                    SyncCurrentUserSlotToSelectedCharacter();
+                }
+                else
+                {
+                    EnsureDefaultCurrentUserOnFirstOnboarding();
+                }
                 RefreshOnboardingWarmupState();
             }
             else if (onboardingPausedTime)
@@ -2307,8 +2334,9 @@ namespace SessionReview
 
             if (selectedPwdStartupControl == StartupControlMode.Manual)
             {
-                height += 42f + 248f + 18f;
-                height += 42f + 150f + 22f;
+                height += 42f;
+                EnsureCharacterOnboardingSlotsInitialized();
+                height += GetCharacterOnboardingContentHeight() + 22f;
             }
 
             height += 40f;
@@ -2338,109 +2366,38 @@ namespace SessionReview
 
             if (selectedPwdStartupControl == StartupControlMode.Manual)
             {
-                GUI.Label(new Rect(x, y, width, 30f), "Wheelchair User", onboardingSectionStyle);
+                GUI.Label(new Rect(x, y, width, 30f), "Current User", onboardingSectionStyle);
                 y += 42f;
+                float characterPickerBaseY = y;
 
-                DrawGenderPreviewCard(new Rect(x, y, 220f, 196f), "Male", maleWheelchairPreview,
-                    selectedPwdCharacter == SEAN.Scenario.Agents.PwdCharacter.MaleWheelchair,
-                    () => selectedPwdCharacter = SEAN.Scenario.Agents.PwdCharacter.MaleWheelchair);
+                GUI.Label(new Rect(x, characterPickerBaseY + 250f, width, 30f), "Community-Informed Characters", onboardingSectionStyle);
 
-                DrawGenderPreviewCard(new Rect(x + 236f, y, 220f, 196f), "Female", femaleWheelchairPreview,
-                    selectedPwdCharacter == SEAN.Scenario.Agents.PwdCharacter.FemaleWheelchair,
-                    () => selectedPwdCharacter = SEAN.Scenario.Agents.PwdCharacter.FemaleWheelchair);
+                EnsureCharacterOnboardingSlotsInitialized();
 
-                if (DrawChipButton(new Rect(x, y + 208f, 160f, 40f), "Male", selectedPwdCharacter == SEAN.Scenario.Agents.PwdCharacter.MaleWheelchair)) {
-                    selectedPwdCharacter = SEAN.Scenario.Agents.PwdCharacter.MaleWheelchair;
-                    SessionOnboardingSettings.UpdatePwdCharacter(SEAN.Scenario.Agents.PwdCharacter.MaleWheelchair);
-                }
-                if (DrawChipButton(new Rect(x + 236f, y + 208f, 160f, 40f), "Female", selectedPwdCharacter == SEAN.Scenario.Agents.PwdCharacter.FemaleWheelchair)) {
-                    selectedPwdCharacter = SEAN.Scenario.Agents.PwdCharacter.FemaleWheelchair;
-                    SessionOnboardingSettings.UpdatePwdCharacter(SEAN.Scenario.Agents.PwdCharacter.FemaleWheelchair);
-                }
-                y += 266f;
+                DrawPwdCharacterCardFromSlot(x, characterPickerBaseY, SEAN.Scenario.Agents.PwdCharacter.FemaleWheelchair,
+                    "Female Wheelchair User", femaleWheelchairPreview);
+                DrawPwdCharacterCardFromSlot(x, characterPickerBaseY, SEAN.Scenario.Agents.PwdCharacter.Dogwalker,
+                    "Dogwalker", dogwalkerPreview);
+                DrawPwdCharacterCardFromSlot(x, characterPickerBaseY, SEAN.Scenario.Agents.PwdCharacter.Scooteruser,
+                    "Scooter User", scooterUserPreview);
+                DrawPwdCharacterCardFromSlot(x, characterPickerBaseY, SEAN.Scenario.Agents.PwdCharacter.Cyclist,
+                    "Cyclist", cyclistPreview);
+                DrawPwdCharacterCardFromSlot(x, characterPickerBaseY, SEAN.Scenario.Agents.PwdCharacter.Walker,
+                    "Walker User", walkerPreview);
+                DrawPwdCharacterCardFromSlot(x, characterPickerBaseY, SEAN.Scenario.Agents.PwdCharacter.WhiteCane,
+                    "White Cane User", whiteCanePreview);
+                DrawPwdCharacterCardFromSlot(x, characterPickerBaseY, SEAN.Scenario.Agents.PwdCharacter.Cane,
+                    "Cane User", canePreview);
+                DrawPwdCharacterCardFromSlot(x, characterPickerBaseY, SEAN.Scenario.Agents.PwdCharacter.FemaleChild,
+                    "Female Child", femaleChildPreview);
+                DrawPwdCharacterCardFromSlot(x, characterPickerBaseY, SEAN.Scenario.Agents.PwdCharacter.MaleChild,
+                    "Male Child", maleChildPreview);
+                DrawPwdCharacterCardFromSlot(x, characterPickerBaseY, SEAN.Scenario.Agents.PwdCharacter.PhoneUser,
+                    "Phone User", phoneUserPreview);
+                DrawPwdCharacterCardFromSlot(x, characterPickerBaseY, SEAN.Scenario.Agents.PwdCharacter.MaleWheelchair,
+                    "Male Wheelchair User", maleWheelchairPreview);
 
-                GUI.Label(new Rect(x, y, width, 30f), "Community-Informed Characters", onboardingSectionStyle);
-                y += 42f;
-
-                // DrawPreviewCard(new Rect(x, y, 188f, 150f), "Dogwalker", dogwalkerPreview,
-                //     "Shown here for UI preview only.");
-                // DrawPreviewCard(new Rect(x + 204f, y, 188f, 150f), "Scooter User", scooterUserPreview,
-                //     "Shown here for UI preview only.");
-                DrawGenderPreviewCard(new Rect(x, y, 188f, 150f), "Dogwalker", dogwalkerPreview,
-                    selectedPwdCharacter == SEAN.Scenario.Agents.PwdCharacter.Dogwalker,
-                    () => selectedPwdCharacter = SEAN.Scenario.Agents.PwdCharacter.Dogwalker);
-
-                DrawGenderPreviewCard(new Rect(x + 204f, y, 188f, 150f), "Scooter User", scooterUserPreview,
-                    selectedPwdCharacter == SEAN.Scenario.Agents.PwdCharacter.Scooteruser,
-                    () => selectedPwdCharacter = SEAN.Scenario.Agents.PwdCharacter.Scooteruser);
-
-                DrawGenderPreviewCard(new Rect(x + 408f, y, 188f, 150f), "Cyclist", cyclistPreview,
-                    selectedPwdCharacter == SEAN.Scenario.Agents.PwdCharacter.Cyclist,
-                    () => selectedPwdCharacter = SEAN.Scenario.Agents.PwdCharacter.Cyclist);
-
-                if (DrawChipButton(new Rect(x, y + 168f, 160f, 40f), "Dogwalker", selectedPwdCharacter == SEAN.Scenario.Agents.PwdCharacter.Dogwalker)) {
-                    selectedPwdCharacter = SEAN.Scenario.Agents.PwdCharacter.Dogwalker;
-                    SessionOnboardingSettings.UpdatePwdCharacter(SEAN.Scenario.Agents.PwdCharacter.Dogwalker);
-                }
-                if (DrawChipButton(new Rect(x + 204f, y + 168f, 160f, 40f), "Scooter User", selectedPwdCharacter == SEAN.Scenario.Agents.PwdCharacter.Scooteruser)) {
-                    selectedPwdCharacter = SEAN.Scenario.Agents.PwdCharacter.Scooteruser;
-                    SessionOnboardingSettings.UpdatePwdCharacter(SEAN.Scenario.Agents.PwdCharacter.Scooteruser);
-                }
-                if (DrawChipButton(new Rect(x + 408f, y + 168f, 160f, 40f), "Cyclist", selectedPwdCharacter == SEAN.Scenario.Agents.PwdCharacter.Cyclist)) {
-                    selectedPwdCharacter = SEAN.Scenario.Agents.PwdCharacter.Cyclist;
-                    SessionOnboardingSettings.UpdatePwdCharacter(SEAN.Scenario.Agents.PwdCharacter.Cyclist);
-                }
-                y += 222f;
-                DrawGenderPreviewCard(new Rect(x, y, 188f, 150f), "Walker User", walkerPreview,
-                    selectedPwdCharacter == SEAN.Scenario.Agents.PwdCharacter.Walker,
-                    () => selectedPwdCharacter = SEAN.Scenario.Agents.PwdCharacter.Walker);
-
-                DrawGenderPreviewCard(new Rect(x + 204f, y, 188f, 150f), "White Cane User", whiteCanePreview,
-                    selectedPwdCharacter == SEAN.Scenario.Agents.PwdCharacter.WhiteCane,
-                    () => selectedPwdCharacter = SEAN.Scenario.Agents.PwdCharacter.WhiteCane);
-
-                DrawGenderPreviewCard(new Rect(x + 408f, y, 188f, 150f), "Cane User", canePreview,
-                    selectedPwdCharacter == SEAN.Scenario.Agents.PwdCharacter.Cane,
-                    () => selectedPwdCharacter = SEAN.Scenario.Agents.PwdCharacter.Cane);
-
-                if (DrawChipButton(new Rect(x, y + 168f, 160f, 40f), "Walker User", selectedPwdCharacter == SEAN.Scenario.Agents.PwdCharacter.Walker)) {
-                    selectedPwdCharacter = SEAN.Scenario.Agents.PwdCharacter.Walker;
-                    SessionOnboardingSettings.UpdatePwdCharacter(SEAN.Scenario.Agents.PwdCharacter.Walker);
-                }
-                if (DrawChipButton(new Rect(x + 204f, y + 168f, 160f, 40f), "White Cane User", selectedPwdCharacter == SEAN.Scenario.Agents.PwdCharacter.WhiteCane)) {
-                    selectedPwdCharacter = SEAN.Scenario.Agents.PwdCharacter.WhiteCane;
-                    SessionOnboardingSettings.UpdatePwdCharacter(SEAN.Scenario.Agents.PwdCharacter.WhiteCane);
-                }
-                if (DrawChipButton(new Rect(x + 408f, y + 168f, 160f, 40f), "Cane User", selectedPwdCharacter == SEAN.Scenario.Agents.PwdCharacter.Cane)) {
-                    selectedPwdCharacter = SEAN.Scenario.Agents.PwdCharacter.Cane;
-                    SessionOnboardingSettings.UpdatePwdCharacter(SEAN.Scenario.Agents.PwdCharacter.Cane);
-                }
-                y += 222f;
-                DrawGenderPreviewCard(new Rect(x, y, 188f, 150f), "Female Child", femaleChildPreview,
-                    selectedPwdCharacter == SEAN.Scenario.Agents.PwdCharacter.FemaleChild,
-                    () => selectedPwdCharacter = SEAN.Scenario.Agents.PwdCharacter.FemaleChild);
-                DrawGenderPreviewCard(new Rect(x + 204f, y, 188f, 150f), "Male Child", maleChildPreview,
-                    selectedPwdCharacter == SEAN.Scenario.Agents.PwdCharacter.MaleChild,
-                    () => selectedPwdCharacter = SEAN.Scenario.Agents.PwdCharacter.MaleChild);
-                DrawGenderPreviewCard(new Rect(x + 408, y, 188f, 150f), "Phone User", phoneUserPreview,
-                    selectedPwdCharacter == SEAN.Scenario.Agents.PwdCharacter.PhoneUser,
-                    () => selectedPwdCharacter = SEAN.Scenario.Agents.PwdCharacter.PhoneUser);
-                
-                if (DrawChipButton(new Rect(x, y + 168f, 160f, 40f), "Female Child", selectedPwdCharacter == SEAN.Scenario.Agents.PwdCharacter.FemaleChild)) {
-                    selectedPwdCharacter = SEAN.Scenario.Agents.PwdCharacter.FemaleChild;
-                    SessionOnboardingSettings.UpdatePwdCharacter(SEAN.Scenario.Agents.PwdCharacter.FemaleChild);
-                }
-                if (DrawChipButton(new Rect(x + 204f, y + 168f, 160f, 40f), "Male Child", selectedPwdCharacter == SEAN.Scenario.Agents.PwdCharacter.MaleChild)) {
-                    selectedPwdCharacter = SEAN.Scenario.Agents.PwdCharacter.MaleChild;
-                    SessionOnboardingSettings.UpdatePwdCharacter(SEAN.Scenario.Agents.PwdCharacter.MaleChild);
-                }
-                if (DrawChipButton(new Rect(x + 408f, y + 168f, 160f, 40f), "Phone User", selectedPwdCharacter == SEAN.Scenario.Agents.PwdCharacter.PhoneUser)) {
-                    selectedPwdCharacter = SEAN.Scenario.Agents.PwdCharacter.PhoneUser;
-                    SessionOnboardingSettings.UpdatePwdCharacter(SEAN.Scenario.Agents.PwdCharacter.PhoneUser);
-                }
-                DrawPreviewCard(new Rect(x + 612f, y, 188f, 150f), "More To Be Built", null,
-                    "Additional characters coming soon.");
-                y += 222f;
+                y = characterPickerBaseY + GetCharacterOnboardingContentHeight() + 22f;
             }
 
             GUI.Label(new Rect(x, y, width, 30f), "Session To Play", onboardingSectionStyle);
@@ -2509,6 +2466,155 @@ namespace SessionReview
             return GUI.Button(rect, label, active ? onboardingChipActiveStyle : onboardingChipStyle);
         }
 
+        private void SelectPwdCharacter(SEAN.Scenario.Agents.PwdCharacter character)
+        {
+            if (character != currentUserSlotCharacter)
+                SwapCharacterSlotWithCurrentUser(character);
+
+            selectedPwdCharacter = currentUserSlotCharacter;
+            SessionOnboardingSettings.UpdatePwdCharacter(currentUserSlotCharacter);
+        }
+
+        private const float PrimaryCardWidth = 270f;
+        private const float PrimaryCardHeight = 230f;
+        private const float CommunityCardWidth = 230f;
+        private const float CommunityCardHeight = 150f;
+        private const float CommunityCardHorizontalSpacing = 20f;
+        private const float CommunityCardColumnStep = CommunityCardWidth + CommunityCardHorizontalSpacing;
+
+        private static CharacterOnboardingSlot CreateCurrentUserPrimarySlot()
+        {
+            return new CharacterOnboardingSlot
+            {
+                cardRect = new Rect(0f, 0f, PrimaryCardWidth, PrimaryCardHeight)
+            };
+        }
+
+        private static CharacterOnboardingSlot MakeCommunityCharacterSlot(float x, float y)
+        {
+            return new CharacterOnboardingSlot
+            {
+                cardRect = new Rect(x, y, CommunityCardWidth, CommunityCardHeight)
+            };
+        }
+
+        private void EnsureCharacterOnboardingSlotsInitialized()
+        {
+            if (characterOnboardingSlotsInitialized)
+                return;
+
+            characterOnboardingSlotsInitialized = true;
+
+            const float communitySectionY = 292f;
+            const float row2Y = communitySectionY + 170f;
+            const float row3Y = row2Y + 170f;
+            float col2 = CommunityCardColumnStep;
+            float col3 = CommunityCardColumnStep * 2f;
+            float col4 = CommunityCardColumnStep * 3f;
+
+            characterOnboardingSlots[SEAN.Scenario.Agents.PwdCharacter.FemaleWheelchair] = CreateCurrentUserPrimarySlot();
+            characterOnboardingSlots[SEAN.Scenario.Agents.PwdCharacter.Dogwalker] =
+                MakeCommunityCharacterSlot(0f, communitySectionY);
+            characterOnboardingSlots[SEAN.Scenario.Agents.PwdCharacter.Scooteruser] =
+                MakeCommunityCharacterSlot(col2, communitySectionY);
+            characterOnboardingSlots[SEAN.Scenario.Agents.PwdCharacter.Cyclist] =
+                MakeCommunityCharacterSlot(col3, communitySectionY);
+            characterOnboardingSlots[SEAN.Scenario.Agents.PwdCharacter.Walker] =
+                MakeCommunityCharacterSlot(0f, row2Y);
+            characterOnboardingSlots[SEAN.Scenario.Agents.PwdCharacter.WhiteCane] =
+                MakeCommunityCharacterSlot(col2, row2Y);
+            characterOnboardingSlots[SEAN.Scenario.Agents.PwdCharacter.Cane] =
+                MakeCommunityCharacterSlot(col3, row2Y);
+            characterOnboardingSlots[SEAN.Scenario.Agents.PwdCharacter.FemaleChild] =
+                MakeCommunityCharacterSlot(0f, row3Y);
+            characterOnboardingSlots[SEAN.Scenario.Agents.PwdCharacter.MaleChild] =
+                MakeCommunityCharacterSlot(col2, row3Y);
+            characterOnboardingSlots[SEAN.Scenario.Agents.PwdCharacter.PhoneUser] =
+                MakeCommunityCharacterSlot(col3, row3Y);
+            characterOnboardingSlots[SEAN.Scenario.Agents.PwdCharacter.MaleWheelchair] =
+                MakeCommunityCharacterSlot(col4, row3Y);
+        }
+
+        private float GetCharacterOnboardingContentHeight()
+        {
+            EnsureCharacterOnboardingSlotsInitialized();
+
+            float maxBottom = 0f;
+            foreach (var slot in characterOnboardingSlots.Values)
+                maxBottom = Mathf.Max(maxBottom, slot.cardRect.yMax);
+
+            return maxBottom;
+        }
+
+        private SEAN.Scenario.Agents.PwdCharacter GetPlayablePwdCharacter()
+        {
+            return currentUserSlotCharacter;
+        }
+
+        private void EnsureDefaultCurrentUserOnFirstOnboarding()
+        {
+            characterOnboardingSlotsInitialized = false;
+            characterOnboardingSlots.Clear();
+            currentUserSlotCharacter = SEAN.Scenario.Agents.PwdCharacter.FemaleWheelchair;
+            selectedPwdCharacter = SEAN.Scenario.Agents.PwdCharacter.FemaleWheelchair;
+            EnsureCharacterOnboardingSlotsInitialized();
+            SessionOnboardingSettings.UpdatePwdCharacter(currentUserSlotCharacter);
+        }
+
+        private void SyncCurrentUserSlotToSelectedCharacter()
+        {
+            EnsureCharacterOnboardingSlotsInitialized();
+
+            if (selectedPwdCharacter == currentUserSlotCharacter)
+                return;
+
+            if (!characterOnboardingSlots.ContainsKey(selectedPwdCharacter))
+                return;
+
+            SwapCharacterSlotWithCurrentUser(selectedPwdCharacter);
+        }
+
+        private void SwapCharacterSlotWithCurrentUser(SEAN.Scenario.Agents.PwdCharacter character)
+        {
+            if (character == currentUserSlotCharacter)
+                return;
+
+            EnsureCharacterOnboardingSlotsInitialized();
+
+            if (!characterOnboardingSlots.TryGetValue(character, out var clickedSlot))
+                return;
+            if (!characterOnboardingSlots.TryGetValue(currentUserSlotCharacter, out var currentUserSlot))
+                return;
+
+            characterOnboardingSlots[currentUserSlotCharacter] = clickedSlot;
+            characterOnboardingSlots[character] = currentUserSlot;
+            currentUserSlotCharacter = character;
+        }
+
+        private void DrawPwdCharacterCardFromSlot(
+            float baseX,
+            float baseY,
+            SEAN.Scenario.Agents.PwdCharacter character,
+            string label,
+            Texture2D preview)
+        {
+            if (!characterOnboardingSlots.TryGetValue(character, out CharacterOnboardingSlot slot))
+                return;
+
+            Rect cardRect = new Rect(
+                baseX + slot.cardRect.x,
+                baseY + slot.cardRect.y,
+                slot.cardRect.width,
+                slot.cardRect.height);
+
+            DrawGenderPreviewCard(
+                cardRect,
+                label,
+                preview,
+                selectedPwdCharacter == character,
+                () => SelectPwdCharacter(character));
+        }
+
         private void DrawGenderPreviewCard(Rect rect, string label, Texture2D preview, bool active, System.Action onClick)
         {
             GUI.Box(rect, GUIContent.none, active ? onboardingSceneActiveButtonStyle : onboardingSceneButtonStyle);
@@ -2564,11 +2670,11 @@ namespace SessionReview
                 targetSceneIndex = 0;
             }
 
-            Debug.Log("selectedPwdCharacter in ApplyOnboardingSelection: " + selectedPwdCharacter);
+            Debug.Log("playable PwdCharacter in ApplyOnboardingSelection: " + GetPlayablePwdCharacter());
 
             SessionOnboardingSettings.Apply(
                 selectedPlayerMode,
-                selectedPwdCharacter,
+                GetPlayablePwdCharacter(),
                 targetSceneIndex,
                 targetSceneName,
                 selectedRobotStartupControl,

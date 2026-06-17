@@ -97,15 +97,16 @@ MonoBehaviour:
   handTag: Hand
   handBone: 17
   autoTagBoneName: Bip01 R Hand
-  localPosition: {x: 0.08, y: 0.02, z: 0.04}
-  localEulerAngles: {x: -75, y: 15, z: 95}
+  localPosition: {x: 0.006, y: 0.002, z: 0.004}
+  localEulerAngles: {x: -68, y: 8, z: 88}
   localScale: {x: 4, y: 4, z: 4}
+  useWorldSpaceFollow: 1
   preserveWorldPoseOnAttach: 0
   debugAttached: 0
   debugHandTarget: 
+  debugDistanceToHand: 0
   debugHandWorldPosition: {x: 0, y: 0, z: 0}
-  debugPropWorldPositionBefore: {x: 0, y: 0, z: 0}
-  debugPropWorldPositionAfter: {x: 0, y: 0, z: 0}
+  debugPropWorldPosition: {x: 0, y: 0, z: 0}
 --- !u!114 &959083787148873769
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -174,6 +175,7 @@ MonoBehaviour:
   leftArmForward: 30
   rightElbowBend: 56.6
   leftElbowBend: 91.6
+  forearmInward: 35
   spineEuler: {x: -20, y: 0, z: 0}
   chestEuler: {x: -12, y: 0, z: 0}
   neckEuler: {x: 10, y: 0, z: 0}
@@ -213,22 +215,22 @@ PrefabInstance:
     - target: {fileID: -8679921383154817045, guid: fd374fc13fee4c647b44626ee53dfa72,
         type: 3}
       propertyPath: m_LocalPosition.x
-      value: 0.49564105
+      value: 0.066
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: fd374fc13fee4c647b44626ee53dfa72,
         type: 3}
       propertyPath: m_LocalPosition.y
-      value: 1
+      value: 1.135
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: fd374fc13fee4c647b44626ee53dfa72,
         type: 3}
       propertyPath: m_LocalPosition.z
-      value: 0.10354141
+      value: 0.404
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: fd374fc13fee4c647b44626ee53dfa72,
         type: 3}
       propertyPath: m_LocalRotation.w
-      value: 0.7247866
+      value: -0.19501103
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: fd374fc13fee4c647b44626ee53dfa72,
         type: 3}
@@ -238,7 +240,7 @@ PrefabInstance:
     - target: {fileID: -8679921383154817045, guid: fd374fc13fee4c647b44626ee53dfa72,
         type: 3}
       propertyPath: m_LocalRotation.y
-      value: -0.6889734
+      value: -0.98080105
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: fd374fc13fee4c647b44626ee53dfa72,
         type: 3}
@@ -253,7 +255,7 @@ PrefabInstance:
     - target: {fileID: -8679921383154817045, guid: fd374fc13fee4c647b44626ee53dfa72,
         type: 3}
       propertyPath: m_LocalEulerAnglesHint.y
-      value: -87.098
+      value: -202.491
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: fd374fc13fee4c647b44626ee53dfa72,
         type: 3}

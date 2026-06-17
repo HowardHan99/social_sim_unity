@@ -358,7 +358,11 @@ namespace IVI
                 animator.SetFloat("Strafe", strafe);
                 animator.SetFloat("Turn", turn);
             }
-            animator.speed = speed > 0.1f ? speed : 1f;
+            var poseAdjust = GetComponent<CyclistPoseAdjust>();
+            if (poseAdjust != null)
+                animator.speed = poseAdjust.animationSpeed;
+            else
+                animator.speed = speed > 0.1f ? speed : 1f;
 
             debugForward = forward;
             debugStrafe = strafe;
