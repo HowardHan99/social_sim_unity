@@ -4,111 +4,59 @@ using UnityEngine;
 namespace IVI
 {
     /// <summary>
-    /// Keeps a prop glued to an animated hand bone.
-    /// Uses world-space follow by default because parenting to GetBoneTransform bones
-    /// is unreliable when Optimize Game Objects is enabled on the model.
+    /// Parents a prop to a humanoid body bone (hand, head, etc.) and applies a local pose.
     /// </summary>
-    [DefaultExecutionOrder(10001)]
     public class AttachPropToHand : MonoBehaviour
     {
         public Transform prop;
-        public string handTag = "Hand";
         public HumanBodyBones handBone = HumanBodyBones.RightHand;
 
-        [Tooltip("Optional: if nothing is tagged Hand yet, tag the first child with this name.")]
+        [Tooltip("Fallback bone name if GetBoneTransform fails (e.g. Bip01 R Hand, Bip01 Head).")]
         public string autoTagBoneName = "Bip01 R Hand";
 
-        [Header("Local pose relative to the hand bone")]
+        [Header("Local pose relative to the body bone")]
         public Vector3 localPosition = new Vector3(0.006f, 0.002f, 0.004f);
         public Vector3 localEulerAngles = new Vector3(-68f, 8f, 88f);
         public Vector3 localScale = new Vector3(4f, 4f, 4f);
 
-        [Tooltip("World-space follow each frame. Recommended when the avatar uses Optimize Game Objects.")]
-        public bool useWorldSpaceFollow = true;
+        [Tooltip("On attach, derive local offsets from the prop's current scene pose.")]
+        public bool captureOffsetFromCurrentPoseOnStart = false;
 
-        [Tooltip("When enabled, keeps the prop's current world pose instead of snapping to the hand.")]
-        public bool preserveWorldPoseOnAttach = false;
+        [Tooltip("Apply Local Scale after parenting.")]
+        public bool applyLocalScale = true;
 
         [Header("Debug (read-only)")]
         public bool debugAttached;
-        public string debugHandTarget;
-        public float debugDistanceToHand;
-        public Vector3 debugHandWorldPosition;
-        public Vector3 debugPropWorldPosition;
+        public string debugAnchorTarget;
 
         Animator animator;
-        Transform followRoot;
-        bool attached;
 
         void Start()
         {
-            followRoot = transform;
             StartCoroutine(AttachWhenReady());
         }
 
         IEnumerator AttachWhenReady()
         {
-            for (int i = 0; i < 90 && !attached; i++)
+            for (int i = 0; i < 90; i++)
             {
-                if (TryBindAnimator())
-                {
-                    attached = true;
+                if (TryAttach())
                     yield break;
-                }
 
                 yield return null;
             }
 
             yield return new WaitForEndOfFrame();
-            attached = TryBindAnimator();
-
-            if (!attached)
+            if (!TryAttach())
             {
                 Debug.LogWarning(
-                    $"[AttachPropToHand] Could not find hand on '{name}'. " +
-                    $"No animated {handBone} bone and no child tagged '{handTag}'.",
+                    $"[AttachPropToHand] Could not parent prop on '{name}'. " +
+                    $"No animated {handBone} and no child named '{autoTagBoneName}'.",
                     this);
             }
         }
 
-        void LateUpdate()
-        {
-            if (!attached || preserveWorldPoseOnAttach || prop == null)
-                return;
-
-            Transform hand = ResolveHandTransform();
-            if (hand == null)
-                return;
-
-            debugHandTarget = hand.name;
-            debugHandWorldPosition = hand.position;
-
-            if (useWorldSpaceFollow)
-            {
-                if (prop.parent != followRoot)
-                    prop.SetParent(followRoot, true);
-
-                prop.SetPositionAndRotation(
-                    hand.TransformPoint(localPosition),
-                    hand.rotation * Quaternion.Euler(localEulerAngles));
-                prop.localScale = localScale;
-            }
-            else
-            {
-                if (prop.parent != hand)
-                    prop.SetParent(hand, false);
-
-                prop.localPosition = localPosition;
-                prop.localRotation = Quaternion.Euler(localEulerAngles);
-                prop.localScale = localScale;
-            }
-
-            debugPropWorldPosition = prop.position;
-            debugDistanceToHand = Vector3.Distance(prop.position, hand.position);
-            debugAttached = true;
-        }
-
-        bool TryBindAnimator()
+        bool TryAttach()
         {
             if (prop == null)
             {
@@ -116,14 +64,42 @@ namespace IVI
                 return false;
             }
 
+            if (debugAttached)
+                return true;
+
             animator = AvatarAnimatorUtility.GetLocomotionAnimator(gameObject);
             if (animator != null && !animator.isInitialized && animator.runtimeAnimatorController != null)
                 animator.Rebind();
 
-            return ResolveHandTransform() != null;
+            Transform anchor = ResolveAnchorTransform();
+            if (anchor == null)
+                return false;
+
+            if (captureOffsetFromCurrentPoseOnStart)
+                CaptureOffsetFromCurrentPose(anchor);
+
+            prop.SetParent(anchor, false);
+            prop.localPosition = localPosition;
+            prop.localRotation = Quaternion.Euler(localEulerAngles);
+
+            if (applyLocalScale)
+                prop.localScale = localScale;
+
+            debugAnchorTarget = anchor.name;
+            debugAttached = true;
+            return true;
         }
 
-        Transform ResolveHandTransform()
+        void CaptureOffsetFromCurrentPose(Transform anchor)
+        {
+            localPosition = anchor.InverseTransformPoint(prop.position);
+            localEulerAngles = (Quaternion.Inverse(anchor.rotation) * prop.rotation).eulerAngles;
+
+            if (applyLocalScale)
+                localScale = prop.localScale;
+        }
+
+        Transform ResolveAnchorTransform()
         {
             if (animator != null)
             {
@@ -132,30 +108,12 @@ namespace IVI
                     return bone;
             }
 
-            Transform tagged = FindTaggedChild(handTag);
-            if (tagged != null)
-                return tagged;
-
             if (string.IsNullOrEmpty(autoTagBoneName))
                 return null;
 
             foreach (Transform t in transform.GetComponentsInChildren<Transform>(true))
             {
-                if (t.name != autoTagBoneName)
-                    continue;
-
-                t.gameObject.tag = handTag;
-                return t;
-            }
-
-            return null;
-        }
-
-        Transform FindTaggedChild(string tag)
-        {
-            foreach (Transform t in transform.GetComponentsInChildren<Transform>(true))
-            {
-                if (t.CompareTag(tag))
+                if (t.name == autoTagBoneName)
                     return t;
             }
 

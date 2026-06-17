@@ -189,6 +189,7 @@ MonoBehaviour:
   debugForward: 0
   debugStrafe: 0
   debugTurn: 0
+  debugIsBiking: 0
   isManualMode: 0
   debugJoystickRawHorizontal: 0
   debugJoystickRawVertical: 0
@@ -404,7 +405,7 @@ PrefabInstance:
         type: 3}
       propertyPath: m_Controller
       value: 
-      objectReference: {fileID: 9100000, guid: 92db63c5cfc544658ae9c245c758169e, type: 2}
+      objectReference: {fileID: 9100000, guid: 47396f6d5549b114a8fb0c3d8271a3b4, type: 2}
     - target: {fileID: 5866666021909216657, guid: 69a857e2820067c4b8d10e05672fc2d8,
         type: 3}
       propertyPath: m_ApplyRootMotion

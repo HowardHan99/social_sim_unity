@@ -14,7 +14,6 @@ GameObject:
   - component: {fileID: 8532619045204469036}
   - component: {fileID: 8123456789012345678}
   - component: {fileID: 959083787148873769}
-  - component: {fileID: 7123456789012345679}
   m_Layer: 0
   m_Name: Phone User
   m_TagString: Untagged
@@ -30,7 +29,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 5487155251517902103}
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalPosition: {x: 0, y: 0.195, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_Children:
   - {fileID: 2587444890316383642}
@@ -94,19 +93,15 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   prop: {fileID: 31282282918351827}
-  handTag: Hand
-  handBone: 17
+  handBone: 18
   autoTagBoneName: Bip01 R Hand
   localPosition: {x: 0.006, y: 0.002, z: 0.004}
   localEulerAngles: {x: -68, y: 8, z: 88}
   localScale: {x: 4, y: 4, z: 4}
-  useWorldSpaceFollow: 1
-  preserveWorldPoseOnAttach: 0
+  captureOffsetFromCurrentPoseOnStart: 0
+  applyLocalScale: 1
   debugAttached: 0
-  debugHandTarget: 
-  debugDistanceToHand: 0
-  debugHandWorldPosition: {x: 0, y: 0, z: 0}
-  debugPropWorldPosition: {x: 0, y: 0, z: 0}
+  debugAnchorTarget: 
 --- !u!114 &959083787148873769
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -151,6 +146,7 @@ MonoBehaviour:
   debugForward: 0
   debugStrafe: 0
   debugTurn: 0
+  debugIsBiking: 0
   isManualMode: 0
   debugJoystickRawHorizontal: 0
   debugJoystickRawVertical: 0
@@ -158,33 +154,6 @@ MonoBehaviour:
   debugJoystickVerticalCenter: 0
   debugJoystickProcessedHorizontal: 0
   debugJoystickProcessedVertical: 0
---- !u!114 &7123456789012345679
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 5487155251517902103}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: f3a8b2c1d4e5f60718293a4b5c6d7e8f, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  armInward: 23.8
-  rightArmForward: 30
-  leftArmForward: 30
-  rightElbowBend: 56.6
-  leftElbowBend: 91.6
-  forearmInward: 35
-  spineEuler: {x: -20, y: 0, z: 0}
-  chestEuler: {x: -12, y: 0, z: 0}
-  neckEuler: {x: 10, y: 0, z: 0}
-  poseWeight: 1
-  bonesReady: 0
-  debugAnimatorTarget: 
-  debugBonesAppliedLastFrame: 0
-  debugRightUpperArmFound: 0
-  debugLeftUpperArmFound: 0
 --- !u!1001 &569030731337167928
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -215,12 +184,12 @@ PrefabInstance:
     - target: {fileID: -8679921383154817045, guid: fd374fc13fee4c647b44626ee53dfa72,
         type: 3}
       propertyPath: m_LocalPosition.x
-      value: 0.066
+      value: 0.411
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: fd374fc13fee4c647b44626ee53dfa72,
         type: 3}
       propertyPath: m_LocalPosition.y
-      value: 1.135
+      value: 1.602
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: fd374fc13fee4c647b44626ee53dfa72,
         type: 3}
@@ -295,7 +264,7 @@ PrefabInstance:
     - target: {fileID: -8679921383154817045, guid: d31bdf2d2f631dc4e85fde015afc17dc,
         type: 3}
       propertyPath: m_LocalPosition.y
-      value: -0.024
+      value: 0.551
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: d31bdf2d2f631dc4e85fde015afc17dc,
         type: 3}
@@ -347,6 +316,11 @@ PrefabInstance:
       propertyPath: m_TagString
       value: Hand
       objectReference: {fileID: 0}
+    - target: {fileID: 5866666021909216657, guid: d31bdf2d2f631dc4e85fde015afc17dc,
+        type: 3}
+      propertyPath: m_Avatar
+      value: 
+      objectReference: {fileID: 9000000, guid: d31bdf2d2f631dc4e85fde015afc17dc, type: 3}
     - target: {fileID: 5866666021909216657, guid: d31bdf2d2f631dc4e85fde015afc17dc,
         type: 3}
       propertyPath: m_Controller

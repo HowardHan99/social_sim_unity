@@ -13,6 +13,8 @@ GameObject:
   - component: {fileID: 8110535903205435714}
   - component: {fileID: -6070732463054680792}
   - component: {fileID: -7936345842397505541}
+  - component: {fileID: 7475256922286419574}
+  - component: {fileID: 3084686490329340791}
   m_Layer: 0
   m_Name: BlindMan2
   m_TagString: Untagged
@@ -103,6 +105,12 @@ MonoBehaviour:
   manualDeceleration: 3
   manualAngularAcceleration: 1200
   debugSBrakePressCount: 0
+  debugAnimatorFound: 0
+  debugAnimatorTarget: 
+  debugForward: 0
+  debugStrafe: 0
+  debugTurn: 0
+  debugIsBiking: 0
   isManualMode: 0
   debugJoystickRawHorizontal: 0
   debugJoystickRawVertical: 0
@@ -126,6 +134,50 @@ Rigidbody:
   m_Interpolate: 0
   m_Constraints: 0
   m_CollisionDetection: 0
+--- !u!114 &7475256922286419574
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3977508065817665654}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7a4b2c9d1e3f4056a8b9c0d1e2f3a4b5, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  prop: {fileID: 6007789515856573923}
+  handBone: 18
+  autoTagBoneName: Bip01 R Hand
+  localPosition: {x: 0, y: 0, z: 0}
+  localEulerAngles: {x: 0, y: 0, z: 0}
+  localScale: {x: 7, y: 7, z: 7}
+  captureOffsetFromCurrentPoseOnStart: 1
+  applyLocalScale: 0
+  debugAttached: 0
+  debugAnchorTarget: 
+--- !u!114 &3084686490329340791
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3977508065817665654}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7a4b2c9d1e3f4056a8b9c0d1e2f3a4b5, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  prop: {fileID: 6869170596948820676}
+  handBone: 10
+  autoTagBoneName: Bip01 Head
+  localPosition: {x: 0, y: 0, z: 0}
+  localEulerAngles: {x: 0, y: 0, z: 0}
+  localScale: {x: 1.7, y: 1.7, z: 1.7}
+  captureOffsetFromCurrentPoseOnStart: 1
+  applyLocalScale: 0
+  debugAttached: 0
+  debugAnchorTarget: 
 --- !u!1 &5898747978933706645
 GameObject:
   m_ObjectHideFlags: 0
@@ -152,8 +204,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 5898747978933706645}
   m_LocalRotation: {x: -0.3741142, y: 0.05585158, z: 0.0065036034, w: 0.92567647}
-  m_LocalPosition: {x: 0.429, y: 0.584, z: 0.609}
-  m_LocalScale: {x: 7, y: 7, z: 7}
+  m_LocalPosition: {x: 0.244, y: 0.804, z: 0.763}
+  m_LocalScale: {x: 7, y: 8.721776, z: 7}
   m_Children: []
   m_Father: {fileID: 859523122380438077}
   m_RootOrder: 1
@@ -238,17 +290,17 @@ PrefabInstance:
     - target: {fileID: -8679921383154817045, guid: 9725070b247a3ce4182c727233b6f04c,
         type: 3}
       propertyPath: m_LocalPosition.x
-      value: 0.076
+      value: 0.003
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 9725070b247a3ce4182c727233b6f04c,
         type: 3}
       propertyPath: m_LocalPosition.y
-      value: 1.689
+      value: 1.704
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 9725070b247a3ce4182c727233b6f04c,
         type: 3}
       propertyPath: m_LocalPosition.z
-      value: 0.087
+      value: 0.086
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 9725070b247a3ce4182c727233b6f04c,
         type: 3}
