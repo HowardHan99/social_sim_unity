@@ -8,6 +8,14 @@ namespace IVI
     /// </summary>
     public class AttachPropToHand : MonoBehaviour
     {
+        public enum AlignMode
+        {
+            Pivot = 0,
+            BoundsTopToBone = 1,
+            BoundsCenterToBone = 2,
+            BoundsCenterToEyes = 3,
+        }
+
         public Transform prop;
         public HumanBodyBones handBone = HumanBodyBones.RightHand;
 
@@ -24,6 +32,12 @@ namespace IVI
 
         [Tooltip("Apply Local Scale after parenting.")]
         public bool applyLocalScale = true;
+
+        [Header("Snap a point of the prop onto the body")]
+        [Tooltip("After parenting, slide the prop so a point of its mesh bounds lands on the bone (or eyes). " +
+                 "Pivot = no adjustment. BoundsTopToBone = top of the prop sits at the bone (e.g. cane grip at hand). " +
+                 "BoundsCenterToEyes = prop centered on the eyes (e.g. sunglasses).")]
+        public AlignMode align = AlignMode.Pivot;
 
         [Header("Debug (read-only)")]
         public bool debugAttached;
@@ -85,9 +99,62 @@ namespace IVI
             if (applyLocalScale)
                 prop.localScale = localScale;
 
+            if (align != AlignMode.Pivot)
+                AlignPropToBody(anchor);
+
             debugAnchorTarget = anchor.name;
             debugAttached = true;
             return true;
+        }
+
+        // Slides the (already parented) prop so a chosen point of its mesh bounds
+        // coincides with the bone (or the eyes). Because the prop is rigidly parented,
+        // baking this offset once keeps it aligned as the body animates.
+        void AlignPropToBody(Transform anchor)
+        {
+            Renderer r = prop.GetComponentInChildren<Renderer>();
+            if (r == null)
+                return;
+
+            Bounds b = r.bounds;
+
+            Vector3 source;
+            Vector3 target;
+            switch (align)
+            {
+                case AlignMode.BoundsTopToBone:
+                    source = new Vector3(b.center.x, b.max.y, b.center.z);
+                    target = anchor.position;
+                    break;
+                case AlignMode.BoundsCenterToEyes:
+                    source = b.center;
+                    target = ResolveEyeTarget() ?? anchor.position;
+                    break;
+                default: // BoundsCenterToBone
+                    source = b.center;
+                    target = anchor.position;
+                    break;
+            }
+
+            prop.position += target - source;
+        }
+
+        Vector3? ResolveEyeTarget()
+        {
+            if (animator == null)
+                return null;
+
+            Transform leftEye = animator.GetBoneTransform(HumanBodyBones.LeftEye);
+            Transform rightEye = animator.GetBoneTransform(HumanBodyBones.RightEye);
+
+            if (leftEye != null && rightEye != null)
+                return (leftEye.position + rightEye.position) * 0.5f;
+            if (leftEye != null)
+                return leftEye.position;
+            if (rightEye != null)
+                return rightEye.position;
+
+            return null;
         }
 
         void CaptureOffsetFromCurrentPose(Transform anchor)

@@ -80,6 +80,7 @@ namespace IVI
         private bool manualForwardInputHeld;
         private bool manualReverseInputHeld;
         private bool useIsBikingAnimator;
+        private Animator bikeAnimator;
 
         void Start()
         {
@@ -105,6 +106,10 @@ namespace IVI
                 animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
                 useIsBikingAnimator = HasAnimatorParameter("IsBiking");
             }
+
+            bikeAnimator = FindBikeAnimator();
+            if (bikeAnimator != null)
+                bikeAnimator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
 
             if (rb != null)
                 rb.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
@@ -348,6 +353,9 @@ namespace IVI
             bool shouldIdle = isManualMode
                 ? !manualForwardInputHeld && !manualReverseInputHeld
                 : speed < 0.1f;
+
+            if (bikeAnimator != null)
+                bikeAnimator.SetBool("isIdling", shouldIdle);
 
             if (useIsBikingAnimator)
             {
@@ -608,6 +616,26 @@ namespace IVI
             }
 
             return isPressed;
+        }
+
+        Animator FindBikeAnimator()
+        {
+            foreach (Animator candidate in GetComponentsInChildren<Animator>(true))
+            {
+                if (candidate == animator)
+                    continue;
+
+                if (candidate.runtimeAnimatorController == null)
+                    continue;
+
+                foreach (AnimatorControllerParameter parameter in candidate.parameters)
+                {
+                    if (parameter.name == "isIdling")
+                        return candidate;
+                }
+            }
+
+            return null;
         }
 
         bool HasAnimatorParameter(string parameterName)
