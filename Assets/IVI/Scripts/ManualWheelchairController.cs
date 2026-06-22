@@ -28,6 +28,18 @@ namespace IVI
         public bool invertJoystickHorizontal = false;
         public bool invertJoystickVertical = true;
 
+        [Header("Ground Sticking")]
+        [Tooltip("Each frame, raycast down and place the character's feet on the ground.")]
+        public bool stickToGround = true;
+        [Tooltip("Layers treated as ground. Exclude the character's own layer if needed.")]
+        public LayerMask groundMask = ~0;
+        [Tooltip("Vertical offset added on top of the ground hit (if the pivot isn't exactly at the feet).")]
+        public float groundOffset = 0f;
+        [Tooltip("How far above the pivot to start the ground ray.")]
+        public float groundRayStartHeight = 2.5f;
+        [Tooltip("How far down to search for ground from the ray start.")]
+        public float groundRayDistance = 6f;
+
         [Header("Manual Brake/Reverse Behavior")]
         public float brakeStopThreshold = 0.02f;
         public int sPressesToEnableReverse = 2;
@@ -169,6 +181,43 @@ namespace IVI
                 manualVelocity = vel;
                 UpdateAnimator();
             }
+
+            SnapToGround();
+        }
+
+        // Places the character's feet on the ground via a downward raycast, ignoring its own
+        // colliders. Keeps a transform-driven kinematic character on uneven floors/slopes.
+        void SnapToGround()
+        {
+            if (!stickToGround)
+                return;
+
+            Vector3 origin = transform.position + Vector3.up * groundRayStartHeight;
+            float maxDistance = groundRayStartHeight + groundRayDistance;
+
+            RaycastHit[] hits = Physics.RaycastAll(
+                origin, Vector3.down, maxDistance, groundMask, QueryTriggerInteraction.Ignore);
+
+            bool found = false;
+            float bestY = float.NegativeInfinity;
+            foreach (RaycastHit hit in hits)
+            {
+                if (hit.collider.transform == transform || hit.collider.transform.IsChildOf(transform))
+                    continue;
+
+                if (hit.point.y > bestY)
+                {
+                    bestY = hit.point.y;
+                    found = true;
+                }
+            }
+
+            if (!found)
+                return;
+
+            Vector3 p = transform.position;
+            p.y = bestY + groundOffset;
+            transform.position = p;
         }
 
         void LateUpdate()

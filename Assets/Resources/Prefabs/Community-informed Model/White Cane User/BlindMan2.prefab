@@ -14,7 +14,7 @@ GameObject:
   - component: {fileID: -6070732463054680792}
   - component: {fileID: -7936345842397505541}
   - component: {fileID: 7475256922286419574}
-  - component: {fileID: 3084686490329340791}
+  - component: {fileID: 6699803365610036356}
   m_Layer: 0
   m_Name: BlindMan2
   m_TagString: Untagged
@@ -78,7 +78,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 82986ae7dfa33654295162cffcb1b085, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  moveSpeed: 0.8
+  moveSpeed: 2
   rotationSpeed: 180
   toggleModeKey: 303
   useWASD: 1
@@ -98,6 +98,13 @@ MonoBehaviour:
   joystickAngularResponseExponent: 1.2
   invertJoystickHorizontal: 0
   invertJoystickVertical: 1
+  stickToGround: 1
+  groundMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  groundOffset: 0.1
+  groundRayStartHeight: 2.5
+  groundRayDistance: 6
   brakeStopThreshold: 0.02
   sPressesToEnableReverse: 2
   sPressWindowSec: 0.6
@@ -152,12 +159,18 @@ MonoBehaviour:
   localPosition: {x: 0, y: 0, z: 0}
   localEulerAngles: {x: 0, y: 0, z: 0}
   localScale: {x: 7, y: 7, z: 7}
-  captureOffsetFromCurrentPoseOnStart: 1
+  captureOffsetFromCurrentPoseOnStart: 0
   applyLocalScale: 0
   align: 1
+  alignOffset: {x: 0, y: 0, z: 0}
+  levelToBody: 0
+  levelRotationOffset: {x: 0, y: 0, z: 0}
+  orientLongAxisForwardDown: 1
+  forwardDownAngle: 50
+  flipGripEnd: 0
   debugAttached: 0
   debugAnchorTarget: 
---- !u!114 &3084686490329340791
+--- !u!114 &6699803365610036356
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -170,14 +183,20 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   prop: {fileID: 6869170596948820676}
-  handBone: 10
+  handBone: 21
   autoTagBoneName: Bip01 Head
-  localPosition: {x: 0, y: 0, z: 0}
+  localPosition: {x: 0.01, y: -0.2, z: 0}
   localEulerAngles: {x: 0, y: 0, z: 0}
-  localScale: {x: 1.7, y: 1.7, z: 1.7}
-  captureOffsetFromCurrentPoseOnStart: 1
-  applyLocalScale: 0
-  align: 3
+  localScale: {x: 2, y: 2, z: 2}
+  captureOffsetFromCurrentPoseOnStart: 0
+  applyLocalScale: 1
+  align: 0
+  alignOffset: {x: 0, y: 0.075, z: 0.25}
+  levelToBody: 1
+  levelRotationOffset: {x: 0, y: 0, z: 0}
+  orientLongAxisForwardDown: 0
+  forwardDownAngle: 50
+  flipGripEnd: 0
   debugAttached: 0
   debugAnchorTarget: 
 --- !u!1 &5898747978933706645
@@ -292,17 +311,17 @@ PrefabInstance:
     - target: {fileID: -8679921383154817045, guid: 9725070b247a3ce4182c727233b6f04c,
         type: 3}
       propertyPath: m_LocalPosition.x
-      value: -0.026018262
+      value: -0.027
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 9725070b247a3ce4182c727233b6f04c,
         type: 3}
       propertyPath: m_LocalPosition.y
-      value: 1.5710014
+      value: 1.565
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 9725070b247a3ce4182c727233b6f04c,
         type: 3}
       propertyPath: m_LocalPosition.z
-      value: 0.086
+      value: 0.043
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 9725070b247a3ce4182c727233b6f04c,
         type: 3}
@@ -344,7 +363,8 @@ PrefabInstance:
       propertyPath: m_Name
       value: fbxGlasses
       objectReference: {fileID: 0}
-    m_RemovedComponents: []
+    m_RemovedComponents:
+    - {fileID: 5866666021909216657, guid: 9725070b247a3ce4182c727233b6f04c, type: 3}
   m_SourcePrefab: {fileID: 100100000, guid: 9725070b247a3ce4182c727233b6f04c, type: 3}
 --- !u!4 &6869170596948820676 stripped
 Transform:

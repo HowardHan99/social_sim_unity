@@ -100,6 +100,13 @@ MonoBehaviour:
   localScale: {x: 4, y: 4, z: 4}
   captureOffsetFromCurrentPoseOnStart: 0
   applyLocalScale: 1
+  align: 0
+  alignOffset: {x: 0, y: 0, z: 0}
+  levelToBody: 0
+  levelRotationOffset: {x: 0, y: 0, z: 0}
+  orientLongAxisForwardDown: 0
+  forwardDownAngle: 50
+  flipGripEnd: 0
   debugAttached: 0
   debugAnchorTarget: 
 --- !u!114 &959083787148873769
@@ -134,6 +141,13 @@ MonoBehaviour:
   joystickAngularResponseExponent: 1.2
   invertJoystickHorizontal: 0
   invertJoystickVertical: 1
+  stickToGround: 1
+  groundMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  groundOffset: 0.1
+  groundRayStartHeight: 2.5
+  groundRayDistance: 6
   brakeStopThreshold: 0.02
   sPressesToEnableReverse: 2
   sPressWindowSec: 0.6

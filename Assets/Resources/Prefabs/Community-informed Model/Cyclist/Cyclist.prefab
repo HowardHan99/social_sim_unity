@@ -1595,6 +1595,13 @@ MonoBehaviour:
   joystickAngularResponseExponent: 1.2
   invertJoystickHorizontal: 0
   invertJoystickVertical: 1
+  stickToGround: 1
+  groundMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  groundOffset: 0.1
+  groundRayStartHeight: 2.5
+  groundRayDistance: 6
   brakeStopThreshold: 0.02
   sPressesToEnableReverse: 2
   sPressWindowSec: 0.6
