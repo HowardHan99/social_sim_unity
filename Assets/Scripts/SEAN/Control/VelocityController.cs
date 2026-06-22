@@ -7,6 +7,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 using Unity.Robotics.ROSTCPConnector;
+using SessionReview;
 
 namespace SEAN.Control
 {
@@ -28,8 +29,8 @@ namespace SEAN.Control
         // Manual control variables
         private bool manualControlActive = false;
         public bool ManualControlActive => manualControlActive;
-        public float manualLinearSpeed = 1.0f;
-        public float manualAngularSpeed = 2.4f;
+        public float manualLinearSpeed = 0.8f;
+        public float manualAngularSpeed = 20.0f;
 
         [Header("Startup Control")]
         public bool startInManualMode = false;
@@ -40,6 +41,12 @@ namespace SEAN.Control
         public string joystickAngularAxis = "LogitechTwist";
         public float joystickLinearDeadzone = 0.03f;
         public float joystickAngularDeadzone = 0.03f;
+        public float joystickLinearFullThrow = 0.1f;
+        public float joystickAngularFullThrow = 1.0f;
+        public float joystickLinearSensitivity = 1.0f;
+        public float joystickAngularSensitivity = 1.0f;
+        public float joystickLinearResponseExponent = 1.6f;
+        public float joystickAngularResponseExponent = 1.0f;
         public bool invertJoystickLinear = true;
         public bool invertJoystickAngular = false;
 
@@ -60,8 +67,12 @@ namespace SEAN.Control
         public bool bypassUnityVelocityPostProcessing = true;
         public bool preserveManualVelocitySmoothing = false;
         public float manualVelocityDamping = 0.85f;
+        public float manualAcceleration = 4.0f;
+        public float manualDeceleration = 3.0f;
+        public float manualAngularAcceleration = 20.0f;
         public bool enforceManualSpeedLimit = true;
-        public float manualMaxPlanarSpeed = 0.7f;
+        public float manualMaxPlanarSpeed = 0.8f;
+        public bool useDirectManualRotation = true;
 
         // Debug fields to show last received ROS commands in Inspector
         [Header("Debug ROS Speeds (Read-Only)")]
@@ -166,7 +177,7 @@ namespace SEAN.Control
         public bool enableCommandShaping = true;
         public float linearCommandDeadband = 0.01f;
         public float angularCommandDeadband = 0.03f;
-        public float maxLinearCommand = 0.7f;
+        public float maxLinearCommand = 0.8f;
         public float maxAngularCommand = 0.7f;
 
         [Header("Path Reacquisition")]
@@ -217,6 +228,7 @@ namespace SEAN.Control
             planVisualizer = FindObjectOfType<global::SEAN.Display.PlanVisualizer>();
             ApplyUprightConstraints();
             ApplyZeroFrictionMaterial();
+            ApplyJoystickResponseDefaults();
             SetManualControlActive(startInManualMode, false);
             RegisterRosMonitorSubscriptions(true);
         }
@@ -242,12 +254,20 @@ namespace SEAN.Control
             }
         }
 
+        private static bool IsSessionInputBlocked()
+        {
+            var mgr = SessionReviewManager.Instance;
+            return mgr != null && mgr.IsMovementInputBlocked;
+        }
+
         private void Update()
         {
             DebugJoystickPresent = JoystickPresent;
             UpdateNamedAxisDebug();
 
-            if (UnityEngine.Input.GetKeyDown(KeyCode.LeftShift))
+            bool sessionBlocked = IsSessionInputBlocked();
+
+            if (!sessionBlocked && UnityEngine.Input.GetKeyDown(KeyCode.LeftShift))
             {
                 SetManualControlActive(!manualControlActive);
             }
@@ -258,9 +278,17 @@ namespace SEAN.Control
                 showOnScreenDebug = !showOnScreenDebug;
             }
 
-            if (manualControlActive)
+            if (manualControlActive && !sessionBlocked)
             {
                 HandleManualInput();
+            }
+            else if (sessionBlocked)
+            {
+                // Drain velocity so robot coasts to a stop while UI is blocking input.
+                prevLinVelocity = 0f;
+                prevAngVelocity = 0f;
+                targetLinVelocity = 0f;
+                targetAngVelocity = 0f;
             }
         }
 
@@ -280,8 +308,8 @@ namespace SEAN.Control
                 float rawAngularInput = ReadJoystickRawAxis(joystickAngularAxis, invertJoystickAngular);
                 float centeredLinearInput = rawLinearInput - joystickLinearCenter;
                 float centeredAngularInput = rawAngularInput - joystickAngularCenter;
-                joystickLinearInput = ApplyJoystickDeadzone(centeredLinearInput, joystickLinearDeadzone);
-                joystickAngularInput = ApplyJoystickDeadzone(centeredAngularInput, joystickAngularDeadzone);
+                joystickLinearInput = ProcessJoystickInput(centeredLinearInput, joystickLinearDeadzone, joystickLinearFullThrow, joystickLinearSensitivity, joystickLinearResponseExponent);
+                joystickAngularInput = ProcessJoystickInput(centeredAngularInput, joystickAngularDeadzone, joystickAngularFullThrow, joystickAngularSensitivity, joystickAngularResponseExponent);
 
                 DebugJoystickRawLinear = rawLinearInput;
                 DebugJoystickRawAngular = rawAngularInput;
@@ -372,8 +400,17 @@ namespace SEAN.Control
 
             if (bypassUnityVelocityPostProcessing && !preserveManualVelocitySmoothing)
             {
-                targetLinVelocity = manualDesiredLin;
-                targetAngVelocity = manualDesiredAng;
+                float linearStep = Mathf.Abs(manualDesiredLin) > Mathf.Abs(prevLinVelocity)
+                    ? manualAcceleration
+                    : manualDeceleration;
+                targetLinVelocity = Mathf.MoveTowards(
+                    prevLinVelocity,
+                    manualDesiredLin,
+                    Mathf.Max(0f, linearStep) * Time.deltaTime);
+                targetAngVelocity = Mathf.MoveTowards(
+                    prevAngVelocity,
+                    manualDesiredAng,
+                    Mathf.Max(0f, manualAngularAcceleration) * Time.deltaTime);
             }
             else
             {
@@ -500,7 +537,16 @@ namespace SEAN.Control
             DebugAppliedLinSpeed = appliedLinVelocity;
             DebugAppliedAngSpeed = appliedAngVelocity;
 
-            if (Mathf.Approximately(appliedAngVelocity, 0.0f) && Mathf.Approximately(rb.angularVelocity.y, 0.0f))
+            if (manualControlActive && useDirectManualRotation)
+            {
+                if (!Mathf.Approximately(appliedAngVelocity, 0.0f))
+                {
+                    float yawDegrees = -appliedAngVelocity * Mathf.Rad2Deg * Time.fixedDeltaTime;
+                    rb.MoveRotation(rb.rotation * Quaternion.Euler(0f, yawDegrees, 0f));
+                }
+                rb.angularVelocity = Vector3.zero;
+            }
+            else if (Mathf.Approximately(appliedAngVelocity, 0.0f) && Mathf.Approximately(rb.angularVelocity.y, 0.0f))
             {
                 rb.angularVelocity = Vector3.zero;
             }
@@ -686,6 +732,43 @@ namespace SEAN.Control
             return Mathf.Abs(value) >= deadzone ? value : 0f;
         }
 
+        private float ScaleJoystickInput(float value, float sensitivity)
+        {
+            return Mathf.Clamp(value * Mathf.Max(0f, sensitivity), -1f, 1f);
+        }
+
+        private float ProcessJoystickInput(float value, float deadzone, float fullThrow, float sensitivity, float responseExponent)
+        {
+            float normalized = NormalizeJoystickThrow(ApplyJoystickDeadzone(value, deadzone), fullThrow);
+            float curved = ApplyJoystickResponseCurve(normalized, responseExponent);
+            return ScaleJoystickInput(curved, sensitivity);
+        }
+
+        private float NormalizeJoystickThrow(float value, float fullThrow)
+        {
+            return Mathf.Clamp(value / Mathf.Max(0.01f, Mathf.Abs(fullThrow)), -1f, 1f);
+        }
+
+        private float ApplyJoystickResponseCurve(float value, float responseExponent)
+        {
+            float exponent = Mathf.Max(0.25f, responseExponent);
+            return Mathf.Sign(value) * Mathf.Pow(Mathf.Abs(value), exponent);
+        }
+
+        private void ApplyJoystickResponseDefaults()
+        {
+            if (Mathf.Approximately(joystickLinearFullThrow, 0.25f) && Mathf.Approximately(joystickLinearSensitivity, 1.0f))
+                joystickLinearFullThrow = 0.1f;
+            if (joystickLinearSensitivity > 2.0f)
+                joystickLinearSensitivity = 1.0f;
+            if (joystickAngularSensitivity > 1.5f)
+                joystickAngularSensitivity = 1.0f;
+            if (joystickLinearResponseExponent <= 0f)
+                joystickLinearResponseExponent = 1.6f;
+            if (joystickAngularResponseExponent <= 0f)
+                joystickAngularResponseExponent = 1.2f;
+        }
+
         private void UpdateNamedAxisDebug()
         {
             DebugAxisHorizontal = GetAxisSafely("Horizontal");
@@ -710,7 +793,7 @@ namespace SEAN.Control
 
             try
             {
-                return UnityEngine.Input.GetAxis(axisName);
+                return UnityEngine.Input.GetAxisRaw(axisName);
             }
             catch (System.ArgumentException)
             {

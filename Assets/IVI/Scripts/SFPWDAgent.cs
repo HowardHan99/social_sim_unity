@@ -19,6 +19,7 @@ namespace IVI
         Dictionary<int, Vector3> closestPoints;
 
         private float robotRepulsion;
+        private SEAN.Scenario.Robot robotAgent;
 
         public float pwdPersonalRadius = 2*RADIUS;
 
@@ -28,6 +29,30 @@ namespace IVI
         public Vector3 waypointStart;
         public Vector3 waypointGoal;
         private bool headingToGoal = true;
+
+        [Header("Robot Blocking Stop")]
+        public bool stopForRobotWhenBlocked = true;
+        public float robotBlockStopDistance = 1.3f;
+        public float robotBlockClearDistance = 1.4f;
+        public float robotBlockForwardAngleDeg = 70f;
+
+        [Header("Robot Blocking Deadlock Break")]
+        public bool runAfterRobotBlockStop = true;
+        public float robotBlockRunDelaySeconds = 2f;
+        public float robotBlockRunMaxSeconds = 1.25f;
+        public float robotBlockRunMaxDistance = 0.75f;
+
+        [Header("Debug Robot Blocking (Read-Only)")]
+        public bool debugRobotBlocked;
+        public float debugRobotBlockDistance;
+        public float debugRobotBlockStoppedSeconds;
+        public bool debugRobotBlockForceRunning;
+        public float debugRobotBlockRunSeconds;
+        public float debugRobotBlockRunDistance;
+
+        private float robotBlockStopStartTime = -1f;
+        private float robotBlockRunStartTime = -1f;
+        private Vector3 robotBlockRunStartPosition;
 
         protected override void Start()
         {
@@ -42,7 +67,8 @@ namespace IVI
 
             if (SEAN.SEAN.instance != null)
             {
-                var robot = SEAN.SEAN.instance.robot.gameObject;
+                robotAgent = SEAN.SEAN.instance.robot;
+                var robot = robotAgent.gameObject;
 
                 if (!GO2Agent.ContainsKey(robot))
                 {
@@ -117,6 +143,9 @@ namespace IVI
 
         protected override Vector3 UpdateVelocity()
         {
+            if (ShouldStopForRobotBlock())
+                return Vector3.zero;
+
             SEAN.Scenario.Agents.SocialForce totalForce = ComputeForce();
             var accel = totalForce.force / MASS;
             Vector3 nextVelocity = velocity + accel * Time.deltaTime;
@@ -126,6 +155,154 @@ namespace IVI
                 nextVelocity = nextVelocity.normalized * Mathf.Min(nextVelocity.magnitude, Parameters.MAX_VEL);
             }
             return nextVelocity;
+        }
+
+        private bool ShouldStopForRobotBlock()
+        {
+            bool blocked = IsRobotBlockingRoute();
+            if (!blocked)
+            {
+                ResetRobotBlockState();
+                return false;
+            }
+
+            if (!runAfterRobotBlockStop)
+                return true;
+
+            if (debugRobotBlockForceRunning)
+            {
+                UpdateRobotBlockRunDebug();
+                if (RobotBlockRunLimitReached())
+                {
+                    StopRobotBlockForceRun();
+                    return true;
+                }
+
+                return false;
+            }
+
+            if (robotBlockStopStartTime < 0f)
+                robotBlockStopStartTime = Time.time;
+
+            debugRobotBlockStoppedSeconds = Time.time - robotBlockStopStartTime;
+            if (debugRobotBlockStoppedSeconds >= Mathf.Max(0f, robotBlockRunDelaySeconds))
+            {
+                StartRobotBlockForceRun();
+                return false;
+            }
+
+            return true;
+        }
+
+        private bool IsRobotBlockingRoute()
+        {
+            if (!stopForRobotWhenBlocked || robotAgent == null || CloseEnough())
+            {
+                debugRobotBlocked = false;
+                debugRobotBlockDistance = 0f;
+                return false;
+            }
+
+            Vector3 toRobot = robotAgent.position - transform.position;
+            toRobot.y = 0f;
+            float robotDistance = toRobot.magnitude;
+            debugRobotBlockDistance = robotDistance;
+            float activeDistance = debugRobotBlocked || debugRobotBlockForceRunning
+                ? Mathf.Max(robotBlockStopDistance, robotBlockClearDistance)
+                : robotBlockStopDistance;
+
+            if (robotDistance > activeDistance || robotDistance <= 1e-4f)
+            {
+                debugRobotBlocked = false;
+                return false;
+            }
+
+            Vector3 toGoal = nearestGoalPoint - transform.position;
+            toGoal.y = 0f;
+            if (toGoal.sqrMagnitude <= 1e-4f)
+            {
+                debugRobotBlocked = false;
+                return false;
+            }
+
+            Vector3 robotDir = toRobot / robotDistance;
+            Vector3 goalDir = toGoal.normalized;
+            Vector3 forward = transform.forward;
+            forward.y = 0f;
+            if (forward.sqrMagnitude <= 1e-4f)
+                forward = goalDir;
+            else
+                forward.Normalize();
+
+            float angleLimit = Mathf.Clamp(robotBlockForwardAngleDeg, 0f, 180f);
+            bool inForwardCone = Vector3.Angle(forward, robotDir) <= angleLimit;
+            bool inGoalCone = Vector3.Angle(goalDir, robotDir) <= angleLimit;
+            bool inPathCorridor = IsRobotNearPathCorridor(toRobot, goalDir, activeDistance);
+
+            debugRobotBlocked = inForwardCone || inGoalCone || inPathCorridor;
+            return debugRobotBlocked;
+        }
+
+        private void StartRobotBlockForceRun()
+        {
+            debugRobotBlockForceRunning = true;
+            robotBlockRunStartTime = Time.time;
+            robotBlockRunStartPosition = transform.position;
+            UpdateRobotBlockRunDebug();
+        }
+
+        private void StopRobotBlockForceRun()
+        {
+            debugRobotBlockForceRunning = false;
+            robotBlockRunStartTime = -1f;
+            robotBlockStopStartTime = Time.time;
+            debugRobotBlockStoppedSeconds = 0f;
+            debugRobotBlockRunSeconds = 0f;
+            debugRobotBlockRunDistance = 0f;
+        }
+
+        private bool RobotBlockRunLimitReached()
+        {
+            return debugRobotBlockRunSeconds >= Mathf.Max(0f, robotBlockRunMaxSeconds)
+                || debugRobotBlockRunDistance >= Mathf.Max(0f, robotBlockRunMaxDistance);
+        }
+
+        private void UpdateRobotBlockRunDebug()
+        {
+            if (robotBlockRunStartTime < 0f)
+            {
+                debugRobotBlockRunSeconds = 0f;
+                debugRobotBlockRunDistance = 0f;
+                return;
+            }
+
+            debugRobotBlockRunSeconds = Time.time - robotBlockRunStartTime;
+            Vector3 runDelta = transform.position - robotBlockRunStartPosition;
+            runDelta.y = 0f;
+            debugRobotBlockRunDistance = runDelta.magnitude;
+        }
+
+        private void ResetRobotBlockState()
+        {
+            debugRobotBlocked = false;
+            debugRobotBlockForceRunning = false;
+            debugRobotBlockDistance = 0f;
+            debugRobotBlockStoppedSeconds = 0f;
+            debugRobotBlockRunSeconds = 0f;
+            debugRobotBlockRunDistance = 0f;
+            robotBlockStopStartTime = -1f;
+            robotBlockRunStartTime = -1f;
+        }
+
+        private static bool IsRobotNearPathCorridor(Vector3 toRobot, Vector3 goalDir, float distanceLimit)
+        {
+            float alongPath = Vector3.Dot(toRobot, goalDir);
+            if (alongPath <= 0f || alongPath > distanceLimit)
+                return false;
+
+            Vector3 lateral = toRobot - goalDir * alongPath;
+            float corridorHalfWidth = Mathf.Max(0.35f, distanceLimit * 0.35f);
+            return lateral.magnitude <= corridorHalfWidth;
         }
 
         void OnTriggerEnter(Collider other)

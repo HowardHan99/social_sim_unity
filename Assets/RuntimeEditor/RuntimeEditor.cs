@@ -20,6 +20,8 @@ public class RuntimeEditor : MonoBehaviour
     private Plane dragPlane;
     private Vector3 dragOffset;
     private float lastAngle;
+    private Vector3 dragBeforePos;
+    private Quaternion dragBeforeRot;
 
     // Gizmo visual objects
     private GameObject gizmoContainer;
@@ -306,13 +308,17 @@ public class RuntimeEditor : MonoBehaviour
         if (Input.GetMouseButtonDown(0))
         {
             Debug.Log("Gizmo: Mouse button down");
+            bool wasDragging = isDragging;
             if (currentMode == GizmoMode.Translate)
-            {
                 CheckTranslateHandles(ray);
-            }
             else if (currentMode == GizmoMode.Rotate)
-            {
                 CheckRotateHandles(ray);
+
+            // Capture transform state the moment a new drag starts
+            if (!wasDragging && isDragging)
+            {
+                dragBeforePos = transform.position;
+                dragBeforeRot = transform.rotation;
             }
         }
 
@@ -331,6 +337,12 @@ public class RuntimeEditor : MonoBehaviour
 
         if (Input.GetMouseButtonUp(0))
         {
+            if (isDragging)
+            {
+                RuntimeEditorManager.Instance?.PushTransformAction(
+                    gameObject, dragBeforePos, dragBeforeRot,
+                    transform.position, transform.rotation);
+            }
             isDragging = false;
         }
     }

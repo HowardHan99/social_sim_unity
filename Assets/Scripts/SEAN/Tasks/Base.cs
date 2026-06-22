@@ -136,7 +136,7 @@ namespace SEAN.Tasks
 
         }
 
-        public float completionDistance = 1.2f;
+        [System.NonSerialized] public float completionDistance = 0.3f;
 
         public int maximumNumberOfTasks = 0;
         public int taskID;
@@ -365,7 +365,7 @@ namespace SEAN.Tasks
                 //print("at the origin");
                 return false;
             }
-            float distToGoal = Vector3.Distance(controlledAvatar.position, interactiveGoal.transform.position);
+            float distToGoal = Util.Geometry.GroundPlaneDist(controlledAvatar.position, interactiveGoal.transform.position);
             //print(debounceTime + " > " + completionDistance + ", debouceCompletion distToGoal: " + distToGoal);
 
             if (distToGoal > completionDistance)

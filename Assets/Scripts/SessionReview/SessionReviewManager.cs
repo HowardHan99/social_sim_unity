@@ -116,6 +116,11 @@ namespace SessionReview
 
         public bool BlocksAutomaticTrialStart => showOnboarding || showTrialStartPrompt || trialWarmupPending;
 
+        /// <summary>True while any session UI is blocking gameplay input (onboarding, prompts, review, warmup).</summary>
+        public bool IsMovementInputBlocked =>
+            showOnboarding || showTrialStartPrompt || trialWarmupPending ||
+            showPostTrialPrompt || inRewindMode || showReviewCompletionPrompt;
+
         private static readonly float[] speedSteps = { 0.25f, 0.5f, 1f, 2f, 4f };
         private int currentSpeedIndex = 2;
         private float savedTimeScale = 1f;
@@ -225,10 +230,10 @@ namespace SessionReview
 
         private void OnTrialEnded(TrialEndInfo info)
         {
-            ExitWorldBuildingMode(true);
-
             if (inRewindMode)
                 ExitReviewMode();
+
+            ExitWorldBuildingMode(restoreGameplayCameras: inWorldBuildingMode);
 
             reviewTrialIndex = trialArchive.TrialCount - 1;
             latestTrialEndInfo = info;
@@ -316,6 +321,17 @@ namespace SessionReview
 
         private void HandleReviewCompletionPromptInput()
         {
+            // ESC backs out of the next-step menu and returns to the still-active
+            // review instead of committing to exiting the scenario. Mirror the
+            // "Keep Reviewing" button: restore the speed the menu zeroed so Space
+            // advances time again.
+            if (Input.GetKeyDown(KeyCode.Escape))
+            {
+                showReviewCompletionPrompt = false;
+                rewindController?.SetPlaybackSpeed(speedSteps[currentSpeedIndex]);
+                return;
+            }
+
             if (Input.GetKeyDown(replayTrialKey))
                 StartNextTrialFromReviewCompletion();
 
@@ -388,7 +404,24 @@ namespace SessionReview
 
             if (Input.GetKeyDown(KeyCode.Escape))
             {
-                EndReviewAndShowNextStepMenu();
+                // Back out one layer at a time instead of ending the review (and
+                // tearing down the gameplay camera) on the very first press:
+                //   1) close the export panel,
+                //   2) return to the default top-down view,
+                //   3) only then surface the next-step menu.
+                if (showReviewExportPanel)
+                {
+                    showReviewExportPanel = false;
+                }
+                else if (rewindController != null &&
+                         rewindController.CurrentPerspective != PerspectiveMode.TopDown)
+                {
+                    rewindController.SetPerspective(PerspectiveMode.TopDown);
+                }
+                else
+                {
+                    EndReviewAndShowNextStepMenu();
+                }
                 return;
             }
 
@@ -430,17 +463,6 @@ namespace SessionReview
                 rewindController.PlayAudioReplayTest();
             }
 
-            if (Input.GetKeyDown(speedUpKey))
-            {
-                currentSpeedIndex = Mathf.Min(currentSpeedIndex + 1, speedSteps.Length - 1);
-                rewindController.SetPlaybackSpeed(speedSteps[currentSpeedIndex]);
-            }
-            if (Input.GetKeyDown(speedDownKey))
-            {
-                currentSpeedIndex = Mathf.Max(currentSpeedIndex - 1, 0);
-                rewindController.SetPlaybackSpeed(speedSteps[currentSpeedIndex]);
-            }
-
             if (Input.GetKeyDown(robotFPKey))
                 rewindController.SetPerspective(PerspectiveMode.RobotFirstPerson);
             if (Input.GetKeyDown(pwdFPKey))
@@ -460,10 +482,33 @@ namespace SessionReview
             if (Input.GetKeyDown(ghostTrailKey))
                 rewindController.ToggleTrails();
 
+            // Trial navigation takes priority over speed when the same keys are bound to both.
+            // Speed only fires when no trial switch occurred this frame.
+            bool trialSwitched = false;
             if (Input.GetKeyDown(prevTrialKey) && trialArchive.TrialCount > 1)
+            {
+                trialSwitched = true;
                 EnterRewindMode(Mathf.Max(0, reviewTrialIndex - 1));
-            if (Input.GetKeyDown(nextTrialKey) && trialArchive.TrialCount > 1)
+            }
+            if (!trialSwitched && Input.GetKeyDown(nextTrialKey) && trialArchive.TrialCount > 1)
+            {
+                trialSwitched = true;
                 EnterRewindMode(Mathf.Min(trialArchive.TrialCount - 1, reviewTrialIndex + 1));
+            }
+
+            if (!trialSwitched)
+            {
+                if (Input.GetKeyDown(speedUpKey))
+                {
+                    currentSpeedIndex = Mathf.Min(currentSpeedIndex + 1, speedSteps.Length - 1);
+                    rewindController.SetPlaybackSpeed(speedSteps[currentSpeedIndex]);
+                }
+                if (Input.GetKeyDown(speedDownKey))
+                {
+                    currentSpeedIndex = Mathf.Max(currentSpeedIndex - 1, 0);
+                    rewindController.SetPlaybackSpeed(speedSteps[currentSpeedIndex]);
+                }
+            }
         }
 
         private void HandleTopDownMouseInput()
@@ -542,10 +587,10 @@ namespace SessionReview
             var trial = trialArchive.GetTrial(trialIndex);
             if (trial == null) return;
 
-            ExitWorldBuildingMode(true);
-
             if (inRewindMode)
                 rewindController.ExitRewind();
+
+            ExitWorldBuildingMode(true);
 
             reviewTrialIndex = trialIndex;
             inRewindMode = true;
@@ -599,9 +644,9 @@ namespace SessionReview
         {
             CaptureReviewCameraForWorldBuilding();
             showReviewCompletionPrompt = false;
-            ExitWorldBuildingMode(true);
             if (inRewindMode)
                 ExitReviewMode();
+            ExitWorldBuildingMode(true);
 
             HidePostTrialPrompt();
             latestTrialEndInfo = null;
@@ -766,9 +811,9 @@ namespace SessionReview
         {
             showReviewCompletionPrompt = false;
             CaptureReviewCameraForWorldBuilding();
-            ExitWorldBuildingMode(true);
             if (inRewindMode)
                 ExitReviewMode();
+            ExitWorldBuildingMode(true);
 
             HidePostTrialPrompt();
             SetOnboardingVisible(true);
@@ -1135,7 +1180,7 @@ namespace SessionReview
             y += 26f;
 
             string controlsText =
-                "Controls: Left click select/drag gizmo | T translate | R rotate | Right mouse free cam | Middle mouse pan | Wheel zoom | F4 top-down reset | E or Esc exit editor";
+                "Controls: Left click select/drag gizmo | Shift+click add moveable | Shift+drag box-select many | T translate | R rotate | Right mouse free cam | Middle mouse pan | Wheel zoom | F4 top-down reset | Esc deselect | \"Back To Menu\" to exit";
             float controlsHeight = bodyStyle.CalcHeight(new GUIContent(controlsText), contentWidth);
             GUI.Label(new Rect(contentX, y, contentWidth, controlsHeight), controlsText, bodyStyle);
             y += controlsHeight + 12f;
@@ -1156,6 +1201,26 @@ namespace SessionReview
 
             if (GUI.Button(new Rect(contentX + (buttonWidth + buttonGap) * 2f, y, buttonWidth, buttonHeight), "Run Again"))
                 StartNextTrialFromPrompt();
+
+            y += buttonHeight + 8f;
+
+            int undoCount = runtimeEditorManager != null ? runtimeEditorManager.UndoCount : 0;
+            int redoCount = runtimeEditorManager != null ? runtimeEditorManager.RedoCount : 0;
+            bool hasSelection = runtimeEditorManager?.CurrentSelectedObject != null;
+
+            GUI.enabled = undoCount > 0;
+            if (GUI.Button(new Rect(contentX, y, buttonWidth, buttonHeight), $"Undo  [{undoCount}]  Ctrl+Z"))
+                runtimeEditorManager?.UndoLastAction();
+
+            GUI.enabled = redoCount > 0;
+            if (GUI.Button(new Rect(contentX + buttonWidth + buttonGap, y, buttonWidth, buttonHeight), $"Redo  [{redoCount}]  Ctrl+Y"))
+                runtimeEditorManager?.RedoLastAction();
+
+            GUI.enabled = hasSelection;
+            if (GUI.Button(new Rect(contentX + (buttonWidth + buttonGap) * 2f, y, buttonWidth, buttonHeight), "Delete  [Del]"))
+                runtimeEditorManager?.DeleteSelectedObject();
+
+            GUI.enabled = true;
 
             DrawWorldBuildingSpawnPalette();
         }
@@ -1474,6 +1539,9 @@ namespace SessionReview
             worldBuildingCameraController.SyncToCurrentTransform();
 
             runtimeEditorManager.suppressSpawnCanvas = true;
+            // World building owns the editor lifecycle, so ESC/hotkey must not self-exit and tear down
+            // the world-building camera. Exit is via the "Back To Menu" button instead.
+            runtimeEditorManager.externalLifecycleControl = true;
             runtimeEditorManager.SetEditorMode(true);
 
             showPostTrialPrompt = false;
@@ -1488,6 +1556,7 @@ namespace SessionReview
             if (runtimeEditorManager != null)
             {
                 runtimeEditorManager.suppressSpawnCanvas = false;
+                runtimeEditorManager.externalLifecycleControl = false;
 
                 if (runtimeEditorManager.isEditorActive)
                     runtimeEditorManager.SetEditorMode(false);
@@ -1548,7 +1617,7 @@ namespace SessionReview
 
             var manualWheelchair = FindPwdPlayerControllerIncludingInactive();
             if (manualWheelchair != null)
-                ZeroRigidbodies(manualWheelchair.transform);
+                manualWheelchair.ResetToSpawn();
         }
 
         private static IVI.ManualWheelchairController FindPwdPlayerControllerIncludingInactive()
@@ -2094,7 +2163,6 @@ namespace SessionReview
                 cam.gameObject.SetActive(true);
                 cam.enabled = true;
                 cam.targetDisplay = 0;
-                Debug.Log($"[SessionReview] Enabled {label}: '{cam.name}', enabled={cam.enabled}, display={cam.targetDisplay}");
             }
 
             EnableRobotCam(sean.robot.camera_first, "camera_first");
@@ -2105,6 +2173,10 @@ namespace SessionReview
         {
             Camera legacyMain = Camera.main;
             if (legacyMain == null)
+                return;
+
+            // Never destroy the SessionReviewManager's own GameObject (which also hosts the rewindCamera)
+            if (legacyMain.gameObject == gameObject)
                 return;
 
             var sean = SEAN.SEAN.instance;

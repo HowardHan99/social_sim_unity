@@ -20,16 +20,16 @@ namespace SessionReview
         [Header("Markers")]
         [SerializeField] private float markerSize = 0.3f;
 
-        [Header("Stop Circles")]
+        [Header("Stop Markers")]
         [SerializeField] private bool showRobotStopCircles = true;
         [SerializeField] private float stopSpeedThreshold = 0.05f;
         [SerializeField] private float minStopDuration = 0.6f;
         [SerializeField] private float stopCircleBaseRadius = 0.1f;
-        [SerializeField] private float stopCircleRadiusPerSecond = 0.1f;
-        [SerializeField] private float stopCircleMaxRadius = 2.5f;
+        [SerializeField] private float stopCircleRadiusPerSecond = 0.06f;
+        [SerializeField] private float stopCircleMaxRadius = 0.55f;
         [SerializeField] private int stopCircleSegments = 24;
-        [SerializeField] private float stopCircleYOffset = 0.16f;
-        [SerializeField] private Color stopCircleColor = new Color(1f, 0.95f, 0.2f, 0.95f);
+        [SerializeField] private float stopCircleYOffset = 0.05f;
+        [SerializeField] private Color stopCircleColor = new Color(1f, 0.95f, 0.2f, 0.85f);
 
         [Header("Color Palette")]
         [SerializeField] private Color robotColor = new Color(0.9f, 0.2f, 0.2f);
@@ -77,6 +77,7 @@ namespace SessionReview
         private List<LineRenderer> trajectoryLines = new List<LineRenderer>();
         private List<LineRenderer> arrowLines = new List<LineRenderer>();
         private List<LineRenderer> stopCircleLines = new List<LineRenderer>();
+        private List<GameObject> stopSpheres = new List<GameObject>();
         private List<LineRenderer> planPathLines = new List<LineRenderer>();
         private List<LineRenderer> annotationLines = new List<LineRenderer>();
         private List<GameObject> vlmMarkers = new List<GameObject>();
@@ -127,8 +128,16 @@ namespace SessionReview
             ClearAll();
             if (trial == null || recording == null) return;
 
+            // Keep the overlay at world root (NOT parented to this manager). The manager's
+            // GameObject can sit under a non-zero / moving parent in some scenes. Trajectory
+            // LineRenderers use useWorldSpace=true so they ignore that transform, but parented
+            // primitives (stop spheres, start/end markers, annotation markers) would inherit
+            // the parent offset and drift away from the real world positions. Rooting the
+            // overlay makes every overlay object render in true world space, consistently.
             overlayParent = new GameObject("TrajectoryOverlay");
-            overlayParent.transform.SetParent(transform);
+            overlayParent.transform.SetParent(null, worldPositionStays: false);
+            overlayParent.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+            overlayParent.transform.localScale = Vector3.one;
 
             if (recording.timelineDict == null)
                 recording.BuildCache();
@@ -168,6 +177,9 @@ namespace SessionReview
                     rotations.Add(state.rotation);
                     timestamps.Add(state.timestamp);
                 }
+
+                if (role == AgentRole.Robot)
+                    TrimInitialFall(positions, rotations, timestamps);
 
                 if (positions.Count < 2) continue;
                 agentsFound++;
@@ -352,6 +364,7 @@ namespace SessionReview
             lr.startWidth = width;
             lr.endWidth = width;
             lr.useWorldSpace = true;
+            lr.numCornerVertices = 5;
 
             if (lineMaterial != null)
                 lr.material = new Material(lineMaterial);
@@ -447,6 +460,35 @@ namespace SessionReview
             return trajectoryYOffset;
         }
 
+        // Removes leading positions where the robot is still falling from its spawn height.
+        // We find the lowest Y the robot reaches (settled ground level) and drop all
+        // leading frames where it is more than 0.25 m above that level.
+        private static void TrimInitialFall(List<Vector3> positions, List<Quaternion> rotations, List<float> timestamps)
+        {
+            if (positions.Count < 2) return;
+
+            float groundY = float.MaxValue;
+            foreach (var p in positions)
+                if (p.y < groundY) groundY = p.y;
+
+            const float fallThreshold = 0.25f;
+            int firstGrounded = 0;
+            for (int i = 0; i < positions.Count; i++)
+            {
+                if (positions[i].y <= groundY + fallThreshold)
+                {
+                    firstGrounded = i;
+                    break;
+                }
+            }
+
+            if (firstGrounded <= 0) return;
+
+            positions.RemoveRange(0, firstGrounded);
+            rotations.RemoveRange(0, firstGrounded);
+            timestamps.RemoveRange(0, firstGrounded);
+        }
+
         private int CreateStopCircles(string id, List<Vector3> positions, List<float> timestamps, Color baseColor)
         {
             if (positions == null || timestamps == null || positions.Count < 2 || timestamps.Count != positions.Count)
@@ -483,7 +525,7 @@ namespace SessionReview
             }
 
             if (circlesCreated > 0)
-                Debug.Log($"[SessionReview] Stop circles for \"{id}\": {circlesCreated}");
+                Debug.Log($"[SessionReview] Stop spheres for \"{id}\": {circlesCreated}");
 
             return circlesCreated;
         }
@@ -507,86 +549,36 @@ namespace SessionReview
             }
             if (count == 0) return false;
             center /= count;
-            center.y += stopCircleYOffset;
 
             float radius = stopCircleBaseRadius + duration * stopCircleRadiusPerSecond;
             radius = Mathf.Clamp(radius, stopCircleBaseRadius, stopCircleMaxRadius);
 
-            var circleObj = new GameObject($"StopCircle_{id}_{startIndex}_{endIndex}");
-            circleObj.transform.SetParent(overlayParent.transform);
-            var lr = circleObj.AddComponent<LineRenderer>();
-            RegisterRendererToGroup("robot_stops", lr);
-
-            lr.useWorldSpace = true;
-            lr.loop = false;
-            lr.startWidth = lineWidth * 0.5f;
-            lr.endWidth = lineWidth * 0.5f;
-
-            if (lineMaterial != null)
-                lr.material = new Material(lineMaterial);
-            else
-                lr.material = new Material(Shader.Find("Sprites/Default"));
-            lr.material.color = Color.white;
+            // Sphere sits on the ground surface
+            center.y += stopCircleYOffset + radius;
 
             Color c = Color.Lerp(baseColor, stopCircleColor, 0.8f);
-            c.a = stopCircleColor.a;
-            lr.startColor = c;
-            lr.endColor = c;
+            c.a = 1f;
 
-            int segments = Mathf.Max(8, stopCircleSegments);
-            lr.positionCount = segments + 1;
-            for (int i = 0; i <= segments; i++)
-            {
-                float angle = (i / (float)segments) * Mathf.PI * 2f;
-                Vector3 offset = new Vector3(Mathf.Cos(angle) * radius, 0f, Mathf.Sin(angle) * radius);
-                lr.SetPosition(i, center + offset);
-            }
+            var sphereObj = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            sphereObj.name = $"StopSphere_{id}_{startIndex}_{endIndex}";
+            sphereObj.transform.SetParent(overlayParent.transform);
+            sphereObj.transform.position = center;
+            sphereObj.transform.localScale = Vector3.one * radius * 2f;
 
-            stopCircleLines.Add(lr);
+            var col = sphereObj.GetComponent<Collider>();
+            if (col != null) Destroy(col);
 
-            CreateStopCircleCross(circleObj.transform, center, radius, c);
+            var rend = sphereObj.GetComponent<Renderer>();
+            var mat = new Material(Shader.Find("Standard"));
+            mat.color = c;
+            mat.SetFloat("_Metallic", 0f);
+            mat.SetFloat("_Glossiness", 0.25f);
+            rend.material = mat;
+
+            RegisterRendererToGroup("robot_stops", rend);
+            stopSpheres.Add(sphereObj);
 
             return true;
-        }
-
-        private void CreateStopCircleCross(Transform circleParent, Vector3 center, float radius, Color color)
-        {
-            float crossWidth = lineWidth * 0.35f;
-
-            for (int arm = 0; arm < 2; arm++)
-            {
-                var crossObj = new GameObject(arm == 0 ? "Cross_H" : "Cross_V");
-                crossObj.transform.SetParent(circleParent);
-
-                var lr = crossObj.AddComponent<LineRenderer>();
-                RegisterRendererToGroup("robot_stops", lr);
-                lr.useWorldSpace = true;
-                lr.loop = false;
-                lr.positionCount = 2;
-                lr.startWidth = crossWidth;
-                lr.endWidth = crossWidth;
-
-                if (lineMaterial != null)
-                    lr.material = new Material(lineMaterial);
-                else
-                    lr.material = new Material(Shader.Find("Sprites/Default"));
-                lr.material.color = Color.white;
-                lr.startColor = color;
-                lr.endColor = color;
-
-                if (arm == 0)
-                {
-                    lr.SetPosition(0, center + new Vector3(-radius, 0f, 0f));
-                    lr.SetPosition(1, center + new Vector3(radius, 0f, 0f));
-                }
-                else
-                {
-                    lr.SetPosition(0, center + new Vector3(0f, 0f, -radius));
-                    lr.SetPosition(1, center + new Vector3(0f, 0f, radius));
-                }
-
-                stopCircleLines.Add(lr);
-            }
         }
 
         private void CreateVLMAnnotations(List<VLMCaptureEvent> events)
@@ -1079,6 +1071,7 @@ namespace SessionReview
             trajectoryLines.Clear();
             arrowLines.Clear();
             stopCircleLines.Clear();
+            stopSpheres.Clear();
             planPathLines.Clear();
             annotationLines.Clear();
             vlmMarkers.Clear();

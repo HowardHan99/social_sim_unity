@@ -7,8 +7,8 @@ namespace IVI
     public class ManualWheelchairController : MonoBehaviour
     {
         [Header("Control Settings")]
-        public float moveSpeed = 0.7f;
-        public float rotationSpeed = 100f;
+        public float moveSpeed = 0.8f;
+        public float rotationSpeed = 240f;
         public KeyCode toggleModeKey = KeyCode.RightShift;
         public bool useWASD = true;
         public bool startInManualMode = false;
@@ -19,6 +19,12 @@ namespace IVI
         public string joystickToggleModeAxis = string.Empty;
         public float joystickDeadzone = 0.03f;
         public float joystickStartupDeadzone = 0.03f;
+        public float joystickLinearFullThrow = 0.1f;
+        public float joystickAngularFullThrow = 1.0f;
+        public float joystickLinearSensitivity = 1.0f;
+        public float joystickAngularSensitivity = 1.0f;
+        public float joystickLinearResponseExponent = 1.6f;
+        public float joystickAngularResponseExponent = 1.0f;
         public bool invertJoystickHorizontal = false;
         public bool invertJoystickVertical = true;
 
@@ -28,9 +34,9 @@ namespace IVI
         public float sPressWindowSec = 0.6f;
 
         [Header("Manual Smoothing")]
-        public float manualAcceleration = 2.5f;
+        public float manualAcceleration = 4.0f;
         public float manualDeceleration = 3.0f;
-        public float manualAngularAcceleration = 720f;
+        public float manualAngularAcceleration = 1200f;
 
         [Header("Debug Manual Brake (read-only)")]
         public int debugSBrakePressCount;
@@ -51,6 +57,7 @@ namespace IVI
         private bool initialized = false;
         private bool waitingForStart = false;
         public bool WaitingForStart => waitingForStart;
+        private Vector3 spawnPosition;
         private Quaternion spawnRotation;
         private WheelchairCameraSmoothing camSmoothing;
         private bool JoystickPresent => enableJoystick && Input.GetJoystickNames().Length > 0;
@@ -66,7 +73,9 @@ namespace IVI
 
         void Start()
         {
+            spawnPosition = transform.position;
             spawnRotation = transform.rotation;
+            ApplyJoystickResponseDefaults();
             sfpwdAgent = GetComponent<SFPWDAgent>();
             rb = GetComponent<Rigidbody>();
             animator = GetComponent<Animator>();
@@ -95,6 +104,15 @@ namespace IVI
 
             waitingForStart = false;
             initialized = true;
+
+            // Session review may have disabled this component (FreezePwdController) between
+            // Start() and this coroutine resuming. Don't override that freeze.
+            if (!enabled)
+            {
+                Debug.Log("[PWD] ManualWheelchairController disabled by session review before init completed; staying frozen.");
+                yield break;
+            }
+
             if (startInManualMode)
                 SetManualMode();
             else
@@ -143,8 +161,8 @@ namespace IVI
                 if (!joystickCenterCaptured)
                     CaptureJoystickCenter();
 
-                float h = ReadJoystickAxis(joystickHorizontalAxis, invertJoystickHorizontal, joystickHorizontalCenter);
-                float v = ReadJoystickAxis(joystickVerticalAxis, invertJoystickVertical, joystickVerticalCenter);
+                float h = ProcessJoystickInput(ReadJoystickAxis(joystickHorizontalAxis, invertJoystickHorizontal, joystickHorizontalCenter), EffectiveJoystickDeadzone(), joystickAngularFullThrow, joystickAngularSensitivity, joystickAngularResponseExponent);
+                float v = ProcessJoystickInput(ReadJoystickAxis(joystickVerticalAxis, invertJoystickVertical, joystickVerticalCenter), EffectiveJoystickDeadzone(), joystickLinearFullThrow, joystickLinearSensitivity, joystickLinearResponseExponent);
                 debugJoystickProcessedHorizontal = h;
                 debugJoystickProcessedVertical = v;
                 manualDesiredLin = moveSpeed * v;
@@ -318,6 +336,20 @@ namespace IVI
             Debug.Log("[PWD] AUTO mode");
         }
 
+        public void ResetToSpawn()
+        {
+            transform.position = spawnPosition;
+            transform.rotation = spawnRotation;
+            manualVelocity = Vector3.zero;
+            currentManualLinearSpeed = 0f;
+            currentManualAngularSpeed = 0f;
+            if (rb != null)
+            {
+                rb.velocity = Vector3.zero;
+                rb.angularVelocity = Vector3.zero;
+            }
+        }
+
         public void ApplyStartupControlMode(bool startManual)
         {
             startInManualMode = startManual;
@@ -412,7 +444,7 @@ namespace IVI
 
             try
             {
-                return Input.GetAxis(axisName);
+                return Input.GetAxisRaw(axisName);
             }
             catch (System.ArgumentException)
             {
@@ -428,6 +460,48 @@ namespace IVI
         private float EffectiveJoystickDeadzone()
         {
             return Mathf.Max(joystickDeadzone, joystickStartupDeadzone);
+        }
+
+        private float ScaleJoystickInput(float value, float sensitivity)
+        {
+            return Mathf.Clamp(value * Mathf.Max(0f, sensitivity), -1f, 1f);
+        }
+
+        private float ProcessJoystickInput(float value, float deadzone, float fullThrow, float sensitivity, float responseExponent)
+        {
+            float normalized = NormalizeJoystickThrow(ApplyJoystickDeadzone(value, deadzone), fullThrow);
+            float curved = ApplyJoystickResponseCurve(normalized, responseExponent);
+            return ScaleJoystickInput(curved, sensitivity);
+        }
+
+        private float NormalizeJoystickThrow(float value, float fullThrow)
+        {
+            return Mathf.Clamp(value / Mathf.Max(0.01f, Mathf.Abs(fullThrow)), -1f, 1f);
+        }
+
+        private float ApplyJoystickResponseCurve(float value, float responseExponent)
+        {
+            float exponent = Mathf.Max(0.25f, responseExponent);
+            return Mathf.Sign(value) * Mathf.Pow(Mathf.Abs(value), exponent);
+        }
+
+        private void ApplyJoystickResponseDefaults()
+        {
+            if (Mathf.Approximately(joystickLinearFullThrow, 0.25f) && Mathf.Approximately(joystickLinearSensitivity, 1.0f))
+                joystickLinearFullThrow = 0.1f;
+            if (joystickLinearSensitivity > 2.0f)
+                joystickLinearSensitivity = 1.0f;
+            if (joystickAngularSensitivity > 1.5f)
+                joystickAngularSensitivity = 1.0f;
+            if (joystickLinearResponseExponent <= 0f)
+                joystickLinearResponseExponent = 1.6f;
+            if (joystickAngularResponseExponent <= 0f)
+                joystickAngularResponseExponent = 1.2f;
+        }
+
+        private float ApplyJoystickDeadzone(float value, float deadzone)
+        {
+            return Mathf.Abs(value) >= deadzone ? value : 0f;
         }
 
         private bool ReadJoystickButtonDown(string axisName)

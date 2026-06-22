@@ -365,6 +365,9 @@ namespace SessionReview
                     break;
             }
 
+            if (trajectoryRenderer != null)
+                trajectoryRenderer.SetVisible(mode == PerspectiveMode.TopDown);
+
             if (rewindComfortBlur != null)
                 rewindComfortBlur.TriggerTransitionBlur();
         }
@@ -1383,8 +1386,14 @@ namespace SessionReview
 
             if (trailParent == null)
             {
+                // World-rooted, not parented to this manager: the manager's GameObject can sit
+                // under a non-zero / moving parent at runtime. The trail LineRenderers use
+                // useWorldSpace so they're immune today, but keeping the container at world root
+                // guarantees correctness if a parented child is ever added here.
                 trailParent = new GameObject("RewindTrails");
-                trailParent.transform.SetParent(transform);
+                trailParent.transform.SetParent(null, worldPositionStays: false);
+                trailParent.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+                trailParent.transform.localScale = Vector3.one;
             }
 
             foreach (var roleEntry in currentTrial.agentRoles)
@@ -1453,8 +1462,12 @@ namespace SessionReview
 
             if (activePlanLine == null)
             {
+                // World-rooted (see RewindTrails note): keep overlay geometry independent of
+                // wherever this manager sits in the scene hierarchy at runtime.
                 var obj = new GameObject("ActivePlanPath");
-                obj.transform.SetParent(transform);
+                obj.transform.SetParent(null, worldPositionStays: false);
+                obj.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+                obj.transform.localScale = Vector3.one;
                 activePlanLine = obj.AddComponent<LineRenderer>();
                 activePlanLine.startWidth = activePlanWidth;
                 activePlanLine.endWidth = activePlanWidth;
@@ -1515,7 +1528,7 @@ namespace SessionReview
             string trailStr = showTrails ? "Trails:ON" : "Trails:OFF";
             string controlsStr = perspectiveMode == PerspectiveMode.FreeCam
                 ? "RMB:Look  MMB:Pan  WASD:Move  Q/E:Up/Down  Wheel:Zoom  Shift:Fast  Esc:Exit"
-                : "Space:Play  Left/Right:Step  +/-:Speed  F1-F5:View  G:Trails  Esc:Exit";
+                : "Space:Play  Left/Right:Step  [/]:Speed/Trials  F1-F5:View  G:Trails  Esc:Exit";
 
             GUI.Label(new Rect(20, labelY, barWidth, 20),
                 $"{playStr} {timeStr}  Speed:{speedStr}  [{perspStr}]  {trailStr}");

@@ -2091,8 +2091,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 82986ae7dfa33654295162cffcb1b085, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  moveSpeed: 2
-  rotationSpeed: 110
+  moveSpeed: 0.8
+  rotationSpeed: 240
   toggleModeKey: 303
   useWASD: 1
   startInManualMode: 1
@@ -2103,11 +2103,17 @@ MonoBehaviour:
   joystickToggleModeAxis: 
   joystickDeadzone: 0.03
   joystickStartupDeadzone: 0.03
+  joystickLinearFullThrow: 0.1
+  joystickAngularFullThrow: 1
+  joystickLinearSensitivity: 1
+  joystickAngularSensitivity: 1
+  joystickLinearResponseExponent: 1.6
+  joystickAngularResponseExponent: 1.0
   invertJoystickHorizontal: 0
   invertJoystickVertical: 1
-  manualAcceleration: 2.5
+  manualAcceleration: 4
   manualDeceleration: 3
-  manualAngularAcceleration: 720
+  manualAngularAcceleration: 1200
   isManualMode: 0
   debugJoystickRawHorizontal: 0
   debugJoystickRawVertical: 0

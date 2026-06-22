@@ -49,14 +49,21 @@ MonoBehaviour:
   EnableJoystick: 1
   PublishOnlyWhenRobotControlled: 1
   EnableKeyboard: 1
-  JoystickScaleLinear: -0.5
-  JoystickScaleAngular: -1.7
+  JoystickScaleLinear: -0.8
+  JoystickScaleAngular: -8
   JoystickLinearAxis: joystickLinearAxis
   JoystickAngularAxis: LogitechTwist
   JoystickStartAxis: L1
   JoystickDeadzone: 0.03
-  FixedScaleLinear: -0.5
-  FixedScaleAngular: -0.5
+  JoystickLinearFullThrow: 0.1
+  JoystickAngularFullThrow: 1
+  JoystickLinearResponseExponent: 1.6
+  JoystickAngularResponseExponent: 1.0
+  JoystickLinearAcceleration: 4
+  JoystickLinearDeceleration: 3
+  JoystickAngularAcceleration: 20
+  FixedScaleLinear: -0.8
+  FixedScaleAngular: -0.8
 --- !u!114 &1618161864257792886
 MonoBehaviour:
   m_ObjectHideFlags: 0
