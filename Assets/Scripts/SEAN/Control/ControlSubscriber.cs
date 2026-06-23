@@ -29,6 +29,8 @@ namespace SEAN.Control
             if (!sean.input.LocalInput) { return; }
             if (sean.input.L1)
             {
+                if (Time.frameCount % 15 == 0)
+                    Debug.Log($"[TURNDIAG] ControlSubscriber.bypass FIRED on {GetType().Name} angular.z={sean.input.CmdVel.angular.z:F3}", this);
                 CmdVelMessage(sean.input.CmdVel);
             }
         }

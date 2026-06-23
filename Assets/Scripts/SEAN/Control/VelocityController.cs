@@ -320,6 +320,9 @@ namespace SEAN.Control
 
                 manualDesiredLin = manualLinearSpeed * joystickLinearInput;
                 manualDesiredAng = manualAngularSpeed * joystickAngularInput;
+
+                if (Mathf.Abs(joystickAngularInput) > 0.01f && Time.frameCount % 15 == 0)
+                    Debug.Log($"[TURNDIAG] MANUAL-path rawAng={rawAngularInput:F3} proc={joystickAngularInput:F3} manualAngularSpeed={manualAngularSpeed} desiredAng={manualDesiredAng:F3}", this);
             }
             else
             {
@@ -536,6 +539,9 @@ namespace SEAN.Control
 
             DebugAppliedLinSpeed = appliedLinVelocity;
             DebugAppliedAngSpeed = appliedAngVelocity;
+
+            if (Mathf.Abs(appliedAngVelocity) > 0.01f && Time.frameCount % 15 == 0)
+                Debug.Log($"[TURNDIAG] APPLY manualActive={manualControlActive} bypass={bypassUnityVelocityPostProcessing} target={targetAngVelocity:F3} applied={appliedAngVelocity:F3} directRot={(manualControlActive && useDirectManualRotation)}", this);
 
             if (manualControlActive && useDirectManualRotation)
             {

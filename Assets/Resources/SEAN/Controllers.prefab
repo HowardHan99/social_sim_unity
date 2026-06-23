@@ -79,3 +79,7 @@ MonoBehaviour:
   P: 1
   I: 1
   D: 1
+  manualAngularSpeed: 6
+  manualAngularAcceleration: 20
+  joystickAngularFullThrow: 0.2
+  joystickAngularResponseExponent: 1

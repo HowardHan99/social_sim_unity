@@ -191,6 +191,10 @@ namespace SEAN.Input
             _horizontal = currentJoystickAngular;
             _vertical = currentJoystickLinear;
             _l1 = GetAxisSafely(ResolveJoystickAxisName(JoystickStartAxis)) != 0;
+
+            if (Mathf.Abs(_horizontal) > 0.01f && Time.frameCount % 15 == 0)
+                Debug.Log($"[TURNDIAG] InputPublisher horizontal={_horizontal:F3} scaleAng={JoystickScaleAngular} L1={_l1}", this);
+
             Send();
         }
 
