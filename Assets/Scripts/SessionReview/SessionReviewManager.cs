@@ -2908,8 +2908,8 @@ namespace SessionReview
             walkerPreview = LoadTextureFromAssets("UIResources/walkerman2.png");
             whiteCanePreview = LoadTextureFromAssets("UIResources/blindman2.png");
             canePreview = LoadTextureFromAssets("UIResources/caneuser.png");
-            femaleChildPreview = LoadTextureFromAssets("UIResources/female-child.png");
-            maleChildPreview = LoadTextureFromAssets("UIResources/male-child.png");
+            femaleChildPreview = LoadTextureFromAssets("UIResources/girl.png");
+            maleChildPreview = LoadTextureFromAssets("UIResources/boy.png");
             phoneUserPreview = LoadTextureFromAssets("UIResources/phoneuser.png");
         }
 

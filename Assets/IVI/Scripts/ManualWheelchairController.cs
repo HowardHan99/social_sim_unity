@@ -40,6 +40,17 @@ namespace IVI
         [Tooltip("How far down to search for ground from the ray start.")]
         public float groundRayDistance = 6f;
 
+        [Header("Step / Curb Collision")]
+        [Tooltip("Probe the ground ahead before moving. If the ground steps up or down by more than " +
+                 "Max Step Height, the move is blocked so curbs between sidewalk and road act like walls " +
+                 "instead of letting the character climb or drop onto the new height.")]
+        public bool blockStepHeight = true;
+        [Tooltip("Largest vertical change (meters) the character can walk over. Slopes and tiny bumps " +
+                 "below this are followed smoothly; curbs/ledges taller than this block movement.")]
+        public float maxStepHeight = 0.12f;
+        [Tooltip("When moving diagonally into a curb, slide along the edge instead of stopping dead.")]
+        public bool slideAlongSteps = true;
+
         [Header("Manual Brake/Reverse Behavior")]
         public float brakeStopThreshold = 0.02f;
         public int sPressesToEnableReverse = 2;
@@ -161,7 +172,7 @@ namespace IVI
             if (isManualMode)
             {
                 HandleInput();
-                transform.position += manualVelocity * Time.deltaTime;
+                transform.position = ApplyGroundedMove(transform.position, manualVelocity * Time.deltaTime);
                 UpdateAnimator();
             }
             else
@@ -175,24 +186,74 @@ namespace IVI
                     vel = rb.velocity;
 
                 vel.y = 0f;
-                if (vel.sqrMagnitude > 0.001f)
-                    transform.position += vel * Time.deltaTime;
+                transform.position = ApplyGroundedMove(transform.position, vel * Time.deltaTime);
 
                 manualVelocity = vel;
                 UpdateAnimator();
             }
 
-            SnapToGround();
+            // When step collision is on, ApplyGroundedMove already keeps the character grounded
+            // (and refuses to climb curbs). The free snap is only used in the legacy mode.
+            if (!blockStepHeight)
+                SnapToGround();
         }
 
-        // Places the character's feet on the ground via a downward raycast, ignoring its own
-        // colliders. Keeps a transform-driven kinematic character on uneven floors/slopes.
-        void SnapToGround()
+        // Moves the character horizontally while keeping it on the ground, treating curbs/ledges
+        // taller than maxStepHeight as walls (the move into them is blocked instead of snapping up).
+        Vector3 ApplyGroundedMove(Vector3 pos, Vector3 horizDelta)
         {
-            if (!stickToGround)
-                return;
+            horizDelta.y = 0f;
 
-            Vector3 origin = transform.position + Vector3.up * groundRayStartHeight;
+            if (!stickToGround || !blockStepHeight)
+                return pos + horizDelta; // legacy path: free move, SnapToGround() places Y afterwards
+
+            // Ground height directly under where the character currently stands.
+            float currentGroundY;
+            if (!SampleGroundY(pos, out currentGroundY))
+                currentGroundY = pos.y - groundOffset; // no ground found: keep relative feet height
+
+            // Try the full move first.
+            Vector3 moved = TryStep(pos, horizDelta, currentGroundY);
+
+            // If blocked, try sliding along each axis so diagonal walks glide along a curb edge.
+            if (slideAlongSteps && moved == pos && horizDelta.sqrMagnitude > 1e-8f)
+            {
+                Vector3 alongX = TryStep(pos, new Vector3(horizDelta.x, 0f, 0f), currentGroundY);
+                if (alongX != pos)
+                    return alongX;
+
+                Vector3 alongZ = TryStep(pos, new Vector3(0f, 0f, horizDelta.z), currentGroundY);
+                if (alongZ != pos)
+                    return alongZ;
+            }
+
+            return moved;
+        }
+
+        // Returns the grounded destination if the step up/down is within maxStepHeight; otherwise
+        // returns the original position (movement blocked, i.e. the character "collides" with the curb).
+        Vector3 TryStep(Vector3 pos, Vector3 horizDelta, float currentGroundY)
+        {
+            Vector3 target = pos + horizDelta;
+
+            float targetGroundY;
+            if (!SampleGroundY(target, out targetGroundY))
+                return pos; // no ground ahead (gap/edge): block so we don't walk into the void
+
+            float dy = targetGroundY - currentGroundY;
+            if (dy > maxStepHeight || dy < -maxStepHeight)
+                return pos; // curb/ledge taller than a step: block the move
+
+            target.y = targetGroundY + groundOffset;
+            return target;
+        }
+
+        // Highest non-self ground height under a given XZ position. Returns false if nothing is hit.
+        bool SampleGroundY(Vector3 atPos, out float groundY)
+        {
+            groundY = 0f;
+
+            Vector3 origin = new Vector3(atPos.x, atPos.y + groundRayStartHeight, atPos.z);
             float maxDistance = groundRayStartHeight + groundRayDistance;
 
             RaycastHit[] hits = Physics.RaycastAll(
@@ -212,11 +273,24 @@ namespace IVI
                 }
             }
 
-            if (!found)
+            if (found)
+                groundY = bestY;
+            return found;
+        }
+
+        // Places the character's feet on the ground via a downward raycast, ignoring its own
+        // colliders. Used only in legacy mode (Block Step Height off).
+        void SnapToGround()
+        {
+            if (!stickToGround)
+                return;
+
+            float groundY;
+            if (!SampleGroundY(transform.position, out groundY))
                 return;
 
             Vector3 p = transform.position;
-            p.y = bestY + groundOffset;
+            p.y = groundY + groundOffset;
             transform.position = p;
         }
 

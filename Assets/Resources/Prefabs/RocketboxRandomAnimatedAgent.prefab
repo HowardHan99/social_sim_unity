@@ -107,9 +107,9 @@ MonoBehaviour:
     type: 3}
   pwdAvatarPrefabCane: {fileID: 8939702436063834965, guid: dc94580c4e15b0b489ccf89cc514836d,
     type: 3}
-  pwdAvatarPrefabFemaleChild: {fileID: 4075354288779685224, guid: cc130fd2fe5556c4ab1d50c80c8f10fc,
+  pwdAvatarPrefabFemaleChild: {fileID: 5903106443318615734, guid: 358af4b015f795341aa3d8b8b72306da,
     type: 3}
-  pwdAvatarPrefabMaleChild: {fileID: 3407353953912973396, guid: 00e093df8cf51194e893db066973f750,
+  pwdAvatarPrefabMaleChild: {fileID: 1654397166830192782, guid: 25b5fc1b1d9d294449528baa52b90ed0,
     type: 3}
   pwdAvatarPrefabPhoneUser: {fileID: 5487155251517902103, guid: f12f42ce7d2167745967d4b85ba59943,
     type: 3}
