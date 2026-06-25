@@ -92,6 +92,7 @@ GameObject:
   - component: {fileID: 7333626437437037149}
   - component: {fileID: 4228704880394044247}
   - component: {fileID: 312961793931383559}
+  - component: {fileID: -6266292294316393164}
   m_Layer: 0
   m_Name: Lamppost_01
   m_TagString: Untagged
@@ -140,3 +141,16 @@ BoxCollider:
   serializedVersion: 2
   m_Size: {x: 0.28588104, y: 0.79210806, z: 2.4923325}
   m_Center: {x: -0.040714264, y: 6.0927534, z: 1.1968961}
+--- !u!114 &-6266292294316393164
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7966189132301549799}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1c19610482eb06543aa9acbc1aa7d22e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  objectId: 

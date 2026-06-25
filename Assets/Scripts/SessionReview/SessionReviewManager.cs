@@ -43,6 +43,11 @@ namespace SessionReview
         [SerializeField] private bool usePostTrialPrompt = true;
         [SerializeField] private KeyCode replayTrialKey = KeyCode.R;
 
+        [Header("End Interaction Button")]
+        [Tooltip("Show an on-screen button during an active interaction that ends it and proceeds to the next phase.")]
+        [SerializeField] private bool showEndInteractionButton = true;
+        [SerializeField] private string endInteractionButtonLabel = "End Interaction";
+
         [Header("Pre-Trial Ready Prompt")]
         [SerializeField] private KeyCode startTrialKey = KeyCode.Return;
         [SerializeField] private KeyCode exportReviewKey = KeyCode.E;
@@ -838,6 +843,8 @@ namespace SessionReview
 
             DrawStatusBadge();
 
+            DrawEndInteractionButton();
+
             if (showTrialStartPrompt)
                 DrawTrialStartPrompt();
 
@@ -871,6 +878,34 @@ namespace SessionReview
 
             if (inWorldBuildingMode)
                 DrawWorldBuildingOverlay();
+        }
+
+        private void DrawEndInteractionButton()
+        {
+            if (!showEndInteractionButton)
+                return;
+
+            // Only available while an interaction is actively running and nothing else
+            // (onboarding, prompts, review, world building) is occupying the screen.
+            if (sessionTracker == null || !sessionTracker.IsTracking)
+                return;
+            if (IsMovementInputBlocked || inWorldBuildingMode || showOnboarding)
+                return;
+
+            float width = 220f;
+            float height = 40f;
+            float x = (Screen.width - width) * 0.5f;
+            float y = Screen.height - height - 24f;
+
+            if (GUI.Button(new Rect(x, y, width, height), endInteractionButtonLabel))
+                EndInteractionAndProceed();
+        }
+
+        private void EndInteractionAndProceed()
+        {
+            // Ending the trial fires SessionTracker.TrialEnded, which OnTrialEnded handles
+            // by advancing to the next phase (post-trial prompt / review).
+            sessionTracker?.EndCurrentTrialManually();
         }
 
         private void DrawEndReviewButton()

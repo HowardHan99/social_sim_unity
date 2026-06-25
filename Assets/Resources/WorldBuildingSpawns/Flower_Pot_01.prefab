@@ -174,6 +174,7 @@ GameObject:
   m_Component:
   - component: {fileID: 8708122177842453087}
   - component: {fileID: 1451945311729209343}
+  - component: {fileID: 7016874155809019128}
   m_Layer: 0
   m_Name: Flower_Pot_01
   m_TagString: Untagged
@@ -210,3 +211,16 @@ BoxCollider:
   serializedVersion: 2
   m_Size: {x: 0.56743836, y: 0.3819716, z: 0.53299004}
   m_Center: {x: -0.015965581, y: 0.15199494, z: 0.040694326}
+--- !u!114 &7016874155809019128
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8327901554454577381}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1c19610482eb06543aa9acbc1aa7d22e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  objectId: 
