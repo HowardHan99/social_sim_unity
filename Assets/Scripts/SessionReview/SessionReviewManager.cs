@@ -103,6 +103,12 @@ namespace SessionReview
         private readonly System.Collections.Generic.Dictionary<Behaviour, bool> worldBuildingDisabledBehaviours =
             new System.Collections.Generic.Dictionary<Behaviour, bool>();
 
+        private string aiGenerationPrompt = "";
+        private Texture2D aiModelPreview;
+        private static float worldBuildingOverlayHeight = 228f;
+        private GUIStyle aiGenerationTitleStyle;
+        private GUIStyle aiGenerationPromptStyle;
+
         public bool UsePostTrialPrompt => usePostTrialPrompt;
         public bool IsReviewModeActive => inRewindMode;
         public bool IsWorldBuildingModeActive => inWorldBuildingMode;
@@ -1257,7 +1263,13 @@ namespace SessionReview
 
             GUI.enabled = true;
 
+            // Grow the overlay background to enclose all content (incl. the Undo/Redo/Delete row).
+            // Updated here so GetWorldBuildingOverlayRect (used by the box, the hit-test, and the
+            // AI panel anchor) reflects the real laid-out height.
+            worldBuildingOverlayHeight = (y + buttonHeight + 12f) - rect.y;
+
             DrawWorldBuildingSpawnPalette();
+            DrawAiGenerationPanel();
         }
 
         private void DrawWorldBuildingSpawnPalette()
@@ -1317,6 +1329,80 @@ namespace SessionReview
             GUI.EndScrollView();
         }
 
+        private void DrawAiGenerationPanel() {
+            if (aiGenerationTitleStyle == null)
+            {
+                aiGenerationTitleStyle = new GUIStyle(GUI.skin.label)
+                {
+                    fontStyle = FontStyle.Bold,
+                    fontSize = 14
+                };
+            }
+            if (aiGenerationPromptStyle == null)
+            {
+                aiGenerationPromptStyle = new GUIStyle(GUI.skin.label)
+                {
+                    wordWrap = true
+                };
+            }
+
+            Rect panel = GetAiGenerationPanelRect();
+
+            GUI.Box(panel, "");
+            float x = panel.x + 14f;
+            float y = panel.y + 12f;
+            float innerW = panel.width - 28f;
+
+            GUI.Label(new Rect(x, y, innerW, 22f), "Object Generator", aiGenerationTitleStyle);
+            y += 26f;
+
+            GUI.Label(new Rect(x, y, innerW, 18f), "Describe an object:", aiGenerationPromptStyle);
+            y += 20f;
+
+            aiGenerationPrompt = GUI.TextField(new Rect(x, y, innerW, 26f), aiGenerationPrompt);
+            y += 34f;
+
+            if (GUI.Button(new Rect(x, y, 120f, 26f), "Generate")) {
+                Debug.Log($"[WorldBuilding/AI] Generate clicked. Prompt='{aiGenerationPrompt}'");
+                GeneratePlaceholderObject();
+            }
+            y += 34f;
+
+            // Model display area
+            Rect preview = new Rect(x, y, innerW, panel.yMax - y - 12f);
+            GUI.Box(preview, "");
+            if (aiModelPreview != null) {
+                GUI.DrawTexture(preview, aiModelPreview, ScaleMode.ScaleToFit);
+            } else {
+                GUI.Label(new Rect(preview.x + 8f, preview.y + preview.height * 0.5f - 10f, preview.width - 16f, 20f), "No preview available");
+            }
+        }
+
+        // Placeholder until real AI generation is wired up: spawns a cardboard box exactly like
+        // clicking "Add Cardboard Box" in the palette. Looks the prop up by prefab name because
+        // WorldBuildingSpawnLibrary assigns spawn ids dynamically.
+        private void GeneratePlaceholderObject()
+        {
+            if (runtimeEditorManager == null)
+                return;
+
+            IReadOnlyList<SpawnableObject> spawnables = WorldBuildingSpawnLibrary.LastSpawnables;
+            if (spawnables == null)
+                return;
+
+            foreach (SpawnableObject spawnable in spawnables)
+            {
+                if (spawnable?.prefab != null &&
+                    spawnable.prefab.name.ToLower().Contains("cardboard"))
+                {
+                    runtimeEditorManager.SpawnObject(spawnable.id);
+                    return;
+                }
+            }
+
+            Debug.LogWarning("[WorldBuilding/AI] Cardboard box prefab not found in WorldBuildingSpawns.");
+        }
+
         private bool IsMouseOverWorldBuildingUi()
         {
             Vector2 mouse = Input.mousePosition;
@@ -1326,12 +1412,22 @@ namespace SessionReview
             if (GetWorldBuildingOverlayRect().Contains(guiPoint))
                 return true;
 
+            if (GetAiGenerationPanelRect().Contains(guiPoint))
+                return true;
+
             return GetWorldBuildingSpawnPaletteRect().Contains(guiPoint);
         }
 
         private static Rect GetWorldBuildingOverlayRect()
         {
-            return new Rect(24f, 24f, 620f, 228f);
+            return new Rect(24f, 24f, 620f, worldBuildingOverlayHeight);
+        }
+
+        private static Rect GetAiGenerationPanelRect()
+        {
+            float panelW = 230f;
+            float panelH = 190f;
+            return new Rect(24f, GetWorldBuildingOverlayRect().yMax + 12f, panelW, panelH);
         }
 
         private static Rect GetWorldBuildingSpawnPaletteRect()
@@ -1366,8 +1462,7 @@ namespace SessionReview
             Rect previewRect = new Rect(rect.x + 12f, rect.y + 10f, rect.width - 24f, 44f);
             DrawWorldBuildingSpawnThumbnail(previewRect, thumbnail);
 
-            GUI.Label(new Rect(rect.x + 10f, rect.y + 58f, rect.width - 20f, 18f), label);
-            if (GUI.Button(new Rect(rect.x + 10f, rect.y + 74f, rect.width - 20f, 18f), $"Add {label}"))
+            if (GUI.Button(new Rect(rect.x + 10f, rect.y + 60f, rect.width - 20f, 28f), $"Add {label}"))
                 runtimeEditorManager?.SpawnObject(spawnId);
         }
 

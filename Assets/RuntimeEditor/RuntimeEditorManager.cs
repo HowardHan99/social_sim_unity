@@ -1130,6 +1130,9 @@ public class RuntimeEditorManager : MonoBehaviour
         Vector3 spawnPosition = GetSpawnPosition();
 
         GameObject spawnedObject = Instantiate(spawnableObject.prefab, spawnPosition, Quaternion.identity);
+        if (IsWheelchairUserUrsPrefab(spawnableObject.prefab))
+            PrepareWheelchairUserUrsForWorldBuilding(spawnedObject, spawnPosition);
+
         if (spawnedObject.GetComponent<SEAN.Scenario.Obstacles.TrackedObstacle>() == null)
         {
             var obstacle = spawnedObject.AddComponent<SEAN.Scenario.Obstacles.TrackedObstacle>();
@@ -1157,6 +1160,171 @@ public class RuntimeEditorManager : MonoBehaviour
 
         // Top-down / ortho: ray usually points into the scene; avoid using world-space forward alone (can miss the ground).
         return ray.GetPoint(spawnDistance);
+    }
+
+    static bool IsWheelchairUserUrsPrefab(GameObject prefab)
+    {
+        return prefab != null &&
+               string.Equals(prefab.name, "WheelchairUser_URS", System.StringComparison.OrdinalIgnoreCase);
+    }
+
+    void PrepareWheelchairUserUrsForWorldBuilding(GameObject obj, Vector3 spawnPoint)
+    {
+        AlignSpawnedObjectToSpawnPoint(obj, spawnPoint);
+        DisableEmbeddedViewCameras(obj);
+        DisableSpawnedWorldUi(obj);
+        DisableChildColliders(obj);
+        FreezeSpawnedPhysics(obj);
+        DisableSpawnedAgentControllers(obj);
+    }
+
+    /// <summary>
+    /// WheelchairUser_URS has mesh pivots offset from the root; shift so bounds sit on the spawn point.
+    /// </summary>
+    void AlignSpawnedObjectToSpawnPoint(GameObject obj, Vector3 spawnPoint)
+    {
+        if (obj == null || !TryGetRendererBounds(obj, out Bounds bounds))
+            return;
+
+        Vector3 adjustment = new Vector3(
+            spawnPoint.x - bounds.center.x,
+            spawnPoint.y - bounds.min.y,
+            spawnPoint.z - bounds.center.z);
+        obj.transform.position += adjustment;
+    }
+
+    /// <summary>
+    /// WheelchairUser_URS embeds follow cameras that can hijack the world-building top-down view on spawn.
+    /// </summary>
+    void DisableEmbeddedViewCameras(GameObject obj)
+    {
+        if (obj == null)
+            return;
+
+        foreach (Camera camera in obj.GetComponentsInChildren<Camera>(true))
+        {
+            if (camera != null)
+                camera.enabled = false;
+        }
+
+        foreach (AudioListener listener in obj.GetComponentsInChildren<AudioListener>(true))
+        {
+            if (listener != null)
+                listener.enabled = false;
+        }
+
+        foreach (IVI.WheelchairCameraSmoothing smoothing in obj.GetComponentsInChildren<IVI.WheelchairCameraSmoothing>(true))
+        {
+            if (smoothing != null)
+                Destroy(smoothing);
+        }
+
+        foreach (IVI.CameraScript cameraScript in obj.GetComponentsInChildren<IVI.CameraScript>(true))
+        {
+            if (cameraScript != null)
+                cameraScript.enabled = false;
+        }
+    }
+
+    /// <summary>
+    /// RenderStreaming / agent UI canvases sit on layer 5 and can absorb pointer clicks before selection runs.
+    /// </summary>
+    void DisableSpawnedWorldUi(GameObject obj)
+    {
+        if (obj == null)
+            return;
+
+        foreach (Canvas canvas in obj.GetComponentsInChildren<Canvas>(true))
+        {
+            if (canvas != null)
+                canvas.enabled = false;
+        }
+    }
+
+    /// <summary>
+    /// Use a single root box for selection; child capsule colliders are easy to miss from the top-down view.
+    /// </summary>
+    void DisableChildColliders(GameObject root)
+    {
+        if (root == null)
+            return;
+
+        Collider rootCollider = root.GetComponent<Collider>();
+        foreach (Collider collider in root.GetComponentsInChildren<Collider>(true))
+        {
+            if (collider == null || collider == rootCollider)
+                continue;
+            collider.enabled = false;
+        }
+    }
+
+    /// <summary>
+    /// Agent prefabs use child rigidbodies that can drift under gravity, separating colliders from the root.
+    /// </summary>
+    void FreezeSpawnedPhysics(GameObject obj)
+    {
+        if (obj == null)
+            return;
+
+        foreach (Rigidbody rb in obj.GetComponentsInChildren<Rigidbody>(true))
+        {
+            if (rb == null)
+                continue;
+            rb.velocity = Vector3.zero;
+            rb.angularVelocity = Vector3.zero;
+            rb.isKinematic = true;
+        }
+    }
+
+    /// <summary>
+    /// Disable autonomous agent scripts so world-building placement stays under the editor gizmo.
+    /// </summary>
+    void DisableSpawnedAgentControllers(GameObject obj)
+    {
+        if (obj == null)
+            return;
+
+        foreach (IVI.ManualWheelchairController controller in obj.GetComponentsInChildren<IVI.ManualWheelchairController>(true))
+        {
+            if (controller != null)
+                controller.enabled = false;
+        }
+
+        foreach (IVI.SFPWDAgent agent in obj.GetComponentsInChildren<IVI.SFPWDAgent>(true))
+        {
+            if (agent != null)
+                agent.enabled = false;
+        }
+
+        foreach (CharacterController characterController in obj.GetComponentsInChildren<CharacterController>(true))
+        {
+            if (characterController != null)
+                characterController.enabled = false;
+        }
+    }
+
+    static bool TryGetRendererBounds(GameObject root, out Bounds bounds)
+    {
+        bounds = default;
+        bool hasBounds = false;
+
+        foreach (Renderer renderer in root.GetComponentsInChildren<Renderer>(true))
+        {
+            if (renderer == null)
+                continue;
+
+            if (!hasBounds)
+            {
+                bounds = renderer.bounds;
+                hasBounds = true;
+            }
+            else
+            {
+                bounds.Encapsulate(renderer.bounds);
+            }
+        }
+
+        return hasBounds;
     }
 
     void RegisterEditableObject(GameObject obj)
