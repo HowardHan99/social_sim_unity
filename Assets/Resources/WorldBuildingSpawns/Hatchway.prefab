@@ -255,7 +255,7 @@ GameObject:
   - component: {fileID: 3811092686443172457}
   - component: {fileID: 5292605994615525001}
   m_Layer: 0
-  m_Name: Hatchway_01
+  m_Name: Hatchway
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0

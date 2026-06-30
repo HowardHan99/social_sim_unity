@@ -176,7 +176,7 @@ GameObject:
   - component: {fileID: 1451945311729209343}
   - component: {fileID: 7016874155809019128}
   m_Layer: 0
-  m_Name: Flower_Pot_01
+  m_Name: Flower_Pot
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0

@@ -94,7 +94,7 @@ GameObject:
   - component: {fileID: 312961793931383559}
   - component: {fileID: -6266292294316393164}
   m_Layer: 0
-  m_Name: Lamppost_01
+  m_Name: Lamppost
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0

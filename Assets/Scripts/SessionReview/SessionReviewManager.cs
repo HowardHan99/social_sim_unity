@@ -84,12 +84,20 @@ namespace SessionReview
         private bool isTopDownPanning;
         private Vector2 lastTopDownMousePosition;
         private static Texture2D lineTexture;
-        private Vector2 worldBuildingSpawnScroll;
-        private bool worldBuildingSpawnPaletteMinimized;
+        private Vector2 worldBuildingAddObjectsScroll;
+        private Vector2 worldBuildingAddCharactersScroll;
+        private bool worldBuildingAddObjectsMinimized = true;
+        private bool worldBuildingAddCharactersMinimized = true;
+        private bool worldBuildingGenerateObjectsMinimized = true;
         private bool worldBuildingOverlayMinimized;
-        private const float WorldBuildingSpawnPaletteHeaderHeight = 44f;
-        private const float WorldBuildingSpawnPaletteExpandedHeaderHeight = 68f;
+        private const float WorldBuildingSidePanelMargin = 24f;
+        private const float WorldBuildingSidePanelGap = 10f;
+        private const float WorldBuildingSidePanelHeaderHeight = 44f;
+        private const float WorldBuildingAddObjectsExpandedHeaderHeight = 68f;
+        private const float WorldBuildingGenerateObjectsBodyHeight = 108f;
+        private const float WorldBuildingSidePanelEmptyBodyHeight = 56f;
         private const float WorldBuildingOverlayHeaderHeight = 44f;
+        private const float WorldBuildingOverlayWidth = 360f;
         private bool showReviewCompletionPrompt;
         private bool inWorldBuildingMode;
         private Camera worldBuildingCamera;
@@ -110,7 +118,8 @@ namespace SessionReview
 
         private string aiGenerationPrompt = "";
         private static float worldBuildingOverlayHeight = 228f;
-        private const int WorldBuildingSpawnPaletteCols = 3;
+        private const int WorldBuildingSpawnPaletteCols = 2;
+        private const float WorldBuildingSidePanelWidth = 360f;
         private const float WorldBuildingSpawnPaletteCardHeight = 96f;
         private const float WorldBuildingSpawnPaletteCardGap = 10f;
 
@@ -1230,15 +1239,10 @@ namespace SessionReview
                 GUI.Label(new Rect(contentX, y, contentWidth, 22f), selectionText);
                 y += 26f;
 
-                string controlsText =
-                    "Controls: Left click select/drag gizmo | Shift+click add moveable | Shift+drag box-select many | T translate | R rotate | Right mouse free cam | Middle mouse pan | Wheel zoom | F4 top-down reset | Esc deselect | \"Back To Menu\" to exit";
-                float controlsHeight = bodyStyle.CalcHeight(new GUIContent(controlsText), contentWidth);
-                GUI.Label(new Rect(contentX, y, contentWidth, controlsHeight), controlsText, bodyStyle);
-                y += controlsHeight + 12f;
-
-                float buttonWidth = 148f;
                 float buttonHeight = 30f;
-                float buttonGap = 12f;
+                float buttonGap = 10f;
+                const int buttonCols = 2;
+                float buttonWidth = (contentWidth - buttonGap * (buttonCols - 1)) / buttonCols;
 
                 if (GUI.Button(new Rect(contentX, y, buttonWidth, buttonHeight), "Back To Menu"))
                 {
@@ -1247,28 +1251,31 @@ namespace SessionReview
                     PauseForPostTrialPrompt();
                 }
 
-                if (GUI.Button(new Rect(contentX + buttonWidth + buttonGap, y, buttonWidth, buttonHeight), "Choose Scenario"))
+                if (GUI.Button(new Rect(contentX + (buttonWidth + buttonGap), y, buttonWidth, buttonHeight), "Choose Scenario"))
                     OpenOnboardingFromPostTrial();
 
-                if (GUI.Button(new Rect(contentX + (buttonWidth + buttonGap) * 2f, y, buttonWidth, buttonHeight), "Run Again"))
-                    StartNextTrialFromPrompt();
+                y += buttonHeight + buttonGap;
 
-                y += buttonHeight + 8f;
+                if (GUI.Button(new Rect(contentX, y, buttonWidth, buttonHeight), "Run Again"))
+                    StartNextTrialFromPrompt();
 
                 int undoCount = runtimeEditorManager != null ? runtimeEditorManager.UndoCount : 0;
                 int redoCount = runtimeEditorManager != null ? runtimeEditorManager.RedoCount : 0;
                 bool hasSelection = runtimeEditorManager?.CurrentSelectedObject != null;
 
                 GUI.enabled = undoCount > 0;
-                if (GUI.Button(new Rect(contentX, y, buttonWidth, buttonHeight), $"Undo  [{undoCount}]  Ctrl+Z"))
+                if (GUI.Button(new Rect(contentX + (buttonWidth + buttonGap), y, buttonWidth, buttonHeight), $"Undo  [{undoCount}]  Ctrl+Z"))
                     runtimeEditorManager?.UndoLastAction();
 
+                GUI.enabled = true;
+                y += buttonHeight + buttonGap;
+
                 GUI.enabled = redoCount > 0;
-                if (GUI.Button(new Rect(contentX + buttonWidth + buttonGap, y, buttonWidth, buttonHeight), $"Redo  [{redoCount}]  Ctrl+Y"))
+                if (GUI.Button(new Rect(contentX, y, buttonWidth, buttonHeight), $"Redo  [{redoCount}]  Ctrl+Y"))
                     runtimeEditorManager?.RedoLastAction();
 
                 GUI.enabled = hasSelection;
-                if (GUI.Button(new Rect(contentX + (buttonWidth + buttonGap) * 2f, y, buttonWidth, buttonHeight), "Delete  [Del]"))
+                if (GUI.Button(new Rect(contentX + (buttonWidth + buttonGap), y, buttonWidth, buttonHeight), "Delete  [Del]"))
                     runtimeEditorManager?.DeleteSelectedObject();
 
                 GUI.enabled = true;
@@ -1276,7 +1283,7 @@ namespace SessionReview
                 worldBuildingOverlayHeight = (y + buttonHeight + 12f) - rect.y;
             }
 
-            DrawWorldBuildingSpawnPalette();
+            DrawWorldBuildingSidePanels();
         }
 
         private void DrawWorldBuildingOverlayHeader(Rect rect)
@@ -1294,28 +1301,145 @@ namespace SessionReview
             RuntimeEditorManager.DrawMinimizeToggleButton(toggleRect, ref worldBuildingOverlayMinimized);
         }
 
-        private void DrawWorldBuildingSpawnPalette()
+        private void DrawWorldBuildingSidePanels()
         {
-            IReadOnlyList<WorldBuildingSpawnUiRow> rows = WorldBuildingSpawnLibrary.LastUiRows;
-            float panelWidth = GetWorldBuildingSpawnPaletteWidth();
-            Rect panelRect = GetWorldBuildingSpawnPaletteRect();
+            float panelWidth = GetWorldBuildingSidePanelWidth();
+            IReadOnlyList<WorldBuildingSpawnUiRow> objectRows = WorldBuildingSpawnLibrary.LastObjectUiRows;
+            IReadOnlyList<WorldBuildingSpawnUiRow> characterRows = WorldBuildingSpawnLibrary.LastCharacterUiRows;
 
-            GUI.Box(panelRect, "");
-            DrawWorldBuildingSpawnPaletteHeader(panelRect);
+            float generateHeight = GetWorldBuildingGenerateObjectsPanelHeight();
+            float charactersHeight = GetWorldBuildingSpawnCardPanelHeight(
+                characterRows,
+                worldBuildingAddCharactersMinimized,
+                WorldBuildingSidePanelHeaderHeight);
+            float objectsHeight = GetWorldBuildingSpawnCardPanelHeight(
+                objectRows,
+                worldBuildingAddObjectsMinimized,
+                WorldBuildingAddObjectsExpandedHeaderHeight);
 
-            if (worldBuildingSpawnPaletteMinimized)
-                return;
+            float yBottom = Screen.height - WorldBuildingSidePanelMargin;
+            float x = Screen.width - panelWidth - WorldBuildingSidePanelMargin;
 
-            DrawWorldBuildingSpawnPaletteBody(panelRect, rows);
+            Rect generateRect = new Rect(x, yBottom - generateHeight, panelWidth, generateHeight);
+            yBottom = generateRect.y - WorldBuildingSidePanelGap;
+
+            Rect charactersRect = new Rect(x, yBottom - charactersHeight, panelWidth, charactersHeight);
+            yBottom = charactersRect.y - WorldBuildingSidePanelGap;
+
+            Rect objectsRect = new Rect(x, yBottom - objectsHeight, panelWidth, objectsHeight);
+
+            DrawWorldBuildingGenerateObjectsPanel(generateRect);
+            DrawWorldBuildingAddCharactersPanel(charactersRect, characterRows);
+            DrawWorldBuildingAddObjectsPanel(objectsRect, objectRows);
         }
 
-        void DrawWorldBuildingSpawnPaletteBody(Rect panelRect, IReadOnlyList<WorldBuildingSpawnUiRow> rows)
+        private void DrawWorldBuildingAddObjectsPanel(Rect panelRect, IReadOnlyList<WorldBuildingSpawnUiRow> rows)
         {
-            if (worldBuildingSpawnPaletteMinimized)
+            GUI.Box(panelRect, "");
+            DrawWorldBuildingSidePanelHeader(
+                panelRect,
+                "Add Objects",
+                "Only prefabs with a matching image in Resources/WorldBuildingUI are listed (others in WorldBuildingSpawns are ignored).",
+                ref worldBuildingAddObjectsMinimized,
+                WorldBuildingAddObjectsExpandedHeaderHeight);
+
+            if (worldBuildingAddObjectsMinimized)
                 return;
 
-            int totalCards = GetWorldBuildingSpawnPaletteTotalCards(rows, includeAiGenerationCard: true);
-            int aiCardSlot = GetAiGenerationCardSlotIndex(rows);
+            DrawWorldBuildingSpawnCardGrid(
+                panelRect,
+                WorldBuildingAddObjectsExpandedHeaderHeight,
+                rows,
+                ref worldBuildingAddObjectsScroll);
+        }
+
+        private void DrawWorldBuildingAddCharactersPanel(Rect panelRect, IReadOnlyList<WorldBuildingSpawnUiRow> rows)
+        {
+            GUI.Box(panelRect, "");
+            DrawWorldBuildingSidePanelHeader(
+                panelRect,
+                "Add Characters",
+                null,
+                ref worldBuildingAddCharactersMinimized,
+                WorldBuildingSidePanelHeaderHeight);
+
+            if (worldBuildingAddCharactersMinimized)
+                return;
+
+            if (rows == null || rows.Count == 0)
+            {
+                GUI.Label(
+                    new Rect(
+                        panelRect.x + 14f,
+                        panelRect.y + WorldBuildingSidePanelHeaderHeight + 12f,
+                        panelRect.width - 28f,
+                        36f),
+                    "No character prefabs with thumbnails yet.");
+                return;
+            }
+
+            DrawWorldBuildingSpawnCardGrid(
+                panelRect,
+                WorldBuildingSidePanelHeaderHeight,
+                rows,
+                ref worldBuildingAddCharactersScroll);
+        }
+
+        private void DrawWorldBuildingGenerateObjectsPanel(Rect panelRect)
+        {
+            GUI.Box(panelRect, "");
+            DrawWorldBuildingSidePanelHeader(
+                panelRect,
+                "Generate Objects",
+                null,
+                ref worldBuildingGenerateObjectsMinimized,
+                WorldBuildingSidePanelHeaderHeight);
+
+            if (worldBuildingGenerateObjectsMinimized)
+                return;
+
+            DrawWorldBuildingGenerateObjectsBody(panelRect);
+        }
+
+        private void DrawWorldBuildingSidePanelHeader(
+            Rect panelRect,
+            string title,
+            string subtitle,
+            ref bool minimized,
+            float expandedHeaderHeight)
+        {
+            const float toggleWidth = 28f;
+            const float toggleHeight = 22f;
+            Rect toggleRect = new Rect(
+                panelRect.xMax - toggleWidth - 10f,
+                panelRect.y + 8f,
+                toggleWidth,
+                toggleHeight);
+
+            GUI.Label(
+                new Rect(panelRect.x + 14f, panelRect.y + 10f, panelRect.width - toggleWidth - 32f, 22f),
+                title);
+
+            if (!minimized && !string.IsNullOrEmpty(subtitle))
+            {
+                GUI.Label(
+                    new Rect(panelRect.x + 14f, panelRect.y + 30f, panelRect.width - 28f, expandedHeaderHeight - 34f),
+                    subtitle);
+            }
+
+            RuntimeEditorManager.DrawMinimizeToggleButton(toggleRect, ref minimized);
+        }
+
+        private void DrawWorldBuildingSpawnCardGrid(
+            Rect panelRect,
+            float headerHeight,
+            IReadOnlyList<WorldBuildingSpawnUiRow> rows,
+            ref Vector2 scroll)
+        {
+            int totalCards = rows?.Count ?? 0;
+            if (totalCards == 0)
+                return;
+
             int rowCount = (totalCards + WorldBuildingSpawnPaletteCols - 1) / WorldBuildingSpawnPaletteCols;
             float scrollAreaMin = 120f;
             float scrollAreaMax = Mathf.Min(280f, Screen.height * 0.38f);
@@ -1327,7 +1451,7 @@ namespace SessionReview
             float scrollBarReserve = 18f;
             Rect viewRect = new Rect(
                 panelRect.x + innerPad,
-                panelRect.y + WorldBuildingSpawnPaletteExpandedHeaderHeight,
+                panelRect.y + headerHeight,
                 panelRect.width - innerPad * 2f,
                 scrollViewportH);
             float innerW = viewRect.width - scrollBarReserve;
@@ -1337,106 +1461,78 @@ namespace SessionReview
             float contentH = Mathf.Max(scrollInnerHeight, viewRect.height);
             Rect contentRect = new Rect(0f, 0f, contentW, contentH);
 
-            worldBuildingSpawnScroll = GUI.BeginScrollView(viewRect, worldBuildingSpawnScroll, contentRect, false, true);
+            scroll = GUI.BeginScrollView(viewRect, scroll, contentRect, false, true);
             for (int slot = 0; slot < totalCards; slot++)
             {
                 int r = slot / WorldBuildingSpawnPaletteCols;
                 int c = slot % WorldBuildingSpawnPaletteCols;
-                float x = c * (cardW + WorldBuildingSpawnPaletteCardGap);
-                float y = WorldBuildingSpawnPaletteCardGap + r * (WorldBuildingSpawnPaletteCardHeight + WorldBuildingSpawnPaletteCardGap);
-                Rect cardRect = new Rect(x, y, cardW, WorldBuildingSpawnPaletteCardHeight);
+                float cardX = c * (cardW + WorldBuildingSpawnPaletteCardGap);
+                float cardY = WorldBuildingSpawnPaletteCardGap + r * (WorldBuildingSpawnPaletteCardHeight + WorldBuildingSpawnPaletteCardGap);
+                Rect cardRect = new Rect(cardX, cardY, cardW, WorldBuildingSpawnPaletteCardHeight);
 
-                if (slot == aiCardSlot)
-                {
-                    DrawAiGenerationCard(cardRect);
-                    continue;
-                }
-
-                int rowIndex = slot < aiCardSlot ? slot : slot - 1;
-                if (rows == null || rowIndex >= rows.Count)
-                    continue;
-
-                WorldBuildingSpawnUiRow row = rows[rowIndex];
+                WorldBuildingSpawnUiRow row = rows[slot];
                 DrawSpawnPreviewCard(cardRect, row.DisplayName, row.SpawnId, row.Thumbnail);
             }
 
             GUI.EndScrollView();
         }
 
-        static int GetWorldBuildingSpawnPaletteTotalCards(
-            IReadOnlyList<WorldBuildingSpawnUiRow> rows,
-            bool includeAiGenerationCard = true)
+        private void DrawWorldBuildingGenerateObjectsBody(Rect panelRect)
         {
-            return (rows?.Count ?? 0) + (includeAiGenerationCard ? 1 : 0);
-        }
+            const float pad = 14f;
+            float innerW = panelRect.width - pad * 2f;
+            float y = panelRect.y + WorldBuildingSidePanelHeaderHeight + 10f;
 
-        static int GetAiGenerationCardSlotIndex(IReadOnlyList<WorldBuildingSpawnUiRow> rows)
-        {
-            if (rows == null || rows.Count == 0)
-                return 0;
-
-            for (int i = 0; i < rows.Count; i++)
-            {
-                string label = rows[i].DisplayName ?? string.Empty;
-                if (label.IndexOf("wheelchair", System.StringComparison.OrdinalIgnoreCase) >= 0
-                    && label.IndexOf("male", System.StringComparison.OrdinalIgnoreCase) >= 0
-                    && label.IndexOf("female", System.StringComparison.OrdinalIgnoreCase) < 0)
-                {
-                    return i + 1;
-                }
-            }
-
-            return rows.Count;
-        }
-
-        void DrawAiGenerationCard(Rect rect)
-        {
-            if (worldBuildingSpawnPaletteMinimized)
-                return;
-
-            GUI.Box(rect, "");
-
-            const float pad = 10f;
-            float innerW = rect.width - pad * 2f;
-            float y = rect.y + 10f;
-
-            GUI.Label(new Rect(rect.x + pad, y, innerW, 18f), "Describe an object:");
+            GUI.Label(new Rect(panelRect.x + pad, y, innerW, 18f), "Describe an object:");
             y += 20f;
 
-            aiGenerationPrompt = GUI.TextField(new Rect(rect.x + pad, y, innerW, 22f), aiGenerationPrompt ?? string.Empty);
+            aiGenerationPrompt = GUI.TextField(new Rect(panelRect.x + pad, y, innerW, 22f), aiGenerationPrompt ?? string.Empty);
             y += 28f;
 
-            if (GUI.Button(new Rect(rect.x + pad, y, innerW, 28f), "Generate"))
+            if (GUI.Button(new Rect(panelRect.x + pad, y, innerW, 28f), "Generate"))
             {
                 Debug.Log($"[WorldBuilding/AI] Generate clicked. Prompt='{aiGenerationPrompt}'");
                 GeneratePlaceholderObject();
             }
         }
 
-        private void DrawWorldBuildingSpawnPaletteHeader(Rect panelRect)
+        private float GetWorldBuildingSpawnCardPanelHeight(
+            IReadOnlyList<WorldBuildingSpawnUiRow> rows,
+            bool minimized,
+            float expandedHeaderHeight)
         {
-            const float toggleWidth = 28f;
-            const float toggleHeight = 22f;
-            Rect toggleRect = new Rect(
-                panelRect.xMax - toggleWidth - 10f,
-                panelRect.y + 8f,
-                toggleWidth,
-                toggleHeight);
+            if (minimized)
+                return WorldBuildingSidePanelHeaderHeight;
 
-            GUI.Label(new Rect(panelRect.x + 14f, panelRect.y + 10f, panelRect.width - toggleWidth - 32f, 22f), "Add Objects");
+            int totalCards = rows?.Count ?? 0;
+            if (totalCards == 0)
+                return expandedHeaderHeight + WorldBuildingSidePanelEmptyBodyHeight;
 
-            if (!worldBuildingSpawnPaletteMinimized)
-            {
-                GUI.Label(new Rect(panelRect.x + 14f, panelRect.y + 30f, panelRect.width - 28f, 34f),
-                    "Only prefabs with a matching image in Resources/WorldBuildingUI are listed (others in WorldBuildingSpawns are ignored).");
-            }
-
-            RuntimeEditorManager.DrawMinimizeToggleButton(toggleRect, ref worldBuildingSpawnPaletteMinimized);
+            int rowCount = (totalCards + WorldBuildingSpawnPaletteCols - 1) / WorldBuildingSpawnPaletteCols;
+            float scrollAreaMin = 120f;
+            float scrollAreaMax = Mathf.Min(280f, Screen.height * 0.38f);
+            float scrollInnerHeight = rowCount * (WorldBuildingSpawnPaletteCardHeight + WorldBuildingSpawnPaletteCardGap)
+                                      + WorldBuildingSpawnPaletteCardGap;
+            float scrollViewportH = Mathf.Clamp(scrollInnerHeight, scrollAreaMin, scrollAreaMax);
+            return expandedHeaderHeight + scrollViewportH + 16f;
         }
 
-        private static float GetWorldBuildingSpawnPaletteWidth()
+        private float GetWorldBuildingGenerateObjectsPanelHeight()
         {
-            return Mathf.Min(540f, Screen.width - 32f);
+            if (worldBuildingGenerateObjectsMinimized)
+                return WorldBuildingSidePanelHeaderHeight;
+
+            return WorldBuildingSidePanelHeaderHeight + WorldBuildingGenerateObjectsBodyHeight + 12f;
+        }
+
+        private static float GetWorldBuildingSidePanelWidth()
+        {
+            return Mathf.Min(WorldBuildingSidePanelWidth, Screen.width - 32f);
+        }
+
+        private static Rect GetWorldBuildingOverlayRect()
+        {
+            return new Rect(24f, 24f, WorldBuildingOverlayWidth, worldBuildingOverlayHeight);
         }
 
         // Placeholder until real AI generation is wired up: spawns a cardboard box exactly like
@@ -1476,36 +1572,40 @@ namespace SessionReview
             if (runtimeEditorManager != null && runtimeEditorManager.ContainsWorldBuildingHelperUi(guiPoint))
                 return true;
 
-            return GetWorldBuildingSpawnPaletteRect().Contains(guiPoint);
+            return ContainsWorldBuildingSidePanel(guiPoint);
         }
 
-        private static Rect GetWorldBuildingOverlayRect()
+        private bool ContainsWorldBuildingSidePanel(Vector2 guiPoint)
         {
-            return new Rect(24f, 24f, 620f, worldBuildingOverlayHeight);
-        }
+            float panelWidth = GetWorldBuildingSidePanelWidth();
+            IReadOnlyList<WorldBuildingSpawnUiRow> objectRows = WorldBuildingSpawnLibrary.LastObjectUiRows;
+            IReadOnlyList<WorldBuildingSpawnUiRow> characterRows = WorldBuildingSpawnLibrary.LastCharacterUiRows;
 
-        private Rect GetWorldBuildingSpawnPaletteRect()
-        {
-            float panelWidth = GetWorldBuildingSpawnPaletteWidth();
+            float generateHeight = GetWorldBuildingGenerateObjectsPanelHeight();
+            float charactersHeight = GetWorldBuildingSpawnCardPanelHeight(
+                characterRows,
+                worldBuildingAddCharactersMinimized,
+                WorldBuildingSidePanelHeaderHeight);
+            float objectsHeight = GetWorldBuildingSpawnCardPanelHeight(
+                objectRows,
+                worldBuildingAddObjectsMinimized,
+                WorldBuildingAddObjectsExpandedHeaderHeight);
 
-            if (worldBuildingSpawnPaletteMinimized)
-                return GetWorldBuildingSpawnPaletteRect(WorldBuildingSpawnPaletteHeaderHeight, panelWidth);
+            float yBottom = Screen.height - WorldBuildingSidePanelMargin;
+            float x = Screen.width - panelWidth - WorldBuildingSidePanelMargin;
 
-            IReadOnlyList<WorldBuildingSpawnUiRow> rows = WorldBuildingSpawnLibrary.LastUiRows;
-            int totalCards = GetWorldBuildingSpawnPaletteTotalCards(rows, includeAiGenerationCard: true);
-            int rowCount = (totalCards + WorldBuildingSpawnPaletteCols - 1) / WorldBuildingSpawnPaletteCols;
-            float scrollAreaMin = 120f;
-            float scrollAreaMax = Mathf.Min(280f, Screen.height * 0.38f);
-            float scrollInnerHeight = rowCount * (WorldBuildingSpawnPaletteCardHeight + WorldBuildingSpawnPaletteCardGap)
-                                      + WorldBuildingSpawnPaletteCardGap;
-            float scrollViewportH = Mathf.Clamp(scrollInnerHeight, scrollAreaMin, scrollAreaMax);
-            float panelHeight = WorldBuildingSpawnPaletteExpandedHeaderHeight + scrollViewportH + 16f;
-            return GetWorldBuildingSpawnPaletteRect(panelHeight, panelWidth);
-        }
+            Rect generateRect = new Rect(x, yBottom - generateHeight, panelWidth, generateHeight);
+            if (generateRect.Contains(guiPoint))
+                return true;
 
-        private static Rect GetWorldBuildingSpawnPaletteRect(float panelHeight, float panelWidth)
-        {
-            return new Rect(Screen.width - panelWidth - 24f, Screen.height - panelHeight - 24f, panelWidth, panelHeight);
+            yBottom = generateRect.y - WorldBuildingSidePanelGap;
+            Rect charactersRect = new Rect(x, yBottom - charactersHeight, panelWidth, charactersHeight);
+            if (charactersRect.Contains(guiPoint))
+                return true;
+
+            yBottom = charactersRect.y - WorldBuildingSidePanelGap;
+            Rect objectsRect = new Rect(x, yBottom - objectsHeight, panelWidth, objectsHeight);
+            return objectsRect.Contains(guiPoint);
         }
 
         private void DrawSpawnPreviewCard(Rect rect, string label, string spawnId, Texture2D thumbnail)
@@ -1722,6 +1822,7 @@ namespace SessionReview
             worldBuildingCameraController.SyncToCurrentTransform();
 
             runtimeEditorManager.suppressSpawnCanvas = true;
+            runtimeEditorManager.worldBuildingSupplementaryHelpText = BuildWorldBuildingControlsHelpText();
             // World building owns the editor lifecycle, so ESC/hotkey must not self-exit and tear down
             // the world-building camera. Exit is via the "Back To Menu" button instead.
             runtimeEditorManager.externalLifecycleControl = true;
@@ -1729,6 +1830,9 @@ namespace SessionReview
 
             showPostTrialPrompt = false;
             showReviewCompletionPrompt = false;
+            worldBuildingAddObjectsMinimized = true;
+            worldBuildingAddCharactersMinimized = true;
+            worldBuildingGenerateObjectsMinimized = true;
             inWorldBuildingMode = true;
         }
 
@@ -1740,6 +1844,8 @@ namespace SessionReview
             {
                 runtimeEditorManager.suppressSpawnCanvas = false;
                 runtimeEditorManager.externalLifecycleControl = false;
+                runtimeEditorManager.worldBuildingSupplementaryHelpText = null;
+                runtimeEditorManager.CloseWorldBuildingHelpPopup();
 
                 if (runtimeEditorManager.isEditorActive)
                     runtimeEditorManager.SetEditorMode(false);
@@ -1780,6 +1886,18 @@ namespace SessionReview
             hasWorldBuildingTargetDisplayOverride = false;
 
             RestoreWorldBuildingCameraBehaviours();
+        }
+
+        private string BuildWorldBuildingControlsHelpText()
+        {
+            KeyCode bindKey = runtimeEditorManager != null
+                ? runtimeEditorManager.bindMoveableKey
+                : KeyCode.LeftShift;
+            return
+                "Left click select/drag gizmo | " +
+                $"{bindKey}+click add moveable | {bindKey}+drag box-select many | " +
+                "T translate | R rotate | Right mouse free cam | Middle mouse pan | Wheel zoom | " +
+                "F4 top-down reset | Esc deselect | \"Back To Menu\" to exit";
         }
 
         private void ResetControlledMotion()

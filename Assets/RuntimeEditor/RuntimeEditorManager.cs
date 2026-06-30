@@ -4,6 +4,7 @@ using UnityEngine.EventSystems;
 using UnityEngine.UI;
 using TMPro;
 using System.Collections;
+using SessionReview;
 
 [System.Serializable]
 public class SpawnableObject
@@ -83,9 +84,21 @@ public class RuntimeEditorManager : MonoBehaviour
     [Tooltip("Show an on-screen debug HUD describing what each click hits, resolves to, and the action taken.")]
     public bool showClickDebug = true;
 
-    bool moveableLegendMinimized;
+    bool worldBuildingHelpOpen;
+    bool worldBuildingHelpPopupRectValid;
+    Rect worldBuildingHelpPopupRect;
     bool clickDebugMinimized;
     const float WorldBuildingHelperPanelHeaderHeight = 36f;
+    const float WorldBuildingHelpButtonSize = 36f;
+    const float WorldBuildingHelpMargin = 16f;
+    const float WorldBuildingHelpPopupWidth = 420f;
+    public string worldBuildingSupplementaryHelpText;
+
+    public void CloseWorldBuildingHelpPopup()
+    {
+        worldBuildingHelpOpen = false;
+        worldBuildingHelpPopupRectValid = false;
+    }
     const float PanelMinimizeToggleWidth = 28f;
     const float PanelMinimizeToggleHeight = 22f;
 
@@ -116,7 +129,7 @@ public class RuntimeEditorManager : MonoBehaviour
         if (showClickDebug && GetClickDebugPanelRect().Contains(guiPoint))
             return true;
 
-        if (highlightMoveableObjects && GetMoveableLegendPanelRect().Contains(guiPoint))
+        if (highlightMoveableObjects && ContainsWorldBuildingHelpUi(guiPoint))
             return true;
 
         return false;
@@ -829,8 +842,8 @@ public class RuntimeEditorManager : MonoBehaviour
     {
         if (!isEditorActive) return;
 
-        // Legend explaining the moveable outline; shown in both normal and World Building modes.
-        DrawMoveableLegend();
+        // Moveable legend + optional controls, combined in a ? help popup.
+        DrawWorldBuildingHelpButtonAndPopup();
 
         // Debug HUD describing the last click; shown in both modes when enabled.
         DrawClickDebug();
@@ -937,17 +950,10 @@ public class RuntimeEditorManager : MonoBehaviour
         return new Rect(Screen.width - w - x, 12f, w, 168f);
     }
 
-    /// <summary>
-    /// Bottom-left on-screen legend explaining what the in-scene moveable outline means and how to
-    /// bind non-moveable objects at runtime.
-    /// </summary>
-    void DrawMoveableLegend()
+    void DrawWorldBuildingHelpButtonAndPopup()
     {
         if (!highlightMoveableObjects)
             return;
-
-        Rect panel = GetMoveableLegendPanelRect();
-        GUI.Box(panel, GUIContent.none);
 
         var label = new GUIStyle(GUI.skin.label)
         {
@@ -957,47 +963,135 @@ public class RuntimeEditorManager : MonoBehaviour
         };
         label.normal.textColor = Color.white;
 
-        DrawPanelMinimizeToggle(panel, ref moveableLegendMinimized);
-
-        if (moveableLegendMinimized)
+        var sectionStyle = new GUIStyle(label)
         {
+            fontStyle = FontStyle.Bold
+        };
+
+        var helpButtonStyle = new GUIStyle(GUI.skin.button)
+        {
+            alignment = TextAnchor.MiddleCenter,
+            fontSize = 18,
+            fontStyle = FontStyle.Bold,
+            padding = new RectOffset(0, 0, 0, 0),
+            margin = new RectOffset(0, 0, 0, 0),
+        };
+
+        if (worldBuildingHelpOpen)
+        {
+            float popupHeight = GetWorldBuildingHelpPopupHeight(label);
+            Rect popupRect = GetWorldBuildingHelpPopupRect(popupHeight);
+            worldBuildingHelpPopupRect = popupRect;
+            worldBuildingHelpPopupRectValid = true;
+            GUI.Box(popupRect, GUIContent.none);
+
+            const float pad = 12f;
+            const float closeButtonSize = 28f;
+            float contentWidth = popupRect.width - pad * 2f - closeButtonSize - 4f;
+            float y = popupRect.y + pad;
+
+            Rect closeRect = new Rect(
+                popupRect.xMax - closeButtonSize - pad,
+                popupRect.y + pad - 2f,
+                closeButtonSize,
+                closeButtonSize);
+            if (GUI.Button(closeRect, "X", GetMinimizeToggleButtonStyle()))
+                CloseWorldBuildingHelpPopup();
+
+            GUI.Label(new Rect(popupRect.x + pad, y, contentWidth, 22f), "Help", sectionStyle);
+            y += 28f;
+
+            if (!string.IsNullOrEmpty(worldBuildingSupplementaryHelpText))
+            {
+                GUI.Label(new Rect(popupRect.x + pad, y, popupRect.width - pad * 2f, 22f), "Controls", sectionStyle);
+                y += 24f;
+
+                float controlsHeight = label.CalcHeight(new GUIContent(worldBuildingSupplementaryHelpText), popupRect.width - pad * 2f);
+                GUI.Label(new Rect(popupRect.x + pad, y, popupRect.width - pad * 2f, controlsHeight), worldBuildingSupplementaryHelpText, label);
+                y += controlsHeight + 12f;
+            }
+
+            const float swatch = 16f;
+            var swatchRect = new Rect(popupRect.x + pad, y + 2f, swatch, swatch);
+            Color prev = GUI.color;
+            GUI.color = moveableHighlightColor;
+            GUI.DrawTexture(swatchRect, Texture2D.whiteTexture);
+            GUI.color = prev;
+
             GUI.Label(
-                new Rect(panel.x + 10f, panel.y + 8f, panel.width - PanelMinimizeToggleWidth - 24f, 20f),
-                "Moveable Legend", label);
+                new Rect(swatchRect.xMax + 8f, y, popupRect.width - pad * 2f - swatch - 8f, 22f),
+                "Moveable Legend",
+                sectionStyle);
+            y += 26f;
+
+            string legendText = allowRuntimeBinding
+                ? $"Outlined objects can be dragged. Hold [{bindMoveableKey}] + click an un-outlined object to make it moveable.\n" +
+                  $"Hold [{bindMoveableKey}] + drag a box to add many at once."
+                : "Outlined objects can be dragged.";
+            float legendHeight = label.CalcHeight(new GUIContent(legendText), popupRect.width - pad * 2f);
+            GUI.Label(new Rect(popupRect.x + pad, y, popupRect.width - pad * 2f, legendHeight), legendText, label);
             return;
         }
 
-        const float pad = 10f;
-        const float swatch = 16f;
-
-        var swatchRect = new Rect(panel.x + pad, panel.y + pad, swatch, swatch);
-        Color prev = GUI.color;
-        GUI.color = moveableHighlightColor;
-        GUI.DrawTexture(swatchRect, Texture2D.whiteTexture);
-        GUI.color = prev;
-
-        GUI.Label(
-            new Rect(swatchRect.xMax + 8f, panel.y + pad - 2f, panel.width - swatch - pad * 2f - PanelMinimizeToggleWidth - 8f, 20f),
-            "Moveable Legend", label);
-
-        if (allowRuntimeBinding)
-        {
-            GUI.Label(
-                new Rect(panel.x + pad, panel.y + pad + swatch + 6f, panel.width - pad * 2f, 58f),
-                $"Hold [{bindMoveableKey}] + click an un-outlined object to make it moveable.\n" +
-                $"Hold [{bindMoveableKey}] + drag a box to add many at once.", label);
-        }
+        worldBuildingHelpPopupRectValid = false;
+        if (GUI.Button(GetWorldBuildingHelpButtonRect(), "?", helpButtonStyle))
+            worldBuildingHelpOpen = true;
     }
 
-    Rect GetMoveableLegendPanelRect()
+    float GetWorldBuildingHelpPopupHeight(GUIStyle bodyStyle)
     {
-        const float panelW = 290f;
-        const float margin = 16f;
-        if (moveableLegendMinimized)
-            return new Rect(margin, Screen.height - WorldBuildingHelperPanelHeaderHeight - margin, panelW, WorldBuildingHelperPanelHeaderHeight);
+        const float pad = 12f;
+        float contentWidth = WorldBuildingHelpPopupWidth - pad * 2f;
+        float height = pad + 28f;
 
-        float panelH = allowRuntimeBinding ? 92f : 48f;
-        return new Rect(margin, Screen.height - panelH - margin, panelW, panelH);
+        if (!string.IsNullOrEmpty(worldBuildingSupplementaryHelpText))
+        {
+            height += 24f;
+            height += bodyStyle.CalcHeight(new GUIContent(worldBuildingSupplementaryHelpText), contentWidth) + 12f;
+        }
+
+        string legendText = allowRuntimeBinding
+            ? $"Outlined objects can be dragged. Hold [{bindMoveableKey}] + click an un-outlined object to make it moveable.\n" +
+              $"Hold [{bindMoveableKey}] + drag a box to add many at once."
+            : "Outlined objects can be dragged.";
+        height += 26f;
+        height += bodyStyle.CalcHeight(new GUIContent(legendText), contentWidth);
+
+        return height + pad;
+    }
+
+    Rect GetWorldBuildingHelpButtonRect()
+    {
+        return new Rect(
+            WorldBuildingHelpMargin,
+            Screen.height - WorldBuildingHelpButtonSize - WorldBuildingHelpMargin,
+            WorldBuildingHelpButtonSize,
+            WorldBuildingHelpButtonSize);
+    }
+
+    Rect GetWorldBuildingHelpPopupRect(float popupHeight)
+    {
+        Rect anchorRect = GetWorldBuildingHelpButtonRect();
+        float bottomY = anchorRect.y + anchorRect.height;
+        return new Rect(
+            anchorRect.x,
+            bottomY - popupHeight,
+            WorldBuildingHelpPopupWidth,
+            popupHeight);
+    }
+
+    bool ContainsWorldBuildingHelpUi(Vector2 guiPoint)
+    {
+        if (worldBuildingHelpOpen)
+        {
+            if (worldBuildingHelpPopupRectValid)
+                return worldBuildingHelpPopupRect.Contains(guiPoint);
+
+            // Popup is open but OnGUI has not run yet this frame; use a safe fallback height.
+            return GetWorldBuildingHelpPopupRect(320f).Contains(guiPoint);
+        }
+
+        return GetWorldBuildingHelpButtonRect().Contains(guiPoint);
     }
 
     static GUIStyle minimizeToggleButtonStyle;
@@ -1227,8 +1321,8 @@ public class RuntimeEditorManager : MonoBehaviour
         Vector3 spawnPosition = GetSpawnPosition();
 
         GameObject spawnedObject = Instantiate(spawnableObject.prefab, spawnPosition, Quaternion.identity);
-        if (IsWheelchairUserUrsPrefab(spawnableObject.prefab))
-            PrepareWheelchairUserUrsForWorldBuilding(spawnedObject, spawnPosition);
+        if (WorldBuildingSpawnLibrary.IsCharacterSpawnPrefab(spawnableObject.prefab.name))
+            PrepareCharacterSpawnForWorldBuilding(spawnedObject, spawnPosition);
 
         if (spawnedObject.GetComponent<SEAN.Scenario.Obstacles.TrackedObstacle>() == null)
         {
@@ -1259,15 +1353,10 @@ public class RuntimeEditorManager : MonoBehaviour
         return ray.GetPoint(spawnDistance);
     }
 
-    static bool IsWheelchairUserUrsPrefab(GameObject prefab)
-    {
-        return prefab != null &&
-               string.Equals(prefab.name, "WheelchairUser_URS", System.StringComparison.OrdinalIgnoreCase);
-    }
-
-    void PrepareWheelchairUserUrsForWorldBuilding(GameObject obj, Vector3 spawnPoint)
+    void PrepareCharacterSpawnForWorldBuilding(GameObject obj, Vector3 spawnPoint)
     {
         AlignSpawnedObjectToSpawnPoint(obj, spawnPoint);
+        EnsureRootSelectionCollider(obj);
         DisableEmbeddedViewCameras(obj);
         DisableSpawnedWorldUi(obj);
         DisableChildColliders(obj);
@@ -1275,9 +1364,6 @@ public class RuntimeEditorManager : MonoBehaviour
         DisableSpawnedAgentControllers(obj);
     }
 
-    /// <summary>
-    /// WheelchairUser_URS has mesh pivots offset from the root; shift so bounds sit on the spawn point.
-    /// </summary>
     void AlignSpawnedObjectToSpawnPoint(GameObject obj, Vector3 spawnPoint)
     {
         if (obj == null || !TryGetRendererBounds(obj, out Bounds bounds))
@@ -1290,9 +1376,24 @@ public class RuntimeEditorManager : MonoBehaviour
         obj.transform.position += adjustment;
     }
 
-    /// <summary>
-    /// WheelchairUser_URS embeds follow cameras that can hijack the world-building top-down view on spawn.
-    /// </summary>
+    void EnsureRootSelectionCollider(GameObject root)
+    {
+        if (root == null || root.GetComponent<Collider>() != null)
+            return;
+
+        var box = root.AddComponent<BoxCollider>();
+        if (TryGetRendererBounds(root, out Bounds bounds))
+        {
+            box.center = root.transform.InverseTransformPoint(bounds.center);
+            box.size = bounds.size;
+        }
+        else
+        {
+            box.center = new Vector3(0f, 0.7f, 0f);
+            box.size = new Vector3(0.8f, 1.4f, 1.1f);
+        }
+    }
+
     void DisableEmbeddedViewCameras(GameObject obj)
     {
         if (obj == null)
@@ -1323,9 +1424,6 @@ public class RuntimeEditorManager : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// RenderStreaming / agent UI canvases sit on layer 5 and can absorb pointer clicks before selection runs.
-    /// </summary>
     void DisableSpawnedWorldUi(GameObject obj)
     {
         if (obj == null)
@@ -1338,9 +1436,6 @@ public class RuntimeEditorManager : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// Use a single root box for selection; child capsule colliders are easy to miss from the top-down view.
-    /// </summary>
     void DisableChildColliders(GameObject root)
     {
         if (root == null)
@@ -1355,9 +1450,6 @@ public class RuntimeEditorManager : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// Agent prefabs use child rigidbodies that can drift under gravity, separating colliders from the root.
-    /// </summary>
     void FreezeSpawnedPhysics(GameObject obj)
     {
         if (obj == null)
@@ -1373,9 +1465,6 @@ public class RuntimeEditorManager : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// Disable autonomous agent scripts so world-building placement stays under the editor gizmo.
-    /// </summary>
     void DisableSpawnedAgentControllers(GameObject obj)
     {
         if (obj == null)
