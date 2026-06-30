@@ -83,6 +83,12 @@ public class RuntimeEditorManager : MonoBehaviour
     [Tooltip("Show an on-screen debug HUD describing what each click hits, resolves to, and the action taken.")]
     public bool showClickDebug = true;
 
+    bool moveableLegendMinimized;
+    bool clickDebugMinimized;
+    const float WorldBuildingHelperPanelHeaderHeight = 36f;
+    const float PanelMinimizeToggleWidth = 28f;
+    const float PanelMinimizeToggleHeight = 22f;
+
     // Last-click diagnostics rendered by the debug HUD.
     private string _clickDebug = "(no click yet)";
 
@@ -101,6 +107,20 @@ public class RuntimeEditorManager : MonoBehaviour
 
     public GameObject CurrentSelectedObject => currentSelectedObject;
     public Camera ActiveRaycastCamera => mainCamera;
+
+    public bool ContainsWorldBuildingHelperUi(Vector2 guiPoint)
+    {
+        if (!isEditorActive)
+            return false;
+
+        if (showClickDebug && GetClickDebugPanelRect().Contains(guiPoint))
+            return true;
+
+        if (highlightMoveableObjects && GetMoveableLegendPanelRect().Contains(guiPoint))
+            return true;
+
+        return false;
+    }
 
     // Event that other systems can subscribe to
     public delegate void EditorModeChanged(bool isActive);
@@ -873,6 +893,25 @@ public class RuntimeEditorManager : MonoBehaviour
         if (!showClickDebug)
             return;
 
+        Rect panel = GetClickDebugPanelRect();
+        var style = new GUIStyle(GUI.skin.box)
+        {
+            fontSize = 12,
+            alignment = TextAnchor.UpperLeft,
+            wordWrap = true,
+            richText = false
+        };
+        style.normal.textColor = Color.yellow;
+
+        if (clickDebugMinimized)
+        {
+            GUI.Box(panel, GUIContent.none, style);
+            GUI.Label(new Rect(panel.x + 10f, panel.y + 8f, panel.width - PanelMinimizeToggleWidth - 24f, 20f),
+                "Click debug", style);
+            DrawPanelMinimizeToggle(panel, ref clickDebugMinimized);
+            return;
+        }
+
         string cam = mainCamera != null ? mainCamera.name : "NULL";
         string sel = currentSelectedObject != null ? currentSelectedObject.name : "(none)";
 
@@ -884,18 +923,18 @@ public class RuntimeEditorManager : MonoBehaviour
             $"Bind key held: {(allowRuntimeBinding && Input.GetKey(bindMoveableKey))}\n" +
             $"Last click:\n{_clickDebug}";
 
-        var style = new GUIStyle(GUI.skin.box)
-        {
-            fontSize = 12,
-            alignment = TextAnchor.UpperLeft,
-            wordWrap = true,
-            richText = false
-        };
-        style.normal.textColor = Color.yellow;
+        GUI.Box(panel, text, style);
+        DrawPanelMinimizeToggle(panel, ref clickDebugMinimized);
+    }
 
-        float w = 360f;
-        float h = 168f;
-        GUI.Box(new Rect(Screen.width - w - 12f, 12f, w, h), text, style);
+    Rect GetClickDebugPanelRect()
+    {
+        const float w = 360f;
+        const float x = 12f;
+        if (clickDebugMinimized)
+            return new Rect(Screen.width - w - x, 12f, w, WorldBuildingHelperPanelHeaderHeight);
+
+        return new Rect(Screen.width - w - x, 12f, w, 168f);
     }
 
     /// <summary>
@@ -907,12 +946,7 @@ public class RuntimeEditorManager : MonoBehaviour
         if (!highlightMoveableObjects)
             return;
 
-        const float pad = 10f;
-        const float swatch = 16f;
-        float panelW = 290f;
-        float panelH = allowRuntimeBinding ? 92f : 48f;
-        var panel = new Rect(16f, Screen.height - panelH - 16f, panelW, panelH);
-
+        Rect panel = GetMoveableLegendPanelRect();
         GUI.Box(panel, GUIContent.none);
 
         var label = new GUIStyle(GUI.skin.label)
@@ -923,7 +957,19 @@ public class RuntimeEditorManager : MonoBehaviour
         };
         label.normal.textColor = Color.white;
 
-        // Color swatch matching the wireframe color.
+        DrawPanelMinimizeToggle(panel, ref moveableLegendMinimized);
+
+        if (moveableLegendMinimized)
+        {
+            GUI.Label(
+                new Rect(panel.x + 10f, panel.y + 8f, panel.width - PanelMinimizeToggleWidth - 24f, 20f),
+                "Moveable Legend", label);
+            return;
+        }
+
+        const float pad = 10f;
+        const float swatch = 16f;
+
         var swatchRect = new Rect(panel.x + pad, panel.y + pad, swatch, swatch);
         Color prev = GUI.color;
         GUI.color = moveableHighlightColor;
@@ -931,16 +977,67 @@ public class RuntimeEditorManager : MonoBehaviour
         GUI.color = prev;
 
         GUI.Label(
-            new Rect(swatchRect.xMax + 8f, panel.y + pad - 2f, panelW - swatch - pad * 2f - 8f, 20f),
-            "Outlined = moveable (drag it)", label);
+            new Rect(swatchRect.xMax + 8f, panel.y + pad - 2f, panel.width - swatch - pad * 2f - PanelMinimizeToggleWidth - 8f, 20f),
+            "Moveable Legend", label);
 
         if (allowRuntimeBinding)
         {
             GUI.Label(
-                new Rect(panel.x + pad, panel.y + pad + swatch + 6f, panelW - pad * 2f, 58f),
+                new Rect(panel.x + pad, panel.y + pad + swatch + 6f, panel.width - pad * 2f, 58f),
                 $"Hold [{bindMoveableKey}] + click an un-outlined object to make it moveable.\n" +
                 $"Hold [{bindMoveableKey}] + drag a box to add many at once.", label);
         }
+    }
+
+    Rect GetMoveableLegendPanelRect()
+    {
+        const float panelW = 290f;
+        const float margin = 16f;
+        if (moveableLegendMinimized)
+            return new Rect(margin, Screen.height - WorldBuildingHelperPanelHeaderHeight - margin, panelW, WorldBuildingHelperPanelHeaderHeight);
+
+        float panelH = allowRuntimeBinding ? 92f : 48f;
+        return new Rect(margin, Screen.height - panelH - margin, panelW, panelH);
+    }
+
+    static GUIStyle minimizeToggleButtonStyle;
+
+    static GUIStyle GetMinimizeToggleButtonStyle()
+    {
+        if (minimizeToggleButtonStyle == null)
+        {
+            minimizeToggleButtonStyle = new GUIStyle(GUI.skin.button)
+            {
+                alignment = TextAnchor.MiddleCenter,
+                padding = new RectOffset(0, 0, 0, 0),
+                margin = new RectOffset(0, 0, 0, 0),
+                clipping = TextClipping.Overflow,
+            };
+        }
+
+        return minimizeToggleButtonStyle;
+    }
+
+    public static void DrawMinimizeToggleButton(Rect toggleRect, ref bool minimized)
+    {
+        string toggleLabel = minimized ? "+" : "\u2014";
+        if (GUI.Button(toggleRect, toggleLabel, GetMinimizeToggleButtonStyle()))
+        {
+            minimized = !minimized;
+            if (minimized)
+                GUI.FocusControl(null);
+        }
+    }
+
+    static void DrawPanelMinimizeToggle(Rect panelRect, ref bool minimized)
+    {
+        Rect toggleRect = new Rect(
+            panelRect.xMax - PanelMinimizeToggleWidth - 8f,
+            panelRect.y + 6f,
+            PanelMinimizeToggleWidth,
+            PanelMinimizeToggleHeight);
+
+        DrawMinimizeToggleButton(toggleRect, ref minimized);
     }
 
     // ===== LAYER MANAGEMENT HELPER METHODS =====
