@@ -70,7 +70,6 @@ namespace IVI
         public float debugForward;
         public float debugStrafe;
         public float debugTurn;
-        public bool debugIsBiking;
 
         [Header("Status (read-only)")]
         public bool isManualMode = false;
@@ -102,7 +101,6 @@ namespace IVI
         private float currentManualAngularSpeed;
         private bool manualForwardInputHeld;
         private bool manualReverseInputHeld;
-        private bool useIsBikingAnimator;
         private Animator bikeAnimator;
 
         void Start()
@@ -123,11 +121,15 @@ namespace IVI
         {
             yield return null;
 
+            EnsureSfpwdAgent();
+            animator = AvatarAnimatorUtility.GetLocomotionAnimator(gameObject);
+            debugAnimatorFound = animator != null;
+            debugAnimatorTarget = animator != null ? animator.gameObject.name : "(none)";
+
             if (animator != null)
             {
                 animator.applyRootMotion = false;
                 animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
-                useIsBikingAnimator = HasAnimatorParameter("IsBiking");
             }
 
             bikeAnimator = FindBikeAnimator();
@@ -177,6 +179,7 @@ namespace IVI
             }
             else
             {
+                EnsureSfpwdAgent();
                 // SFPWDAgent (Base.Update) computes velocity and rotation when present.
                 // Fall back to rigidbody velocity for prefabs tested without an agent.
                 Vector3 vel = Vector3.zero;
@@ -480,12 +483,9 @@ namespace IVI
             if (bikeAnimator != null)
                 bikeAnimator.SetBool("isIdling", shouldIdle);
 
-            if (useIsBikingAnimator)
+            if (AvatarAnimatorUtility.UsesCyclistPedalController(animator))
             {
-                bool isBiking = !shouldIdle;
-                animator.SetBool("IsBiking", isBiking);
-                animator.speed = isBiking ? Mathf.Max(speed / Mathf.Max(moveSpeed, 0.01f), 0.5f) : 1f;
-                debugIsBiking = isBiking;
+                AvatarAnimatorUtility.ApplyCyclistPedalSpeed(animator, shouldIdle, speed, moveSpeed);
                 debugForward = 0f;
                 debugStrafe = 0f;
                 debugTurn = 0f;
@@ -741,6 +741,17 @@ namespace IVI
             return isPressed;
         }
 
+        public void BindNavigationAgent(SFPWDAgent agent)
+        {
+            sfpwdAgent = agent;
+        }
+
+        void EnsureSfpwdAgent()
+        {
+            if (sfpwdAgent == null)
+                sfpwdAgent = GetComponent<SFPWDAgent>();
+        }
+
         Animator FindBikeAnimator()
         {
             foreach (Animator candidate in GetComponentsInChildren<Animator>(true))
@@ -759,20 +770,6 @@ namespace IVI
             }
 
             return null;
-        }
-
-        bool HasAnimatorParameter(string parameterName)
-        {
-            if (animator == null)
-                return false;
-
-            foreach (AnimatorControllerParameter parameter in animator.parameters)
-            {
-                if (parameter.name == parameterName)
-                    return true;
-            }
-
-            return false;
         }
     }
 }

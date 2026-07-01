@@ -22,7 +22,8 @@ namespace IVI
             {
                 if (animator.avatar != null && animator.avatar.isHuman)
                 {
-                    if (!HasSkinnedMeshInSubtree(animator.transform))
+                    if (!HasSkinnedMeshInSubtree(animator.transform)
+                        && !HasSkinnedMeshAmongSiblings(animator.transform))
                         continue;
 
                     int depth = GetDepthFromRoot(animator.transform, root.transform);
@@ -49,9 +50,43 @@ namespace IVI
             return fallback ?? root.GetComponentInChildren<Animator>(true);
         }
 
+        public static bool UsesCyclistPedalController(Animator animator)
+        {
+            return animator != null
+                && animator.runtimeAnimatorController != null
+                && animator.runtimeAnimatorController.name == "CyclistController";
+        }
+
+        public static void ApplyCyclistPedalSpeed(Animator animator, bool shouldIdle, float speed, float referenceSpeed)
+        {
+            if (!UsesCyclistPedalController(animator))
+                return;
+
+            animator.speed = shouldIdle
+                ? 0f
+                : Mathf.Max(speed / Mathf.Max(referenceSpeed, 0.01f), 0.5f);
+        }
+
         private static bool HasSkinnedMeshInSubtree(Transform t)
         {
             return t.GetComponentInChildren<SkinnedMeshRenderer>(true) != null;
+        }
+
+        /// <summary>
+        /// Sports_Female_02 keeps its mesh as a sibling of the skeleton root, not a child.
+        /// </summary>
+        private static bool HasSkinnedMeshAmongSiblings(Transform t)
+        {
+            if (t.parent == null)
+                return false;
+
+            foreach (Transform sibling in t.parent)
+            {
+                if (sibling.GetComponentInChildren<SkinnedMeshRenderer>(true) != null)
+                    return true;
+            }
+
+            return false;
         }
 
         private static int GetDepthFromRoot(Transform t, Transform root)

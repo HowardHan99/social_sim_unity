@@ -133,7 +133,13 @@ namespace SEAN.Scenario.Agents
         {
             if (animator == null)
                 return;
-            //animator.SetBool("Idling", true);
+
+            if (IVI.AvatarAnimatorUtility.UsesCyclistPedalController(animator))
+            {
+                IVI.AvatarAnimatorUtility.ApplyCyclistPedalSpeed(animator, true, 0f, 4f);
+                return;
+            }
+
             animator.SetFloat("Forward", 0);
             animator.SetFloat("Strafe", 0);
         }
@@ -256,6 +262,13 @@ namespace SEAN.Scenario.Agents
             Vector3 animParams = Quaternion.Euler(0, -transform.eulerAngles.y, 0) * velocity;
             animParams *= animationScale;
             var idle = velocity.magnitude < 0.1f;
+            float speed = velocity.magnitude;
+
+            if (IVI.AvatarAnimatorUtility.UsesCyclistPedalController(animator))
+            {
+                IVI.AvatarAnimatorUtility.ApplyCyclistPedalSpeed(animator, idle, speed, 4f);
+                return;
+            }
 
             animator.SetBool("Idling", idle);
             if (!GetType().Equals(typeof(PlayerAgent)))

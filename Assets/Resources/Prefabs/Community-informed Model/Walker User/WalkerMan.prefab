@@ -118,7 +118,6 @@ MonoBehaviour:
   debugForward: 0
   debugStrafe: 0
   debugTurn: 0
-  debugIsBiking: 0
   isManualMode: 0
   debugJoystickRawHorizontal: 0
   debugJoystickRawVertical: 0
@@ -188,17 +187,17 @@ PrefabInstance:
     - target: {fileID: -8679921383154817045, guid: 71a36528b5092aa4b904290788683b1d,
         type: 3}
       propertyPath: m_LocalPosition.x
-      value: 0
+      value: -0.003
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 71a36528b5092aa4b904290788683b1d,
         type: 3}
       propertyPath: m_LocalPosition.y
-      value: -0.073
+      value: 0.013
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 71a36528b5092aa4b904290788683b1d,
         type: 3}
       propertyPath: m_LocalPosition.z
-      value: 0.293
+      value: 0.314
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 71a36528b5092aa4b904290788683b1d,
         type: 3}

@@ -200,7 +200,6 @@ MonoBehaviour:
   debugForward: 0
   debugStrafe: 0
   debugTurn: 0
-  debugIsBiking: 0
   isManualMode: 0
   debugJoystickRawHorizontal: 0
   debugJoystickRawVertical: 0
@@ -317,7 +316,7 @@ MonoBehaviour:
   dog: {fileID: 3108332725983109965}
   dogAttachOffset: {x: 0, y: 0.3, z: 0}
   detachDogOnStart: 1
-  dogStaysUnder: {fileID: 0}
+  dogStaysUnder: {fileID: 221331349434870075}
   segments: 16
   sag: 0.25
   tautDistance: 1.5

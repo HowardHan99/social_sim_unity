@@ -116,7 +116,6 @@ MonoBehaviour:
   debugForward: 0
   debugStrafe: 0
   debugTurn: 0
-  debugIsBiking: 0
   isManualMode: 0
   debugJoystickRawHorizontal: 0
   debugJoystickRawVertical: 0
@@ -155,17 +154,17 @@ PrefabInstance:
     - target: {fileID: -8679921383154817045, guid: 6c3155a7bb0cfee4087ce1f4b90ce510,
         type: 3}
       propertyPath: m_LocalScale.x
-      value: 0.4
+      value: 1.7
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 6c3155a7bb0cfee4087ce1f4b90ce510,
         type: 3}
       propertyPath: m_LocalScale.y
-      value: 0.4
+      value: 1.7
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 6c3155a7bb0cfee4087ce1f4b90ce510,
         type: 3}
       propertyPath: m_LocalScale.z
-      value: 0.4
+      value: 1.7
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 6c3155a7bb0cfee4087ce1f4b90ce510,
         type: 3}

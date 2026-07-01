@@ -242,13 +242,6 @@ namespace SEAN.Scenario.Agents
                 && Mathf.Abs(navHit.position.y - rawPos.y) < 1.5f)
                 spawnPos = navHit.position;
 
-            if (pwdCharacter == PwdCharacter.Cyclist)
-            {
-                Quaternion startFacing = Quaternion.Euler(0f, yAngle, 0f);
-                spawnPos += startFacing * Vector3.left * 10f;
-                spawnRot = Quaternion.Euler(0f, yAngle + 40f, 0f);
-            }
-
             // Instantiate as a ROOT object (no parent). This avoids all parent-child
             // Rigidbody issues. Background agents are parented because NavManager needs
             // the hierarchy, but the PWD player has its own controller.
@@ -283,6 +276,7 @@ namespace SEAN.Scenario.Agents
             var manualCtrl = avatarObject.GetComponent<IVI.ManualWheelchairController>();
             if (manualCtrl == null)
                 manualCtrl = avatarObject.AddComponent<IVI.ManualWheelchairController>();
+            manualCtrl.BindNavigationAgent(sfpwd);
             manualCtrl.enabled = true;
             manualCtrl.startInManualMode = SessionReview.SessionOnboardingSettings.PwdStartupControl == SessionReview.StartupControlMode.Manual;
 

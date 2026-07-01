@@ -71,7 +71,15 @@ namespace IVI
             // AttachPropToHand snaps this leash onto the hand and would otherwise
             // carry the dog up with it.
             if (detachDogOnStart && dog != null)
-                dog.SetParent(dogStaysUnder, true);
+            {
+                Transform owner = dogStaysUnder;
+                if (owner == null)
+                {
+                    var attach = GetComponentInParent<AttachPropToHand>();
+                    owner = attach != null ? attach.transform : transform.root;
+                }
+                dog.SetParent(owner, true);
+            }
         }
 
         void LateUpdate()
