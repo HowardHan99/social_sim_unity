@@ -40,6 +40,51 @@ public class UIManager : MonoBehaviour
     public Button vlmCaptureButton; // Dedicated VLM entry button shown only during VLM flow
     public CamCapture vlmCamCapture; // Optional direct hook so prompt confirmation can trigger capture
 
+    [Header("Preset Voice Messages (OR quick-send)")]
+    [Tooltip("Quick alternative to the VLM: send one of these fixed messages straight to text-to-speech without capturing an image.")]
+    public List<string> presetVoiceMessages = new List<string>
+    {
+        "Please, give way.",
+        "Excuse me.",
+        "Attention, robot here."
+    };
+    [Tooltip("Optional. A styled Button placed inside the signal pop-up that is cloned once per preset message. It is hidden at runtime and used only as a template.")]
+    public Button presetVoiceMessageTemplate;
+    [Tooltip("Optional. Parent (ideally with a Vertical/Horizontal Layout Group) that holds the generated preset buttons. Defaults to the template's parent when left empty.")]
+    public Transform presetVoiceMessageContainer;
+    [Tooltip("Generate and cache the preset clips at startup so the first press plays without network latency.")]
+    public bool prewarmPresetVoiceMessages = true;
+
+    [Header("Generated Signal UI (used when no template is assigned)")]
+    [Tooltip("When no template is assigned, build the whole signal UI from code and switch off the scene's hard-positioned UI.")]
+    public bool autoGeneratePresetButtons = true;
+
+    // Layout/styling kept in code (not serialized) so edits here always take effect at runtime.
+    private const float presetPanelWidth = 560f;
+    private readonly Vector2 presetButtonSize = new Vector2(360f, 46f);
+    private const float presetButtonSpacing = 8f;
+    private const float presetButtonFontSize = 23f;
+    private const float presetHeaderFontSize = 27f;
+    private readonly Color presetButtonColor = new Color(0.16f, 0.52f, 0.45f, 0.97f);    // teal quick-message chips
+    private readonly Color presetConfirmColor = new Color(0.20f, 0.58f, 0.32f, 0.97f);   // green confirm
+    private readonly Color presetExpanderColor = new Color(1f, 1f, 1f, 0.12f);           // subtle expander
+    private readonly Color presetPanelBackdropColor = new Color(0f, 0f, 0f, 0.72f);
+    private readonly Color presetTextColor = Color.white;
+    private const string CollapsedExpanderText = "▸  Build a detailed message";
+    private const string ExpandedExpanderText = "▾  Hide detailed options";
+
+    private bool presetVoiceMessagesBuilt;
+    private GameObject presetPanelInstance;     // generated root panel, when no template is used
+    private GameObject detailedSectionInstance; // collapsible checkbox/LLM section
+    private TMP_Text detailedExpanderLabel;
+    private readonly List<Toggle> generatedToggles = new List<Toggle>();
+    private static readonly string[] DetailedSignalOptions =
+    {
+        "Declare robot movement info",
+        "Confirm detection of pedestrian",
+        "Instruction for pedestrians to avoid accident"
+    };
+
     public bool SuppressSignalButtons { get; set; }
     public bool UnpauseOnExitResponseWindow { get; set; } = true;
     public bool IsVlmSignalFlowActive { get; private set; }
@@ -56,11 +101,28 @@ public class UIManager : MonoBehaviour
         {
             confirmResponseButton.onClick.AddListener(OnConfirmResponseButtonPressed);
         }
+
+        BuildPresetVoiceMessageButtons();
+
+        if (prewarmPresetVoiceMessages)
+            PrewarmPresetVoiceMessages();
     }
 
     void Update()
     {
         elapsedTime += Time.unscaledDeltaTime; // Ensures the UI works even when the game is paused
+
+        // The generated panel lives on the Canvas, so mirror the pop-up's visibility manually.
+        if (presetPanelInstance != null)
+        {
+            bool showPresets = popUpWindow != null && popUpWindow.activeInHierarchy;
+            if (presetPanelInstance.activeSelf != showPresets)
+            {
+                presetPanelInstance.SetActive(showPresets);
+                if (showPresets)
+                    CollapseDetailedSection(); // always open compact (quick messages only)
+            }
+        }
 
         // Show signal buttons only when the game is paused and the session is robot-focused
         if (PauseManager.Instance != null && !IsVlmSignalFlowActive)
@@ -330,6 +392,324 @@ public class UIManager : MonoBehaviour
 
         Debug.Log("[UIManager] Prompt confirmed. Triggering VLM capture.");
         vlmCamCapture.CaptureAndProcessImage();
+    }
+
+    /// <summary>
+    /// Clones the preset-message template once per entry in <see cref="presetVoiceMessages"/>
+    /// and wires each clone to send that fixed message straight to TTS (the "OR" quick-send option).
+    /// </summary>
+    private void BuildPresetVoiceMessageButtons()
+    {
+        if (presetVoiceMessagesBuilt)
+            return;
+
+        if (presetVoiceMessageTemplate != null)
+            BuildPresetButtonsFromTemplate();
+        else if (autoGeneratePresetButtons)
+            BuildSignalUIProgrammatically();
+        else
+        {
+            Debug.Log("[UIManager] No preset voice message template assigned and auto-generation disabled; skipping preset buttons.");
+            return;
+        }
+
+        presetVoiceMessagesBuilt = true;
+    }
+
+    // Clone an Inspector-assigned button so the presets match a custom style.
+    private void BuildPresetButtonsFromTemplate()
+    {
+        Transform parent = presetVoiceMessageContainer != null
+            ? presetVoiceMessageContainer
+            : presetVoiceMessageTemplate.transform.parent;
+
+        // The template itself is only a blueprint, never an interactive button.
+        presetVoiceMessageTemplate.gameObject.SetActive(false);
+
+        foreach (string presetMessage in presetVoiceMessages)
+        {
+            if (string.IsNullOrWhiteSpace(presetMessage))
+                continue;
+
+            Button presetButton = Instantiate(presetVoiceMessageTemplate, parent);
+            presetButton.gameObject.name = "PresetVoiceButton (" + presetMessage + ")";
+            presetButton.gameObject.SetActive(true);
+
+            TMP_Text label = presetButton.GetComponentInChildren<TMP_Text>(true);
+            if (label != null)
+                label.text = presetMessage;
+
+            string capturedMessage = presetMessage; // avoid closure over the loop variable
+            presetButton.onClick.RemoveAllListeners();
+            presetButton.onClick.AddListener(() => SendPresetVoiceMessage(capturedMessage));
+        }
+    }
+
+    // Build the whole signal UI from code (quick messages + collapsible detailed options) with an
+    // automatic layout, and switch off the scene's hard-positioned UI so nothing is hand-placed.
+    private void BuildSignalUIProgrammatically()
+    {
+        // Parent to the Canvas (not the awkwardly-scaled pop-up) so screen positioning is predictable.
+        Canvas canvas = FindParentCanvas(popUpWindow != null ? popUpWindow.transform : transform);
+        Transform parent = canvas != null ? canvas.transform : (popUpWindow != null ? popUpWindow.transform : transform);
+
+        // --- Root panel: centered, dark backdrop, auto vertical layout that sizes to its content ---
+        var root = new GameObject("GeneratedSignalPanel",
+            typeof(RectTransform), typeof(Image), typeof(VerticalLayoutGroup), typeof(ContentSizeFitter));
+        root.transform.SetParent(parent, false);
+        presetPanelInstance = root;
+
+        RectTransform rootRect = root.GetComponent<RectTransform>();
+        rootRect.anchorMin = new Vector2(0.5f, 0.5f);
+        rootRect.anchorMax = new Vector2(0.5f, 0.5f);
+        rootRect.pivot = new Vector2(0.5f, 0.5f);
+        rootRect.sizeDelta = new Vector2(presetPanelWidth, 0f);
+        rootRect.anchoredPosition = Vector2.zero;
+
+        root.GetComponent<Image>().color = presetPanelBackdropColor;
+
+        var rootLayout = root.GetComponent<VerticalLayoutGroup>();
+        rootLayout.padding = new RectOffset(24, 24, 22, 22);
+        rootLayout.spacing = presetButtonSpacing;
+        rootLayout.childAlignment = TextAnchor.UpperCenter;
+        rootLayout.childControlWidth = true;
+        rootLayout.childControlHeight = true;
+        rootLayout.childForceExpandWidth = true;
+        rootLayout.childForceExpandHeight = false;
+
+        var rootFitter = root.GetComponent<ContentSizeFitter>();
+        rootFitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
+        rootFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+        // --- Primary: quick messages ---
+        CreatePresetLabel(root.transform, "Send a quick message", presetHeaderFontSize, presetTextColor);
+
+        foreach (string presetMessage in presetVoiceMessages)
+        {
+            if (string.IsNullOrWhiteSpace(presetMessage))
+                continue;
+
+            string capturedMessage = presetMessage;
+            Button quickButton = CreatePresetButtonObject(root.transform, presetMessage, presetButtonColor);
+            quickButton.onClick.AddListener(() => SendPresetVoiceMessage(capturedMessage));
+        }
+
+        // --- Expander: reveals the detailed (LLM) options only on demand ---
+        Button expandButton = CreatePresetButtonObject(root.transform, CollapsedExpanderText, presetExpanderColor);
+        detailedExpanderLabel = expandButton.GetComponentInChildren<TextMeshProUGUI>(true);
+        expandButton.onClick.AddListener(ToggleDetailedSection);
+
+        // --- Collapsible detailed section (checkboxes + Confirm), hidden by default ---
+        var detailed = new GameObject("DetailedSignalOptions", typeof(RectTransform), typeof(VerticalLayoutGroup));
+        detailed.transform.SetParent(root.transform, false);
+        detailedSectionInstance = detailed;
+
+        var detailedLayout = detailed.GetComponent<VerticalLayoutGroup>();
+        detailedLayout.padding = new RectOffset(0, 0, 8, 0);
+        detailedLayout.spacing = presetButtonSpacing;
+        detailedLayout.childAlignment = TextAnchor.UpperCenter;
+        detailedLayout.childControlWidth = true;
+        detailedLayout.childControlHeight = true;
+        detailedLayout.childForceExpandWidth = true;
+        detailedLayout.childForceExpandHeight = false;
+
+        CreatePresetLabel(detailed.transform, "Select what the robot should convey:", presetButtonFontSize, presetTextColor);
+
+        generatedToggles.Clear();
+        foreach (string option in DetailedSignalOptions)
+            generatedToggles.Add(CreatePresetToggle(detailed.transform, option));
+
+        // Reroute the existing VLM confirm logic to our generated toggles.
+        if (optionToggles == null)
+            optionToggles = new List<Toggle>();
+        optionToggles.Clear();
+        optionToggles.AddRange(generatedToggles);
+
+        Button confirmButton = CreatePresetButtonObject(detailed.transform, "Confirm", presetConfirmColor);
+        confirmButton.onClick.AddListener(OnConfirmButtonPressed);
+
+        detailed.SetActive(false); // collapsed until the user expands it
+
+        // --- Turn off the old hard-positioned scene UI inside the pop-up ---
+        if (popUpWindow != null)
+        {
+            foreach (Transform child in popUpWindow.transform)
+                child.gameObject.SetActive(false);
+        }
+
+        // It lives on the Canvas now, so match the pop-up's visibility explicitly.
+        root.SetActive(popUpWindow != null && popUpWindow.activeInHierarchy);
+    }
+
+    private void ToggleDetailedSection()
+    {
+        if (detailedSectionInstance == null)
+            return;
+
+        bool show = !detailedSectionInstance.activeSelf;
+        detailedSectionInstance.SetActive(show);
+        if (detailedExpanderLabel != null)
+            detailedExpanderLabel.text = show ? ExpandedExpanderText : CollapsedExpanderText;
+    }
+
+    private void CollapseDetailedSection()
+    {
+        if (detailedSectionInstance != null)
+            detailedSectionInstance.SetActive(false);
+        if (detailedExpanderLabel != null)
+            detailedExpanderLabel.text = CollapsedExpanderText;
+    }
+
+    private static Canvas FindParentCanvas(Transform start)
+    {
+        for (Transform current = start; current != null; current = current.parent)
+        {
+            Canvas canvas = current.GetComponent<Canvas>();
+            if (canvas != null)
+                return canvas;
+        }
+        return null;
+    }
+
+    private Button CreatePresetButtonObject(Transform parent, string text, Color bgColor)
+    {
+        var buttonObj = new GameObject("Button (" + text + ")",
+            typeof(RectTransform), typeof(Image), typeof(Button));
+        buttonObj.transform.SetParent(parent, false);
+
+        Image image = buttonObj.GetComponent<Image>();
+        image.color = bgColor;
+
+        Button button = buttonObj.GetComponent<Button>();
+        button.targetGraphic = image;
+
+        LayoutElement layoutElement = buttonObj.AddComponent<LayoutElement>();
+        layoutElement.preferredHeight = presetButtonSize.y;
+        layoutElement.minHeight = presetButtonSize.y;
+
+        CreatePresetLabel(buttonObj.transform, text, presetButtonFontSize, presetTextColor);
+        return button;
+    }
+
+    // Builds a checkbox-style Toggle from scratch; its label is read by OnConfirmButtonPressed.
+    private Toggle CreatePresetToggle(Transform parent, string text)
+    {
+        var row = new GameObject("Toggle (" + text + ")",
+            typeof(RectTransform), typeof(Toggle), typeof(HorizontalLayoutGroup), typeof(LayoutElement));
+        row.transform.SetParent(parent, false);
+
+        var rowLayoutElement = row.GetComponent<LayoutElement>();
+        rowLayoutElement.minHeight = presetButtonSize.y;
+        rowLayoutElement.preferredHeight = presetButtonSize.y;
+
+        var rowLayout = row.GetComponent<HorizontalLayoutGroup>();
+        rowLayout.spacing = 12f;
+        rowLayout.padding = new RectOffset(10, 10, 4, 4);
+        rowLayout.childAlignment = TextAnchor.MiddleLeft;
+        rowLayout.childControlWidth = true;
+        rowLayout.childControlHeight = true;
+        rowLayout.childForceExpandWidth = false;
+        rowLayout.childForceExpandHeight = false;
+
+        // Checkbox box
+        var box = new GameObject("Box", typeof(RectTransform), typeof(Image), typeof(LayoutElement));
+        box.transform.SetParent(row.transform, false);
+        Image boxImage = box.GetComponent<Image>();
+        boxImage.color = new Color(1f, 1f, 1f, 0.9f);
+        var boxLayoutElement = box.GetComponent<LayoutElement>();
+        boxLayoutElement.minWidth = 30f;
+        boxLayoutElement.preferredWidth = 30f;
+        boxLayoutElement.minHeight = 30f;
+        boxLayoutElement.preferredHeight = 30f;
+
+        // Checkmark (Toggle shows/hides this with isOn)
+        var checkmark = new GameObject("Checkmark", typeof(RectTransform), typeof(Image));
+        checkmark.transform.SetParent(box.transform, false);
+        RectTransform checkRect = checkmark.GetComponent<RectTransform>();
+        checkRect.anchorMin = new Vector2(0.18f, 0.18f);
+        checkRect.anchorMax = new Vector2(0.82f, 0.82f);
+        checkRect.offsetMin = Vector2.zero;
+        checkRect.offsetMax = Vector2.zero;
+        Image checkImage = checkmark.GetComponent<Image>();
+        checkImage.color = presetButtonColor;
+
+        // Label
+        var labelObj = new GameObject("Label", typeof(RectTransform), typeof(LayoutElement));
+        labelObj.transform.SetParent(row.transform, false);
+        TextMeshProUGUI label = labelObj.AddComponent<TextMeshProUGUI>();
+        label.text = text;
+        label.color = presetTextColor;
+        label.alignment = TextAlignmentOptions.Left;
+        label.fontSize = presetButtonFontSize;
+        labelObj.GetComponent<LayoutElement>().flexibleWidth = 1f;
+
+        Toggle toggle = row.GetComponent<Toggle>();
+        toggle.targetGraphic = boxImage;
+        toggle.graphic = checkImage;
+        toggle.isOn = false;
+
+        return toggle;
+    }
+
+    private void CreatePresetLabel(Transform parent, string text, float fontSize, Color color)
+    {
+        var textObj = new GameObject("Label", typeof(RectTransform));
+        textObj.transform.SetParent(parent, false);
+
+        RectTransform textRect = textObj.GetComponent<RectTransform>();
+        textRect.anchorMin = Vector2.zero;
+        textRect.anchorMax = Vector2.one;
+        textRect.offsetMin = Vector2.zero;
+        textRect.offsetMax = Vector2.zero;
+
+        TextMeshProUGUI label = textObj.AddComponent<TextMeshProUGUI>();
+        label.text = text;
+        label.color = color;
+        label.alignment = TextAlignmentOptions.Center;
+        label.fontSize = fontSize;
+    }
+
+    /// <summary>
+    /// Pre-generates and caches each preset clip so the first press plays without network latency.
+    /// </summary>
+    public void PrewarmPresetVoiceMessages()
+    {
+        if (ttsManager == null)
+            return;
+
+        foreach (string presetMessage in presetVoiceMessages)
+        {
+            if (!string.IsNullOrWhiteSpace(presetMessage))
+                ttsManager.ConvertTextToSpeech(presetMessage); // generates + caches, does not auto-play
+        }
+    }
+
+    /// <summary>
+    /// "OR" quick-send path: speak a fixed preset message via TTS without running the VLM,
+    /// record it like a normal response, and close the signal flow.
+    /// </summary>
+    public void SendPresetVoiceMessage(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+            return;
+
+        isAwaitingVlmResponse = false;
+        prompt = string.Empty;
+        finalResponse = message;
+
+        if (popUpWindow != null)
+            popUpWindow.SetActive(false);
+
+        if (SessionReview.SessionReviewManager.Instance != null)
+            SessionReview.SessionReviewManager.Instance.AttachVLMReplayResponse(message);
+
+        if (ttsManager != null)
+            ttsManager.PlaySpeech(message);
+        else
+            Debug.LogError("[UIManager] TTSManager missing; cannot play preset voice message.");
+
+        // Close the response/signal flow so the orchestrator advances, mirroring the VLM path.
+        ExitResponseWindow();
     }
 
     public void ExitResponseWindow()

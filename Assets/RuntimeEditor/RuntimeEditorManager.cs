@@ -486,75 +486,74 @@ public class RuntimeEditorManager : MonoBehaviour
             Ray ray = GetRayFromScreenPoint(Input.mousePosition);
             RaycastHit hit;
 
-            // Debug.Log($"[Raycast] Mouse Position: {Input.mousePosition}, Ray Origin: {ray.origin}, Ray Direction: {ray.direction}");
-
             bool shiftHeld = allowRuntimeBinding && Input.GetKey(bindMoveableKey);
 
+            GameObject clickedObject = null;
+            GameObject editableObject = null;
+
+            // Primary: precise collider raycast.
             if (Physics.Raycast(ray, out hit, maxRaycastDistance, selectableLayers))
             {
-                GameObject clickedObject = hit.collider.gameObject;
-                GameObject editableObject = ResolveEditableObject(clickedObject);
-                // Debug.Log($"[Raycast HIT] Object: {clickedObject.name}, Position: {hit.point}, Distance: {hit.distance:F2}m, Layer: {LayerMask.LayerToName(clickedObject.layer)}");
+                clickedObject = hit.collider.gameObject;
 
                 // To ignore if pointer is over UI
-                if(clickedObject.layer == LayerMask.NameToLayer("UI"))
+                if (clickedObject.layer == LayerMask.NameToLayer("UI"))
                 {
                     Debug.Log("[Raycast] Pointer is over UI. Ignoring click.");
                     _clickDebug = $"Hit '{clickedObject.name}' on UI layer — ignored.";
                     return;
                 }
 
+                GameObject resolved = ResolveEditableObject(clickedObject);
                 // Neglect static objects (ground, buildings, scenery) — they aren't draggable props.
-                if (clickedObject.isStatic || (editableObject != null && editableObject.isStatic))
-                {
-                    Debug.Log($"[Raycast] '{clickedObject.name}' is static. Ignoring.");
-                    _clickDebug =
-                        $"HIT: {clickedObject.name} [layer {LayerMask.LayerToName(clickedObject.layer)}]\n" +
-                        "-> STATIC object, ignored (scenery is not selectable).";
-                    return;
-                }
+                bool staticBlocked = clickedObject.isStatic || (resolved != null && resolved.isStatic);
+                if (resolved != null && !staticBlocked)
+                    editableObject = resolved;
+            }
 
-                // Check if object is editable
-                if (editableObject != null)
+            // Fallback: a moveable prop's collider may be missing or tight-fitted to its opaque
+            // pixels (e.g. a PNG sprite/quad), so a click on a transparent region misses the
+            // collider raycast (or passes through to the static ground behind it). Select the
+            // front-most moveable object whose visual bounds the cursor ray passes through.
+            if (editableObject == null)
+                editableObject = FindMoveableUnderCursor(ray);
+
+            if (editableObject != null)
+            {
+                SelectObject(editableObject);
+                _clickDebug = clickedObject != null
+                    ? $"SELECTED: {editableObject.name}  (collider hit '{clickedObject.name}')"
+                    : $"SELECTED: {editableObject.name}  (via transparent/bounds fallback)";
+            }
+            else if (shiftHeld && clickedObject != null)
+            {
+                // Explicit bind: only when the user holds the bind key.
+                GameObject bound = MakeObjectMoveable(clickedObject);
+                if (bound != null)
                 {
-                    SelectObject(editableObject);
+                    SelectObject(bound);
                     _clickDebug =
-                        $"HIT: {clickedObject.name} [layer {LayerMask.LayerToName(clickedObject.layer)}]\n" +
-                        $"-> SELECTED: {editableObject.name}";
-                }
-                else if (shiftHeld)
-                {
-                    // Explicit bind: only when the user holds the bind key.
-                    GameObject bound = MakeObjectMoveable(clickedObject);
-                    if (bound != null)
-                    {
-                        SelectObject(bound);
-                        _clickDebug =
-                            $"HIT: {clickedObject.name} [layer {LayerMask.LayerToName(clickedObject.layer)}]\n" +
-                            $"-> MADE MOVEABLE + SELECTED: {bound.name}" +
-                            (bound != clickedObject ? $"  (resolved up from clicked '{clickedObject.name}')" : "");
-                    }
-                    else
-                    {
-                        _clickDebug =
-                            $"HIT: {clickedObject.name} [layer {LayerMask.LayerToName(clickedObject.layer)}]\n" +
-                            $"-> bind FAILED (no visible mesh on it or its parents).";
-                    }
+                        $"MADE MOVEABLE + SELECTED: {bound.name}" +
+                        (bound != clickedObject ? $"  (resolved up from clicked '{clickedObject.name}')" : "");
                 }
                 else
                 {
-                    Debug.Log($"[Raycast] '{clickedObject.name}' is not moveable. Hold [{bindMoveableKey}] and click to make it moveable.");
-                    _clickDebug =
-                        $"HIT: {clickedObject.name} [layer {LayerMask.LayerToName(clickedObject.layer)}]\n" +
-                        $"-> NOT in editable list. Hold [{bindMoveableKey}] + click to add it.";
+                    _clickDebug = $"HIT: {clickedObject.name} -> bind FAILED (no visible mesh on it or its parents).";
                 }
+            }
+            else if (clickedObject != null)
+            {
+                Debug.Log($"[Raycast] '{clickedObject.name}' is not moveable. Hold [{bindMoveableKey}] and click to make it moveable.");
+                _clickDebug =
+                    $"HIT: {clickedObject.name} [layer {LayerMask.LayerToName(clickedObject.layer)}]\n" +
+                    $"-> NOT moveable. Hold [{bindMoveableKey}] + click to add it.";
             }
             else
             {
                 Debug.Log("[Raycast] No objects hit by raycast");
                 _clickDebug =
                     $"NO HIT (cam '{mainCamera.name}', mask {LayerMaskToString(selectableLayers)}).\n" +
-                    "Nothing with a collider under the cursor on a selectable layer.";
+                    "Nothing selectable under the cursor.";
             }
         }
 
@@ -746,6 +745,41 @@ public class RuntimeEditorManager : MonoBehaviour
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Returns the front-most moveable object (registered editable, or any TrackedObstacle prop)
+    /// whose world-space renderer bounds the cursor ray passes through. Used as a fallback when the
+    /// precise collider raycast misses — e.g. clicking a transparent region of a PNG sprite/quad
+    /// whose collider is missing or tight-fitted to opaque pixels. Returns null if none match.
+    /// </summary>
+    GameObject FindMoveableUnderCursor(Ray ray)
+    {
+        GameObject best = null;
+        float bestDist = float.MaxValue;
+
+        void Consider(GameObject root)
+        {
+            if (root == null || !root.activeInHierarchy || root.isStatic)
+                return;
+            foreach (Renderer r in root.GetComponentsInChildren<Renderer>())
+            {
+                if (r == null || r is LineRenderer || !r.enabled)
+                    continue;
+                if (r.bounds.IntersectRay(ray, out float d) && d < bestDist)
+                {
+                    bestDist = d;
+                    best = root;
+                }
+            }
+        }
+
+        for (int i = 0; i < editableObjects.Count; i++)
+            Consider(editableObjects[i]);
+        foreach (var obstacle in FindObjectsOfType<SEAN.Scenario.Obstacles.TrackedObstacle>())
+            Consider(obstacle.gameObject);
+
+        return best;
     }
 
     public void SelectObject(GameObject obj)

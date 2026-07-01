@@ -856,7 +856,7 @@ namespace SessionReview
                 var drawTrajManager = FindObjectOfType<TrajectoryManager>();
                 bool isDrawTrajectoryModeActive = drawTrajManager != null && drawTrajManager.IsDrawMode;
                 string controlsLine = isDrawTrajectoryModeActive
-                    ? $"{perspective} | Draw Traj: LMB draw  Wheel:Zoom  MMB:Pan  Esc:Finish Draw"
+                    ? $"{perspective} | Draw Traj: Pencil draws  1-finger pan  2-finger zoom  (on-screen buttons)"
                     : $"{perspective} | F1-F5:View  Wheel:Zoom  MMB:Pan  Tab/Esc:Exit";
                 GUI.Box(new Rect(Screen.width - 340, 10, 330, 50), "");
                 GUI.Label(new Rect(Screen.width - 335, 15, 320, 20),

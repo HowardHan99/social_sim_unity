@@ -29081,6 +29081,14 @@ MonoBehaviour:
   confirmBN: {fileID: 1221336985}
   vlmCaptureButton: {fileID: 0}
   vlmCamCapture: {fileID: 0}
+  presetVoiceMessages:
+  - Please, give way.
+  - Excuse me.
+  - Attention, robot here.
+  presetVoiceMessageTemplate: {fileID: 0}
+  presetVoiceMessageContainer: {fileID: 0}
+  prewarmPresetVoiceMessages: 1
+  autoGeneratePresetButtons: 1
 --- !u!4 &1246494139
 Transform:
   m_ObjectHideFlags: 0
@@ -74277,7 +74285,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 4340796762774641598}
   m_LocalRotation: {x: -0, y: 0.0000005066395, z: -0, w: 1}
-  m_LocalPosition: {x: 28, y: -2.534, z: 26.83}
+  m_LocalPosition: {x: 28, y: -2.534, z: 28.469}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_Children: []
   m_Father: {fileID: 1582752897}
@@ -109981,7 +109989,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 964229943770547210}
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: 0.939, y: -0.10000038, z: 7.63}
+  m_LocalPosition: {x: 1.606, y: -0.10000038, z: 7.629}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_Children: []
   m_Father: {fileID: 8453757820112370048}
@@ -125622,7 +125630,7 @@ PrefabInstance:
     - target: {fileID: 6010255879447909402, guid: 0969d4a2d8980104d86cd66358e4719b,
         type: 3}
       propertyPath: m_LocalPosition.x
-      value: -28.001
+      value: -27.86
       objectReference: {fileID: 0}
     - target: {fileID: 6010255879447909402, guid: 0969d4a2d8980104d86cd66358e4719b,
         type: 3}
@@ -125632,7 +125640,7 @@ PrefabInstance:
     - target: {fileID: 6010255879447909402, guid: 0969d4a2d8980104d86cd66358e4719b,
         type: 3}
       propertyPath: m_LocalPosition.z
-      value: -10
+      value: -10.663
       objectReference: {fileID: 0}
     - target: {fileID: 6010255879447909402, guid: 0969d4a2d8980104d86cd66358e4719b,
         type: 3}

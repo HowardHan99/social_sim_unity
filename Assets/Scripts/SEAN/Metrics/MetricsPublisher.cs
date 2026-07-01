@@ -26,7 +26,12 @@ namespace SEAN.Metrics
         private void Update()
         {
             if (!sean.robotTask.isRunning) { return; }
-            // Build a fresh message each frame to avoid cross-thread mutation while ROS serializes.
+
+            // Build a fresh message each publish. ROSConnection.Send() only enqueues
+            // the reference and serializes it later on the background connection thread,
+            // so mutating a shared/reused instance here races with that serialization
+            // (e.g. a freshly reallocated robot_poses array whose elements are still
+            // null) and throws NullReferenceException in SerializationStatements().
             var trialInfoMessage = new RosMessageTypes.SocialSimRos.MTrialInfo();
             sean.clock.UpdateMHeader(trialInfoMessage.header);
 

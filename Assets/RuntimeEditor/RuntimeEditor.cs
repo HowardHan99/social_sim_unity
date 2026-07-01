@@ -23,6 +23,16 @@ public class RuntimeEditor : MonoBehaviour
     private Vector3 dragBeforePos;
     private Quaternion dragBeforeRot;
 
+    // Free "grab the body" dragging: when no axis handle is grabbed, the object itself can be
+    // dragged across the ground plane. This makes props (and the robot) moveable even when the
+    // thin axis gizmo is hard to see/hit in the world-building view.
+    private bool isBodyDragging = false;
+    private bool pendingBodyDrag = false;
+    private Plane bodyDragPlane;
+    private Vector3 bodyDragOffset;
+    private Vector3 mouseDownScreenPos;
+    private const float BodyDragThreshold = 4f; // pixels of motion before a click becomes a drag
+
     // Gizmo visual objects
     private GameObject gizmoContainer;
     private GameObject xLine, yLine, zLine;
@@ -296,6 +306,15 @@ public class RuntimeEditor : MonoBehaviour
 
     void HandleMouseInput()
     {
+        // No raycast camera (e.g. the main camera was disabled/destroyed during a camera
+        // hand-off such as Session Review -> World Building). Try to re-acquire one, and if
+        // there still isn't one, bail this frame instead of NRE'ing on mainCamera.
+        if (mainCamera == null)
+        {
+            mainCamera = Camera.main;
+            if (mainCamera == null) return;
+        }
+
         //Don't process if pointer is over UI
         if (IsClickOnUI() && Input.GetMouseButtonDown(0))
         {
@@ -314,24 +333,42 @@ public class RuntimeEditor : MonoBehaviour
             else if (currentMode == GizmoMode.Rotate)
                 CheckRotateHandles(ray);
 
-            // Capture transform state the moment a new drag starts
+            // Capture transform state the moment a new (handle) drag starts
             if (!wasDragging && isDragging)
             {
                 dragBeforePos = transform.position;
                 dragBeforeRot = transform.rotation;
             }
+            else if (!isDragging && currentMode == GizmoMode.Translate && IsRayOverObject(ray))
+            {
+                // No axis handle was grabbed, but the click landed on the object itself: arm a
+                // free ground-plane drag. We only commit once the pointer moves past a threshold,
+                // so a plain click (used to (re)select) never nudges the object.
+                pendingBodyDrag = true;
+                mouseDownScreenPos = Input.mousePosition;
+                dragBeforePos = transform.position;
+                dragBeforeRot = transform.rotation;
+                BeginBodyDragPlane(ray);
+            }
         }
 
-        if (Input.GetMouseButton(0) && isDragging)
+        if (Input.GetMouseButton(0))
         {
-            Debug.Log("Gizmo: Mouse button down and dragging");
-            if (currentMode == GizmoMode.Translate)
+            if (pendingBodyDrag && !isDragging &&
+                ((Vector2)Input.mousePosition - (Vector2)mouseDownScreenPos).magnitude > BodyDragThreshold)
             {
-                UpdateTranslate(ray);
+                isDragging = true;
+                isBodyDragging = true;
             }
-            else if (currentMode == GizmoMode.Rotate)
+
+            if (isDragging)
             {
-                UpdateRotate(ray);
+                if (currentMode == GizmoMode.Rotate)
+                    UpdateRotate(ray);
+                else if (isBodyDragging)
+                    UpdateBodyDrag(ray);
+                else
+                    UpdateTranslate(ray);
             }
         }
 
@@ -339,11 +376,73 @@ public class RuntimeEditor : MonoBehaviour
         {
             if (isDragging)
             {
+                // Keep physics bodies in sync so the move survives un-pausing the game.
+                SyncRigidbodiesToTransform();
                 RuntimeEditorManager.Instance?.PushTransformAction(
                     gameObject, dragBeforePos, dragBeforeRot,
                     transform.position, transform.rotation);
             }
             isDragging = false;
+            isBodyDragging = false;
+            pendingBodyDrag = false;
+        }
+    }
+
+    // True if the click ray passes through this object's visual bounds (ignoring the gizmo itself).
+    bool IsRayOverObject(Ray ray)
+    {
+        return TryGetWorldBounds(out Bounds b) && b.IntersectRay(ray);
+    }
+
+    bool TryGetWorldBounds(out Bounds bounds)
+    {
+        bounds = default;
+        bool has = false;
+        foreach (Renderer r in GetComponentsInChildren<Renderer>())
+        {
+            if (r == null || r is LineRenderer || !r.enabled)
+                continue;
+            if (gizmoContainer != null && r.transform.IsChildOf(gizmoContainer.transform))
+                continue;
+            if (!has) { bounds = r.bounds; has = true; }
+            else bounds.Encapsulate(r.bounds);
+        }
+        return has;
+    }
+
+    void BeginBodyDragPlane(Ray ray)
+    {
+        // Slide along a horizontal plane through the object — the natural motion in both the
+        // top-down and tilted world-building views.
+        bodyDragPlane = new Plane(Vector3.up, transform.position);
+        bodyDragOffset = bodyDragPlane.Raycast(ray, out float enter)
+            ? ray.GetPoint(enter) - transform.position
+            : Vector3.zero;
+    }
+
+    void UpdateBodyDrag(Ray ray)
+    {
+        if (bodyDragPlane.Raycast(ray, out float enter))
+        {
+            Vector3 target = ray.GetPoint(enter) - bodyDragOffset;
+            target.y = transform.position.y; // ground-plane move only; keep height
+            transform.position = target;
+        }
+    }
+
+    // Sync any physics bodies (e.g. the robot's base_link Rigidbody) to the moved transform and
+    // zero their velocity. Without this the stale physics position snaps the object back when the
+    // game un-pauses (Time.timeScale returns to 1 after world building).
+    void SyncRigidbodiesToTransform()
+    {
+        foreach (Rigidbody rb in GetComponentsInChildren<Rigidbody>())
+        {
+            if (rb == null)
+                continue;
+            rb.position = rb.transform.position;
+            rb.rotation = rb.transform.rotation;
+            rb.velocity = Vector3.zero;
+            rb.angularVelocity = Vector3.zero;
         }
     }
 

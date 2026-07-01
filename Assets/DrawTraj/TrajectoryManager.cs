@@ -13,11 +13,30 @@ using UnityEngine;
 ///   5. Assign 'trajectoryTarget' to your avatar/character Transform.
 ///   6. Wire TrajectoryUI separately (see TrajectoryUI.cs).
 ///
-/// DRAW MODE CONTROLS:
-///   Mouse left-click / hold   — draw
-///   Touch (finger / pencil)   — draw
-///   ESC                       — end session, save, return to normal view
+/// DRAW MODE CONTROLS (iPad):
+///   Apple Pencil              — draw (fingers reserved for navigation; resting palm ignored)
+///   One-finger drag           — pan
+///   Two-finger pinch / drag   — zoom + pan
+///   On-screen buttons         — Undo · Clear · Zoom · Pencil-only · Finish · Cancel
+/// DRAW MODE CONTROLS (desktop):
+///   Mouse left-hold           — draw
+///   Mouse wheel / MMB drag    — zoom / pan (standalone scene only; review supplies its own)
+///   ESC                       — finish & save
 /// </summary>
+public enum PencilDetectionMode
+{
+    /// <summary>Stylus if the Input System Pen device is pressed, OR Touch.type==Stylus, OR the contact radius is small. Best default.</summary>
+    Auto,
+    /// <summary>Stylus only if Touch.type reports Stylus (fails on devices that always report Direct).</summary>
+    StylusType,
+    /// <summary>Stylus if the contact radius is below fingerRadiusThreshold (fingers have a fatter contact).</summary>
+    Radius,
+    /// <summary>Stylus if the contact reports a real pen pressure (pressure &lt; max, i.e. variable).</summary>
+    Pressure,
+    /// <summary>Draw only from the Input System Pen device (Apple Pencil); every finger touch navigates.</summary>
+    PenDevice
+}
+
 public class TrajectoryManager : MonoBehaviour
 {
     // ── Inspector ────────────────────────────────────────────────────────────
@@ -78,6 +97,33 @@ public class TrajectoryManager : MonoBehaviour
     public float followSpeedMultiplierMin = 0.1f;
     public float followSpeedMultiplierMax = 3f;
 
+    [Header("Touch / iPad Input")]
+    [Tooltip("When ON, only an Apple Pencil (stylus) adds trajectory points; fingers are reserved for " +
+             "pan/zoom and a resting palm is ignored. Turn OFF to draw with a single finger when no pencil is available.")]
+    public bool applePencilOnly = true;
+
+    [Tooltip("How a pencil contact is told apart from a finger. Many iPads report Touch.type as 'Direct' for " +
+             "BOTH, so 'Auto'/'Radius' (contact size) is usually the reliable choice. Use the on-screen Touch Debug " +
+             "readout to see what your finger vs pencil actually report, then pick the mode + threshold that splits them.")]
+    public PencilDetectionMode pencilDetection = PencilDetectionMode.Auto;
+
+    [Tooltip("Contacts with radius BELOW this are treated as a pencil; at/above it as a finger. " +
+             "Read the Touch Debug overlay and set this between your pencil radius and your finger radius.")]
+    [Min(0f)] public float fingerRadiusThreshold = 8f;
+
+    [Tooltip("Show the live per-touch debug overlay (type / radius / pressure) while drawing, " +
+             "to calibrate pencil-vs-finger detection on your device.")]
+    public bool showTouchDebug = true;
+
+    [Tooltip("Closest zoom-in (smallest orthographic size) allowed while drawing.")]
+    [Min(1f)] public float minZoomOrthoSize = 4f;
+
+    [Tooltip("Farthest zoom-out (largest orthographic size) allowed while drawing.")]
+    [Min(1f)] public float maxZoomOrthoSize = 120f;
+
+    [Tooltip("Mouse-wheel / Zoom-button step as a fraction of the current zoom (desktop & on-screen buttons).")]
+    [Range(0.01f, 0.9f)] public float zoomStepFraction = 0.15f;
+
     // ── Public state (read by TrajectoryUI) ──────────────────────────────────
     public bool IsDrawMode { get; private set; }
     public bool IsFollowMode { get; private set; }
@@ -88,6 +134,48 @@ public class TrajectoryManager : MonoBehaviour
     {
         get => followSpeedMultiplier;
         set => followSpeedMultiplier = Mathf.Clamp(value, followSpeedMultiplierMin, followSpeedMultiplierMax);
+    }
+
+    // ── Touch / draw state (read by TrajectoryUI) ─────────────────────────────
+    public bool ApplePencilOnly
+    {
+        get => applePencilOnly;
+        set => applePencilOnly = value;
+    }
+
+    /// <summary>True once a contact classified as a pencil has been seen this run.</summary>
+    public bool StylusDetected { get; private set; }
+
+    /// <summary>True when there is at least one stroke (finished or in-progress) to undo.</summary>
+    public bool CanUndo => _activeRenderer != null || _sessionRenderers.Count > 0;
+
+    public PencilDetectionMode PencilDetection
+    {
+        get => pencilDetection;
+        set => pencilDetection = value;
+    }
+
+    public bool ShowTouchDebug
+    {
+        get => showTouchDebug;
+        set => showTouchDebug = value;
+    }
+
+    public float FingerRadiusThreshold => fingerRadiusThreshold;
+
+    /// <summary>Nudge the finger/pencil radius split from an on-screen button (on-device calibration).</summary>
+    public void AdjustRadiusThreshold(float delta)
+    {
+        fingerRadiusThreshold = Mathf.Max(0f, fingerRadiusThreshold + delta);
+    }
+
+    /// <summary>Human-readable per-touch readout (type/radius/pressure) for on-screen calibration.</summary>
+    public string TouchDebugReadout { get; private set; } = "";
+
+    /// <summary>Cycle the pencil-vs-finger detection strategy (wired to an on-screen button).</summary>
+    public void CyclePencilDetection()
+    {
+        pencilDetection = (PencilDetectionMode)(((int)pencilDetection + 1) % 5);
     }
 
     // ── Private state ────────────────────────────────────────────────────────
@@ -109,11 +197,22 @@ public class TrajectoryManager : MonoBehaviour
     private float _followLastElapsed;   // last elapsedSeconds we saw
     private bool _followSessionActive;  // accumulator initialised?
 
+    // Touch navigation / stroke edge-detection
+    private TrajectoryUI _ui;
+    private bool _strokeDown;            // a drawing contact is currently pressed
+    private bool _navActive;            // a finger pan/zoom gesture is in progress
+    private int _navFingerCount;        // fingers used by the active nav gesture
+    private Vector2 _lastNavCentroid;
+    private float _lastNavPinchDist;
+    private bool _mousePanning;          // desktop middle-mouse pan (standalone scene)
+    private Vector2 _lastMousePanPos;
+
     // ── Unity Lifecycle ──────────────────────────────────────────────────────
 
     private void Start()
     {
         if (mainCamera == null) mainCamera = Camera.main;
+        if (_ui == null) _ui = GetComponent<TrajectoryUI>() ?? FindObjectOfType<TrajectoryUI>();
         SetupTopDownCamera();
         _wasReviewActive = IsReviewActive();
         if (_wasReviewActive)
@@ -152,13 +251,15 @@ public class TrajectoryManager : MonoBehaviour
         if (IsDrawMode) return;
         IsDrawMode = true;
         _cameraReady = false;
+        _strokeDown = false;
+        _navActive = false;
+        _mousePanning = false;
 
         SetVisibility(true);
         _sessionCollection = new TrajectoryCollection();
         SwitchCamera(topDown: true);
-        BeginStroke();
 
-        // Fly camera to above the target, then seed the first point
+        // A stroke now begins on the first pen-down so multiple strokes + Undo work.
         StartCoroutine(FlyToTarget(() =>
         {
             _cameraReady = true;
@@ -171,9 +272,77 @@ public class TrajectoryManager : MonoBehaviour
         if (!IsDrawMode) return;
         IsDrawMode = false;
         _cameraReady = false;
+        _strokeDown = false;
+        _navActive = false;
 
-        EndStroke();
+        EndStroke();      // finalise an in-progress stroke (null-safe)
         SaveSession();
+        SwitchCamera(topDown: false);
+        RefreshDisplay();
+    }
+
+    /// <summary>Remove the most recent stroke (or the in-progress one) from this session.</summary>
+    public void UndoLastStroke()
+    {
+        if (!IsDrawMode) return;
+
+        // An in-progress stroke is discarded first.
+        if (_activeRenderer != null)
+        {
+            Destroy(_activeRenderer.gameObject);
+            _activeRenderer = null;
+            _strokeDown = false;
+            return;
+        }
+
+        int last = _sessionRenderers.Count - 1;
+        if (last < 0) return;
+
+        if (_sessionRenderers[last] != null)
+            Destroy(_sessionRenderers[last].gameObject);
+        _sessionRenderers.RemoveAt(last);
+
+        if (_sessionCollection != null && _sessionCollection.trajectories.Count > 0)
+            _sessionCollection.trajectories.RemoveAt(_sessionCollection.trajectories.Count - 1);
+    }
+
+    /// <summary>Discard every stroke drawn so far this session (stays in draw mode).</summary>
+    public void ClearCurrentSession()
+    {
+        if (!IsDrawMode) return;
+
+        if (_activeRenderer != null)
+        {
+            Destroy(_activeRenderer.gameObject);
+            _activeRenderer = null;
+            _strokeDown = false;
+        }
+        foreach (var r in _sessionRenderers)
+            if (r != null) Destroy(r.gameObject);
+        _sessionRenderers.Clear();
+        _sessionCollection = new TrajectoryCollection();
+    }
+
+    /// <summary>Leave draw mode WITHOUT saving — discards everything drawn this session.</summary>
+    public void CancelDrawMode()
+    {
+        if (!IsDrawMode) return;
+
+        IsDrawMode = false;
+        _cameraReady = false;
+        _strokeDown = false;
+        _navActive = false;
+
+        if (_activeRenderer != null)
+        {
+            Destroy(_activeRenderer.gameObject);
+            _activeRenderer = null;
+        }
+        foreach (var r in _sessionRenderers)
+            if (r != null) Destroy(r.gameObject);
+        _sessionRenderers.Clear();
+        _sessionCollection = null;
+
         SwitchCamera(topDown: false);
         RefreshDisplay();
     }
@@ -354,24 +523,288 @@ public class TrajectoryManager : MonoBehaviour
 
     private void HandleDrawInput()
     {
-        bool touching = false;
+        BuildTouchDebug();
 
-        // ── Touch input (iPad finger / Apple Pencil) ──
-        if (Input.touchCount > 0)
+        bool stylusDown = false;
+        Vector2 stylusPos = Vector2.zero;
+
+        // Apple Pencil exposed through the Input System Pen device (separate from touches).
+        // Honoured in Auto and in the dedicated PenDevice mode.
+#if ENABLE_INPUT_SYSTEM
+        if (pencilDetection == PencilDetectionMode.PenDevice || pencilDetection == PencilDetectionMode.Auto)
         {
-            Touch t = Input.GetTouch(0);
-            if (t.phase == TouchPhase.Began || t.phase == TouchPhase.Moved || t.phase == TouchPhase.Stationary)
+            var pen = UnityEngine.InputSystem.Pen.current;
+            if (pen != null && pen.tip.isPressed)
             {
-                touching = true;
-                TryAddPointFromScreen(t.position);
+                Vector2 penPos = pen.position.ReadValue();
+                if (!IsBlockedByUI(penPos))
+                {
+                    stylusDown = true;
+                    stylusPos = penPos;
+                    StylusDetected = true;
+                }
             }
         }
+#endif
 
-        // ── Mouse input (fallback / desktop) ──
-        if (!touching && Input.GetMouseButton(0))
+        Vector2 finger0 = Vector2.zero, finger1 = Vector2.zero;
+        int fingerCount = 0;
+
+        for (int i = 0; i < Input.touchCount; i++)
         {
-            TryAddPointFromScreen(Input.mousePosition);
+            Touch t = Input.GetTouch(i);
+            bool ended = t.phase == TouchPhase.Ended || t.phase == TouchPhase.Canceled;
+
+            if (TouchIsStylus(t))
+            {
+                StylusDetected = true;
+                if (!ended && !IsBlockedByUI(t.position))
+                {
+                    stylusDown = true;
+                    stylusPos = t.position;
+                }
+                continue;
+            }
+
+            // Finger touch — ignore lifted touches and taps that land on the controls.
+            if (ended || IsBlockedByUI(t.position))
+                continue;
+
+            if (fingerCount == 0) finger0 = t.position;
+            else if (fingerCount == 1) finger1 = t.position;
+            fingerCount++;
         }
+
+        // ── Resolve the drawing contact ───────────────────────────────────────
+        // Apple Pencil always draws. A finger only draws when pencil-only is OFF.
+        // While the pencil is down, fingers are ignored entirely (palm rejection).
+        bool drawDown = false;
+        Vector2 drawPos = Vector2.zero;
+
+        if (stylusDown)
+        {
+            drawDown = true;
+            drawPos = stylusPos;
+        }
+        else if (!applePencilOnly && fingerCount == 1)
+        {
+            drawDown = true;
+            drawPos = finger0;
+        }
+        else if (Input.touchCount == 0 && Input.GetMouseButton(0) && !IsBlockedByUI(Input.mousePosition))
+        {
+            drawDown = true;
+            drawPos = Input.mousePosition;
+        }
+
+        // ── Stroke begin / continue / end (rising & falling edges) ────────────
+        if (drawDown)
+        {
+            if (!_strokeDown)
+            {
+                _strokeDown = true;
+                BeginStroke();
+            }
+            TryAddPointFromScreen(drawPos);
+        }
+        else if (_strokeDown)
+        {
+            _strokeDown = false;
+            EndStroke();
+        }
+
+        // ── Finger pan / pinch-zoom (never while the pencil is drawing) ───────
+        bool canNavigate = !stylusDown &&
+                           (fingerCount >= 2 || (applePencilOnly && fingerCount == 1));
+        if (canNavigate)
+            HandleTouchNavigation(fingerCount, finger0, finger1);
+        else
+            _navActive = false;
+
+        // ── Desktop pan / zoom (standalone scene; review supplies its own) ────
+        if (!IsReviewActive() && Input.touchCount == 0)
+            HandleMouseNavigation();
+    }
+
+    private void HandleTouchNavigation(int fingerCount, Vector2 finger0, Vector2 finger1)
+    {
+        if (fingerCount >= 2)
+        {
+            Vector2 centroid = (finger0 + finger1) * 0.5f;
+            float dist = Vector2.Distance(finger0, finger1);
+
+            // (Re)seed the gesture when it starts or the finger count changes.
+            if (!_navActive || _navFingerCount < 2)
+            {
+                _navActive = true;
+                _navFingerCount = 2;
+                _lastNavCentroid = centroid;
+                _lastNavPinchDist = dist;
+                return;
+            }
+
+            Vector2 centroidDelta = centroid - _lastNavCentroid;
+            if (centroidDelta.sqrMagnitude > 0f)
+                PanDrawCamera(centroidDelta);
+
+            // Pinch out (fingers apart -> dist up -> ratio < 1) zooms in, anchored at the centroid.
+            if (dist > 1f && _lastNavPinchDist > 1f)
+                ZoomDrawCamera(centroid, _lastNavPinchDist / dist);
+
+            _lastNavCentroid = centroid;
+            _lastNavPinchDist = dist;
+        }
+        else // single-finger pan (pencil-only mode)
+        {
+            if (!_navActive || _navFingerCount != 1)
+            {
+                _navActive = true;
+                _navFingerCount = 1;
+                _lastNavCentroid = finger0;
+                return;
+            }
+
+            PanDrawCamera(finger0 - _lastNavCentroid);
+            _lastNavCentroid = finger0;
+        }
+    }
+
+    private void HandleMouseNavigation()
+    {
+        float scroll = Input.mouseScrollDelta.y;
+        if (Mathf.Abs(scroll) > 0.01f && !IsBlockedByUI(Input.mousePosition))
+            ZoomDrawCamera(Input.mousePosition, scroll > 0f ? (1f - zoomStepFraction) : (1f + zoomStepFraction));
+
+        if (Input.GetMouseButtonDown(2) && !IsBlockedByUI(Input.mousePosition))
+        {
+            _mousePanning = true;
+            _lastMousePanPos = Input.mousePosition;
+        }
+        if (_mousePanning && Input.GetMouseButton(2))
+        {
+            Vector2 cur = Input.mousePosition;
+            PanDrawCamera(cur - _lastMousePanPos);
+            _lastMousePanPos = cur;
+        }
+        if (Input.GetMouseButtonUp(2))
+            _mousePanning = false;
+    }
+
+    // ── Camera pan / zoom (orthographic top-down draw camera) ─────────────────
+    private void PanDrawCamera(Vector2 screenDelta)
+    {
+        Camera cam = GetDrawingCamera();
+        if (cam == null || !cam.orthographic)
+            return;
+
+        float worldPerPixel = (cam.orthographicSize * 2f) / Mathf.Max(Screen.height, 1f);
+        // Top-down camera (rot 90,0,0): screen +X -> world +X, screen +Y -> world +Z.
+        // Drag the content under the finger => move the camera opposite to the delta.
+        cam.transform.position += new Vector3(-screenDelta.x * worldPerPixel, 0f, -screenDelta.y * worldPerPixel);
+    }
+
+    private void ZoomDrawCamera(Vector2 screenAnchor, float zoomMultiplier)
+    {
+        Camera cam = GetDrawingCamera();
+        if (cam == null || !cam.orthographic)
+            return;
+
+        bool haveBefore = TryGetGroundPoint(cam, screenAnchor, out Vector3 before);
+
+        float maxSize = Mathf.Max(minZoomOrthoSize, maxZoomOrthoSize);
+        cam.orthographicSize = Mathf.Clamp(cam.orthographicSize * zoomMultiplier, minZoomOrthoSize, maxSize);
+
+        // Keep the world point under the anchor fixed (zoom toward the finger / cursor).
+        if (haveBefore && TryGetGroundPoint(cam, screenAnchor, out Vector3 after))
+        {
+            Vector3 delta = before - after;
+            delta.y = 0f;
+            cam.transform.position += delta;
+        }
+    }
+
+    private static bool TryGetGroundPoint(Camera cam, Vector2 screenPoint, out Vector3 groundPoint)
+    {
+        groundPoint = Vector3.zero;
+        Ray ray = cam.ScreenPointToRay(screenPoint);
+        Plane plane = new Plane(Vector3.up, Vector3.zero);
+        if (!plane.Raycast(ray, out float enter))
+            return false;
+        groundPoint = ray.GetPoint(enter);
+        return true;
+    }
+
+    private bool IsBlockedByUI(Vector2 screenPos)
+    {
+        return _ui != null && _ui.BlocksInputAt(screenPos);
+    }
+
+    /// <summary>
+    /// Decide whether a touch came from the Apple Pencil. Touch.type is unreliable on
+    /// many iPads (reports Direct for both finger and pencil), so Auto/Radius/Pressure
+    /// fall back to physical contact characteristics. Calibrate with the Touch Debug overlay.
+    /// </summary>
+    private bool TouchIsStylus(Touch t)
+    {
+        switch (pencilDetection)
+        {
+            case PencilDetectionMode.PenDevice:
+                // The pencil is read from the Pen device; every touch here is a finger.
+                return false;
+
+            case PencilDetectionMode.StylusType:
+                return t.type == TouchType.Stylus;
+
+            case PencilDetectionMode.Radius:
+                return t.radius > 0f && t.radius < fingerRadiusThreshold;
+
+            case PencilDetectionMode.Pressure:
+                // A pencil reports a variable pressure below its max; a finger usually pegs at max (or 0).
+                return t.maximumPossiblePressure > 0f &&
+                       t.pressure > 0.001f &&
+                       t.pressure < t.maximumPossiblePressure - 0.001f;
+
+            default: // Auto
+                return t.type == TouchType.Stylus ||
+                       (t.radius > 0f && t.radius < fingerRadiusThreshold);
+        }
+    }
+
+    private void BuildTouchDebug()
+    {
+        if (!showTouchDebug)
+        {
+            TouchDebugReadout = "";
+            return;
+        }
+
+        var sb = new System.Text.StringBuilder();
+        string pen = "n/a (legacy Input)";
+#if ENABLE_INPUT_SYSTEM
+        var penDev = UnityEngine.InputSystem.Pen.current;
+        pen = penDev != null
+            ? $"present tip={penDev.tip.isPressed} p={penDev.pressure.ReadValue():F2}"
+            : "none";
+#endif
+        sb.Append($"Mode={pencilDetection}  radiusThr={fingerRadiusThreshold:F1}  touches={Input.touchCount}\nPen device: {pen}");
+
+        for (int i = 0; i < Input.touchCount; i++)
+        {
+            Touch t = Input.GetTouch(i);
+            string tag = TouchIsStylus(t) ? "PENCIL" : "finger";
+            sb.Append($"\n#{i} {tag} | type={t.type} r={t.radius:F1}±{t.radiusVariance:F1} " +
+                      $"press={t.pressure:F2}/{t.maximumPossiblePressure:F2} alt={t.altitudeAngle:F2}");
+        }
+
+        TouchDebugReadout = sb.ToString();
+    }
+
+    /// <summary>Step zoom from an on-screen button (zooms about the screen centre).</summary>
+    public void ZoomStep(bool zoomIn)
+    {
+        if (!IsDrawMode) return;
+        Vector2 center = new Vector2(Screen.width * 0.5f, Screen.height * 0.5f);
+        ZoomDrawCamera(center, zoomIn ? (1f - zoomStepFraction) : (1f + zoomStepFraction));
     }
 
     private void TryAddPointFromScreen(Vector2 screenPos)

@@ -6,7 +6,14 @@ RuntimeEditor.HandleMouseInput () (at Assets/RuntimeEditor/RuntimeEditor.cs:306)
 RuntimeEditor.Update () (at Assets/RuntimeEditor/RuntimeEditor.cs:76)
 ```
 
-This happens after entering World Building from Session Review. The other computer works because some scene/local state there avoids the trigger — the code is fine, the trap is in the scene.
+Happens on the **other** computer after entering World Building from Session Review.
+Does **not** happen on this computer. Same repo, same committed scenes.
+
+> **Status:** Re-verified on the working machine (2026-06-24). The original diagnosis
+> got the *throwing line* right but the *differentiator* wrong. Corrected below, and a
+> universal code fix has been applied (see "Fix" section). The earlier theory — "the
+> working scene doesn't have the zombie component" — is **false**: both machines have
+> identical scenes.
 
 ## The exact line that throws
 
@@ -15,110 +22,229 @@ This happens after entering World Building from Session Review. The other comput
 Ray ray = mainCamera.ScreenPointToRay(Input.mousePosition);
 ```
 
-The only nullable thing on this line is `mainCamera` (the `RuntimeEditor` instance's private field). `Input.mousePosition` is a struct and cannot NRE.
+The only nullable thing on this line is `mainCamera` (a private field on the `RuntimeEditor`
+instance). `Input.mousePosition` is a struct and cannot NRE. So: **`mainCamera == null`.**
 
-## Root cause — a "zombie" RuntimeEditor on the manager GameObject
+## The component that throws — a stray `RuntimeEditor` on the manager GameObject
 
-The five sidewalk scenes each contain a GameObject literally named **`RuntimeEdit`** that has BOTH components attached:
+Each of the five sidewalk scenes has a GameObject named **`RuntimeEdit`** carrying BOTH:
 
 - `RuntimeEditorManager` (script GUID `99aa9ff51d9985c48bf299277efe123d`)
-- `RuntimeEditor` (script GUID `552ee8c61b7287140aea88df4da63c1a`) ← **this one should not be here**
+- `RuntimeEditor` (script GUID `552ee8c61b7287140aea88df4da63c1a`) ← the per-object gizmo handler, which shouldn't live here
 
-Confirmed in:
-- [Assets/Scenes/sidewalkCrossroad.unity:7085-7179](Assets/Scenes/sidewalkCrossroad.unity#L7085-L7179) — `m_Name: RuntimeEdit`, `m_IsActive: 0`, RuntimeEditor at `&320971309` with `m_Enabled: 1`
+The `RuntimeEditor` MonoBehaviour is meant to be added **at runtime** by the manager onto a
+*selected prop* via [`RuntimeEditorManager.SelectObject`](Assets/RuntimeEditor/RuntimeEditorManager.cs#L751),
+which immediately calls `SetRaycastCamera(mainCamera)` on the new instance. The copy sitting on
+the manager's own GameObject is never selected, so it never receives a camera that way. Its only
+chance to get one is its own `Start()` fallback to `Camera.main`.
+
+> ⚠️ **This is present on BOTH computers — it is NOT the difference.**
+> Verified on the working machine: [Assets/Scenes/sidewalkCrossroad.unity:7085-7179](Assets/Scenes/sidewalkCrossroad.unity#L7085-L7179)
+> — GameObject `&320971306` `m_Name: RuntimeEdit`, `m_IsActive: 0`, with the stray
+> `RuntimeEditor` at `&320971309`, `m_Enabled: 1`. The scene `.unity` files are identical
+> across the two machines (`git log` on the scene shows the same commit; no local scene edits).
+> So the stray component is necessary for the crash but is **not** what differs between the
+> machines.
+
+Confirmed present in all five (same layout):
+- [Assets/Scenes/sidewalkCrossroad.unity](Assets/Scenes/sidewalkCrossroad.unity)
 - [Assets/Scenes/sidewalkOutofStore.unity](Assets/Scenes/sidewalkOutofStore.unity)
 - [Assets/Scenes/sidewalkCornerInteraction.unity](Assets/Scenes/sidewalkCornerInteraction.unity)
 - [Assets/Scenes/sidewalkNarrowroad.unity](Assets/Scenes/sidewalkNarrowroad.unity)
 - [Assets/Scenes/sidewalkNarrowroadsoft.unity](Assets/Scenes/sidewalkNarrowroadsoft.unity)
 
-The `RuntimeEditor` component is the per-object gizmo handler. The design intent is that the **manager** adds it dynamically to a *selected* prop via [`RuntimeEditorManager.SelectObject`](Assets/RuntimeEditor/RuntimeEditorManager.cs#L751) and immediately calls `SetRaycastCamera(mainCamera)` on the new instance. The stray copy sitting on the manager's own GameObject is never selected, never receives a camera through that code path.
+## The real condition for the crash: `Camera.main == null` when the stray `Start()` runs
 
-## The trigger chain (why World Building lights it up)
+The stray `RuntimeEditor` gets a camera exactly once, in [`Start()`](Assets/RuntimeEditor/RuntimeEditor.cs#L52-L59):
+```csharp
+void Start()
+{
+    if (mainCamera == null) mainCamera = Camera.main;   // runs ONCE, on first activation
+    ...
+}
+```
+`Start()` runs **once per component lifetime**, the first time the object becomes active. After
+that `mainCamera` keeps whatever value it got — even if that camera is later disabled (a *disabled*
+Camera reference is still non-null, so `ScreenPointToRay` still works).
 
-1. The `RuntimeEdit` GameObject sits in the scene **inactive** (`m_IsActive: 0`), so the zombie component is dormant.
-2. User enters World Building. [`SessionReviewManager.EnsureRuntimeEditorReady`](Assets/Scripts/SessionReview/SessionReviewManager.cs#L1825-L1826) force-activates it:
+So the crash requires **all** of:
+1. The `RuntimeEdit` GameObject becomes active **for the first time** during World Building, AND
+2. At the moment its `Start()` runs, `Camera.main` returns `null`.
+
+`Camera.main` returns the first **enabled**, `MainCamera`-tagged camera. In the committed scene the
+**only** `MainCamera`-tagged camera is `FirstPersonCam`
+([Assets/Scenes/sidewalkCrossroad.unity:67872-67873](Assets/Scenes/sidewalkCrossroad.unity#L67872)).
+`topViewCamera` (the world-building camera, [`Environment.topViewCamera`](Assets/Scripts/SEAN/Environment/Environment.cs#L24))
+is **not** tagged `MainCamera` (it gets a `TopViewCamera` tag). So once `FirstPersonCam` is disabled
+or destroyed and nothing else is `MainCamera`-tagged-and-enabled, `Camera.main` is `null`.
+
+### The trigger chain in World Building
+
+1. `RuntimeEdit` sits inactive in the scene (`m_IsActive: 0`), so the stray component is dormant and
+   its `Start()` has never run.
+2. Entering World Building, [`ActivateWorldBuildingView`](Assets/Scripts/SessionReview/SessionReviewManager.cs#L1486) does:
+   - `worldBuildingCamera = topViewCamera` (line 1496)
+   - [`PrepareTopDownWorldBuildingCamera`](Assets/Scripts/SessionReview/SessionReviewManager.cs#L1656-L1665):
+     `worldBuildingPreviousMainCamera = Camera.main; ... worldBuildingPreviousMainCamera.enabled = false;`
+     → disables the current `MainCamera` (e.g. `FirstPersonCam`).
+   - [`EnsureRuntimeEditorReady`](Assets/Scripts/SessionReview/SessionReviewManager.cs#L1816-L1826):
+     `runtimeEditorManager.gameObject.SetActive(true)` → **first activation of `RuntimeEdit`**, which
+     schedules the stray `RuntimeEditor.Start()`.
+   - `worldBuildingCamera.enabled = true` (line 1520) — but this camera is **not** `MainCamera`-tagged.
+   - `SetEditorCamera(worldBuildingCamera, …)` (line 1523) only forwards the camera to `currentEditor`,
+     which is `null` (nothing selected). The stray instance is **not** reached by this path.
+3. Next frame the stray's `Start()` runs: `Camera.main` is `null` (the old main camera is disabled, the
+   world-building camera isn't `MainCamera`-tagged) → `mainCamera = null`.
+4. Every subsequent frame: `Update()` → `HandleMouseInput()` → `mainCamera.ScreenPointToRay(...)` → **NRE**.
+
+## Why the two machines diverge (this is the actual "difference")
+
+> Updated after operator feedback: **the same avatars were spawned on both machines**, so this is
+> *not* an asset/Rocketbox-submodule difference. The divergence is in **runtime camera bookkeeping**,
+> not in what assets exist.
+
+There is not just one `MainCamera` in play. Besides the scene's `FirstPersonCam`, several **spawnable
+prefabs carry their own `MainCamera`-tagged cameras**:
+
+- [Assets/Resources/Prefabs/Cameras.prefab](Assets/Resources/Prefabs/Cameras.prefab) — **three** of them: `DownviewCamera`, `FollowCamera`, `FlyCamera`.
+- [Assets/Resources/Prefabs/RocketboxSFRandom.prefab](Assets/Resources/Prefabs/RocketboxSFRandom.prefab) — a `Camera` tagged `MainCamera`.
+- [Assets/Resources/SEAN/Sensors/ThirdPersonCameraParent.prefab](Assets/Resources/SEAN/Sensors/ThirdPersonCameraParent.prefab) — `MainCamera`-tagged.
+
+`Camera.main` returns the **first enabled** `MainCamera`-tagged camera. With this many candidates,
+whether it's `null` at one specific frame depends entirely on which cameras happen to be **enabled**
+then — and Session Review enables/disables/destroys cameras aggressively along several conditional paths:
+
+- [`PrepareTopDownWorldBuildingCamera`](Assets/Scripts/SessionReview/SessionReviewManager.cs#L1656) disables the current `Camera.main` (just one).
+- [`ActivatePwdCameraAsMain`](Assets/Scripts/SessionReview/SessionReviewManager.cs#L2217-L2237) disables **all** cameras except the PWD camera.
+- [`DestroyLegacyStandaloneMainCamera`](Assets/Scripts/SessionReview/SessionReviewManager.cs#L2172-L2188) **destroys** `Camera.main` if it isn't a "managed" gameplay camera.
+- [`RestoreRobotGameplayCameras`](Assets/Scripts/SessionReview/SessionReviewManager.cs#L2156-L2169) re-enables robot cameras.
+
+So the crash is a **latent ordering/state bug**, not an asset bug. It fires only when the particular
+session path leaves **zero** enabled `MainCamera`-tagged cameras at the exact frame the stray
+`RuntimeEditor.Start()` runs. The two machines take a *slightly* different camera path even with the same
+avatars/scenes — driven by things like:
+
+- **Which view/teardown ran in that session** (robot vs PWD, first-person vs follow/fly cam, whether
+  `ActivatePwdCameraAsMain`/`DestroyLegacyStandaloneMainCamera` fired) — sensitive to UI clicks, focus,
+  and timing.
+- **Frame ordering** — `Start()` runs once on first activation; if `RuntimeEdit` happened to activate
+  earlier in the session (e.g. the editor was toggled once) on the working machine, the stray cached a
+  live camera while one was enabled and never sees the later `null`.
+- **Unity version / Script Execution Order** differences between the two installs, which shift when
+  `Start()` runs relative to the camera enable/disable/destroy calls.
+
+Bottom line: it's a race against camera bookkeeping. We don't need to pin the exact trigger — the code
+guard below makes the stray immune to it. If you *do* want the exact trigger, capture the camera state on
+the broken machine (below) and diff it against this machine.
+
+## How to capture the exact difference on the broken machine (~1 minute)
+
+1. Temporarily add this in [`ActivateWorldBuildingView`](Assets/Scripts/SessionReview/SessionReviewManager.cs#L1513)
+   right after `EnsureRuntimeEditorReady()` (do the same on this machine and diff the two logs):
    ```csharp
-   if (!runtimeEditorManager.gameObject.activeInHierarchy)
-       runtimeEditorManager.gameObject.SetActive(true);
+   foreach (var c in FindObjectsOfType<Camera>(true))
+       Debug.Log($"[WB] cam={c.name} tag={c.tag} enabled={c.enabled} active={c.gameObject.activeInHierarchy}");
+   Debug.Log($"[WB] Camera.main = {(Camera.main ? Camera.main.name : "NULL")}");
    ```
-3. Activating the GameObject runs `Awake`/`OnEnable`/`Start` on **both** scripts on that object — including the zombie `RuntimeEditor`.
-4. The zombie's [`Start()`](Assets/RuntimeEditor/RuntimeEditor.cs#L52-L59) only falls back to `Camera.main`:
-   ```csharp
-   if (mainCamera == null) mainCamera = Camera.main;
-   ```
-   The inspector reference is empty (it's a per-object gizmo, no Camera field exposed), so this fallback is its only chance.
-5. **At the same moment**, [`PrepareTopDownWorldBuildingCamera`](Assets/Scripts/SessionReview/SessionReviewManager.cs#L1661-L1665) disables the previous main camera so the world-building camera owns the screen:
-   ```csharp
-   if (worldBuildingPreviousMainCamera != null &&
-       worldBuildingPreviousMainCamera != cameraToUse)
-       worldBuildingPreviousMainCamera.enabled = false;
-   ```
-   `Camera.main` returns only **enabled** MainCamera-tagged cameras, so it now returns `null`.
-6. The manager calls `SetEditorCamera(worldBuildingCamera, ...)` — but inside [`SetEditorCamera`](Assets/RuntimeEditor/RuntimeEditorManager.cs#L338-L358) it only forwards the camera to `currentEditor`, which is `null` because nothing is selected yet. The zombie on the manager GameObject is not in `allEditors` and is never touched.
-7. Next frame: zombie's `Update()` → `HandleMouseInput()` → `mainCamera.ScreenPointToRay(...)` → **NRE every frame**.
+   On the broken machine `Camera.main` prints `NULL` (and no `MainCamera`-tagged camera is `enabled=True`);
+   on this machine at least one is still enabled. That single line is the whole difference.
+2. In the Hierarchy (Play mode, World Building entered), select `RuntimeEdit` and confirm the stray
+   `Runtime Editor` component is the thing throwing.
 
-## Why it works on the other computer
+## Fix
 
-Same `.cs` files, but the *scene asset* or *local state* differs. Any of these would mask the bug:
+### Fix 1 — Code guard (applied; the universal one-commit fix)
 
-- **The other scene file doesn't have the zombie `RuntimeEditor` component.** Most likely: it was deleted on the other PC and the scene save wasn't committed. Run `git status Assets/Scenes/` over there — if `sidewalkCrossroad.unity` is dirty, that's the proof. Otherwise check git log on the scene.
-- **A different MainCamera stays enabled during world building** on the other PC (e.g. an extra editor camera, or the FirstPersonCam isn't the tagged MainCamera there) — so `Camera.main` fallback succeeds, the zombie picks up *a* camera, and nothing throws even though the zombie is still wrong.
-- **Local prefab/avatar state differences** (you have uncommitted modifications in `Assets/ExternalAssets/Microsoft-Rocketbox`: deleted `Sports_Female_02.fbx`, modified avatar `.meta` files, untracked `Sports_Female_02.prefab`). If the avatar that carries `FirstPersonCam` fails to spawn or is replaced on this PC but not the other, the timing of who-is-Camera.main changes.
-- **TagManager/Layer drift** — Layer 7 ("Gizmo") is the 8th entry in this PC's [ProjectSettings/TagManager.asset](ProjectSettings/TagManager.asset). If that file were dirty on either side this would also bite, but a quick check shows the layer exists, so this is not the cause here — listed only for completeness.
-
-## How to confirm the diagnosis (do this first, ~30 seconds)
-
-1. Open `sidewalkCrossroad.unity` (or whichever scene reproduces the crash).
-2. In the Hierarchy, find the GameObject named **`RuntimeEdit`** (it's inactive by default — toggle "Show Inactive" / it's a root object).
-3. Look at the Inspector. You will see **two** components: `Runtime Editor Manager` AND `Runtime Editor`. The second one is the bug.
-4. Enter Play mode, kick off World Building, watch the console. The NRE appears the instant `RuntimeEdit` flips active.
-
-## Fix (pick one)
-
-### Fix A — Remove the zombie component (recommended)
-
-In each affected scene, select the `RuntimeEdit` GameObject and **remove the `Runtime Editor` component** from the Inspector (right-click the component header → *Remove Component*). Keep the `Runtime Editor Manager`. Save the scene.
-
-This is the right fix because the `RuntimeEditor` MonoBehaviour is meant to live on the *selected prop*, attached at runtime by the manager. Having one on the manager itself is just a leftover.
-
-Affected scenes (all five):
-- `Assets/Scenes/sidewalkCrossroad.unity`
-- `Assets/Scenes/sidewalkOutofStore.unity`
-- `Assets/Scenes/sidewalkCornerInteraction.unity`
-- `Assets/Scenes/sidewalkNarrowroad.unity`
-- `Assets/Scenes/sidewalkNarrowroadsoft.unity`
-
-After fixing, commit the scene `.unity` files so both computers stay in sync.
-
-### Fix B — Make the code defensive (belt and braces)
-
-If you can't edit scenes right now, harden [`RuntimeEditor.HandleMouseInput`](Assets/RuntimeEditor/RuntimeEditor.cs#L297) so it bails when there's no camera:
+Applied to [`RuntimeEditor.HandleMouseInput`](Assets/RuntimeEditor/RuntimeEditor.cs#L297) — it
+re-acquires `Camera.main` if available and otherwise bails for the frame instead of NRE'ing:
 
 ```csharp
 void HandleMouseInput()
 {
-    if (mainCamera == null) return;     // <-- add this
-    if (IsClickOnUI() && Input.GetMouseButtonDown(0)) { ... return; }
-    Ray ray = mainCamera.ScreenPointToRay(Input.mousePosition);
+    // No raycast camera (e.g. the main camera was disabled/destroyed during a camera
+    // hand-off such as Session Review -> World Building). Try to re-acquire one, and if
+    // there still isn't one, bail this frame instead of NRE'ing on mainCamera.
+    if (mainCamera == null)
+    {
+        mainCamera = Camera.main;
+        if (mainCamera == null) return;
+    }
     ...
 }
 ```
 
-And in [`UpdateGizmoPositions`](Assets/RuntimeEditor/RuntimeEditor.cs#L204) if you ever extend it to use the camera.
+This is the recommended fix to ship because **one commit protects both machines** regardless of the
+runtime camera state, and it self-heals once any `MainCamera` exists. `HandleMouseInput` is the only
+reachable path to every `mainCamera` use (line 484 needs an active drag, which needs the line-306 click
+first), so this single guard is complete. **Commit + push so the broken machine gets it on pull.**
 
-Belt-and-braces, but treats the symptom rather than the cause. Fix A is the real one.
+### Fix 2 — Remove the stray `RuntimeEditor` component (architectural cleanup, optional but correct)
+
+In each of the five scenes, select `RuntimeEdit` and **Remove Component → Runtime Editor** (keep
+`Runtime Editor Manager`), then save. This removes the dormant component that has no business being there.
+It is the "right" structural fix, but note it must be done in all five scenes and committed; Fix 1 already
+stops the crash, so do this as hygiene, not as the urgent fix.
+
+## Input methods & the "can't rotate into 3D" symptom
+
+Operator report: in World Building you couldn't rotate the view into 3D — though it may simply be that
+the per-frame NRE at entry made the whole mode unusable before you reached the rotation phase. Both are
+worth understanding because this project runs **two input backends at once**.
+
+- `ProjectSettings/ProjectSettings.asset` → `activeInputHandler: 2` (**Both**), committed and clean. So
+  **both** `ENABLE_INPUT_SYSTEM` (new) and `ENABLE_LEGACY_INPUT_MANAGER` (legacy) are defined.
+- The stray `RuntimeEditor` (and the gizmo R/T mode toggle) use **legacy** `Input` (`Input.mousePosition`,
+  `Input.GetKeyDown`). The fact that the crash is a `NullReferenceException` and **not** an
+  `InvalidOperationException` ("you are trying to read Input using UnityEngine.Input but switched to Input
+  System package") **proves legacy input is enabled on the broken machine too** — so `activeInputHandler`
+  is the same on both machines and is *not* the difference.
+- The World-Building camera ([`SimpleCameraController`](Assets/RuntimeEditor/SimpleCameraController.cs)) is
+  `#if ENABLE_INPUT_SYSTEM`-gated, so under "Both" it takes the **new Input System** path.
+
+### How "rotate into 3D" is supposed to work
+
+It is **hold Right Mouse Button + move mouse**:
+[`IsCameraRotationAllowed()`](Assets/RuntimeEditor/SimpleCameraController.cs#L464-L473) →
+`Mouse.current.rightButton.isPressed` → [`EnsurePerspectiveForFreeLook()`](Assets/RuntimeEditor/SimpleCameraController.cs#L379-L402)
+flips the camera from top-down orthographic to perspective (the "3D" view). It is **not** a key press and
+not the gizmo's R key — if you didn't hold RMB, nothing rotates by design.
+
+### Ways rotation can independently fail (test these only after the NRE fix)
+
+1. **Most likely: it never got that far.** The stray NRE throws every frame at entry. Unity catches it
+   per-`Update`, so `SimpleCameraController` technically still runs — but the spam + the broken editor
+   state make the mode effectively unusable. After Fix 1, re-test RMB-drag rotation first.
+2. **`Mouse.current == null`** under the new Input System → `IsCameraRotationAllowed()` is always false →
+   RMB-drag does nothing, silently. Happens if the new Input System didn't register a mouse device. Check
+   for it; if so, this is a real input bug independent of the camera NRE.
+3. **`SimpleCameraController.Start()` not yet run** when first rotating: it's `AddComponent`-ed at
+   [SessionReviewManager.cs:1841](Assets/Scripts/SessionReview/SessionReviewManager.cs#L1841) and `Start()`
+   builds the `InputAction`s ([lines 118-150](Assets/RuntimeEditor/SimpleCameraController.cs#L118-L150)). If
+   look-input is read before `Start()`, `lookAction` is null → a *different* NRE in `GetInputLookRotation`.
+4. **Stale `Library` / mismatched compile defines** between the two machines: if one machine compiled
+   `SimpleCameraController` with the legacy branch and the other with the new branch (e.g. an out-of-date
+   `Library` that never picked up the input-handler change), rotation input behaves differently. Fix by
+   deleting `Library/` and reimporting so both compile with `ENABLE_INPUT_SYSTEM`.
+
+Net: input backend is *not* the cause of the NRE, and is the same on both machines. The "can't rotate"
+symptom is most likely a downstream effect of the NRE; verify after Fix 1, and if it persists, suspect
+`Mouse.current` / new-Input-System device registration (#2) or a stale `Library` (#4).
 
 ## Things this is NOT
 
-- **Not a new Input System / legacy Input mismatch.** `ProjectSettings/ProjectSettings.asset` has `activeInputHandler: 2` (Both enabled). Legacy `Input.mousePosition` works.
-- **Not the "Gizmo" layer missing.** Layer 7 is present in `ProjectSettings/TagManager.asset`.
-- **Not branch drift.** `git log Gracie2..origin/main` and `git log origin/main..Gracie2` both return empty — Gracie2 is in sync with `main`. The two machines run identical code; the difference is local scene/uncommitted state.
-- **Not `SEAN.Environment.topViewCamera` returning null.** That codepath errors with `"TopViewCamera not found under …"` and refuses to enter World Building. You got past that.
+- **Not "the working scene lacks the stray component."** ❌ The original doc's headline cause. Disproven:
+  the stray component is present and identical on the working machine. The scenes match across machines.
+- **Not a new/legacy Input System mismatch.** `ProjectSettings.asset` has `activeInputHandler: 2` (Both).
+- **Not a missing "Gizmo" layer.** Layer 7 ("Gizmo") is present in `ProjectSettings/TagManager.asset`.
+- **Not branch drift.** Same commits, same scene files on both machines.
+- **Not `topViewCamera` returning null.** That path refuses to enter World Building with a different error.
 
-## Local state to clean up regardless
+## Local state worth cleaning up
 
-`git submodule status` shows uncommitted modifications in `Assets/ExternalAssets/Microsoft-Rocketbox`: deleted `Sports_Female_02.fbx`, modified avatar `.meta` files, untracked `Sports_Female_02.prefab` and a few materials. These are unrelated to the NRE itself but they are a likely reason the two computers diverge in avatar/camera spawning, which is in turn the most likely reason this same scene happens to find `Camera.main` on the other PC but not here.
-
-Either:
-- Reset the submodule: `git -C Assets/ExternalAssets/Microsoft-Rocketbox checkout .` (destroys local edits — confirm first that you don't need them), then `git submodule update --init --recursive`, **or**
-- Commit/push the submodule changes so the other PC matches.
+- **Other machine:** `Assets/ExternalAssets/Microsoft-Rocketbox` submodule is dirty (deleted
+  `Sports_Female_02.fbx`, modified avatar `.meta`s, untracked `Sports_Female_02.prefab` + materials).
+  This is the prime suspect for the avatar/camera spawn divergence. Either reset it
+  (`git -C Assets/ExternalAssets/Microsoft-Rocketbox checkout .` then `git submodule update --init --recursive`)
+  or commit/push it so both machines match.
+- **This machine:** working tree has `Assets/Rerun` (submodule) and `Assets/Scripts/VLMscripts/UIManager.cs`
+  modified, plus the Fix 1 edit to `Assets/RuntimeEditor/RuntimeEditor.cs`. `Microsoft-Rocketbox` is clean here.
