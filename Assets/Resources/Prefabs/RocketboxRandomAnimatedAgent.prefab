@@ -93,25 +93,25 @@ MonoBehaviour:
   pwdCharacter: 0
   pwdAvatarPrefabMale: {fileID: 6004020823855633571, guid: f9f89412d43f4f34d8dae9bdd5aa10d8,
     type: 3}
-  pwdAvatarPrefabFemale: {fileID: 4123353721614615874, guid: bba6774b950b2c843ad5d47502eaa9d4,
+  pwdAvatarPrefabFemale: {fileID: 2359640441698508503, guid: 8c3a94ce3fd9faa49a21250ac6f08efd,
     type: 3}
-  pwdAvatarPrefabScooteruser: {fileID: 6787443626245204790, guid: f64558dc6aaeb5345b83f3d0bac88893,
+  pwdAvatarPrefabScooteruser: {fileID: 6787443626245204790, guid: 824861a957d2d57469531b457c9c2991,
     type: 3}
-  pwdAvatarPrefabDogwalker: {fileID: 7040208758660078004, guid: 7e27c02e3f9d2324b9474bbc379db951,
+  pwdAvatarPrefabDogwalker: {fileID: 7040208758660078004, guid: f8b0b37e8ead88046920f1780d18cd78,
     type: 3}
-  pwdAvatarPrefabCyclist: {fileID: 9016459577240848659, guid: affac2d88f888e045bdbc979cdaf4e01,
+  pwdAvatarPrefabCyclist: {fileID: 9016459577240848659, guid: 76b0cfcbb7209674bb7f32f80450800c,
     type: 3}
-  pwdAvatarPrefabWalker: {fileID: 1054567183228303193, guid: a03f8be0b698350418bfdbd9b88d2af5,
+  pwdAvatarPrefabWalker: {fileID: 1054567183228303193, guid: e532cd6a80877b64d8ebfa1e331fe1de,
     type: 3}
-  pwdAvatarPrefabWhiteCane: {fileID: 3977508065817665654, guid: f46d99b60fae77c4eb7ce13cf7468e88,
+  pwdAvatarPrefabWhiteCane: {fileID: 3977508065817665654, guid: 251c89a6da9729d4f8b1d7475d2a97f6,
     type: 3}
-  pwdAvatarPrefabCane: {fileID: 8939702436063834965, guid: dc94580c4e15b0b489ccf89cc514836d,
+  pwdAvatarPrefabCane: {fileID: 8939702436063834965, guid: 92a9392f7a49f604bb64a8429e03254e,
     type: 3}
-  pwdAvatarPrefabFemaleChild: {fileID: 5903106443318615734, guid: 358af4b015f795341aa3d8b8b72306da,
+  pwdAvatarPrefabFemaleChild: {fileID: 5903106443318615734, guid: 27ef67bb8a592cd44a7ceb559203df56,
     type: 3}
-  pwdAvatarPrefabMaleChild: {fileID: 1654397166830192782, guid: 25b5fc1b1d9d294449528baa52b90ed0,
+  pwdAvatarPrefabMaleChild: {fileID: 1654397166830192782, guid: 813b6a401ec41a145803093355b57fa9,
     type: 3}
-  pwdAvatarPrefabPhoneUser: {fileID: 5487155251517902103, guid: f12f42ce7d2167745967d4b85ba59943,
+  pwdAvatarPrefabPhoneUser: {fileID: 5487155251517902103, guid: 8527adad5a31bf14295da5dfb16c0ddb,
     type: 3}
   startObjectName: start
   goalObjectName: end

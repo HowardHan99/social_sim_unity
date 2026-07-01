@@ -101,6 +101,5 @@ Assets/openaiapikey.txt.meta
 /Assets/Samples/Unity Render Streaming
 /Assets/Samples
 *.rerunstate
-*.meta
 Assets/Rerun
 /SessionLogs

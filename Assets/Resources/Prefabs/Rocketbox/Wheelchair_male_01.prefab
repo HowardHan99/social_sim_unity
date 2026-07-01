@@ -874,7 +874,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 3011972582078307015}
   m_LocalRotation: {x: -0, y: -0.031396054, z: -0, w: 0.999507}
-  m_LocalPosition: {x: 0.023, y: 0.48656178, z: -0.024}
+  m_LocalPosition: {x: 0.023, y: 0.48656178, z: -0.053}
   m_LocalScale: {x: 45.493378, y: 39.488083, z: 39.567883}
   m_Children: []
   m_Father: {fileID: 6348177221307780633}
@@ -1927,7 +1927,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 6004020823855633571}
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 1.0212879, y: -0.06058216, z: 12.042046}
+  m_LocalPosition: {x: 1.0212879, y: -0.06058216, z: 12.082}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_Children:
   - {fileID: 2488095541549727869}
@@ -2046,6 +2046,9 @@ MonoBehaviour:
   groundOffset: 0
   groundRayStartHeight: 2.5
   groundRayDistance: 6
+  blockStepHeight: 1
+  maxStepHeight: 0.12
+  slideAlongSteps: 1
   brakeStopThreshold: 0.02
   sPressesToEnableReverse: 2
   sPressWindowSec: 0.6
