@@ -32,7 +32,7 @@ Transform:
   m_LocalPosition: {x: 0, y: -0.124, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_Children:
-  - {fileID: 3473988442273553992}
+  - {fileID: 759768669558147291}
   - {fileID: 7362851090740715483}
   m_Father: {fileID: 0}
   m_RootOrder: 0
@@ -47,10 +47,10 @@ CapsuleCollider:
   m_Material: {fileID: 0}
   m_IsTrigger: 0
   m_Enabled: 1
-  m_Radius: 0.6858027
-  m_Height: 1.8670795
+  m_Radius: 0.2665195
+  m_Height: 2.062095
   m_Direction: 1
-  m_Center: {x: 0.0032596588, y: 0.85730016, z: 0}
+  m_Center: {x: 0.0032596588, y: 0.75979245, z: -0.029252231}
 --- !u!114 &1723106831847699698
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -144,12 +144,12 @@ MonoBehaviour:
   stickToGround: 1
   groundMask:
     serializedVersion: 2
-    m_Bits: 4294967295
+    m_Bits: 1
   groundOffset: 0.1
   groundRayStartHeight: 2.5
   groundRayDistance: 6
   blockStepHeight: 1
-  maxStepHeight: 0.12
+  maxStepHeight: 0.3
   slideAlongSteps: 1
   brakeStopThreshold: 0.02
   sPressesToEnableReverse: 2
@@ -163,7 +163,6 @@ MonoBehaviour:
   debugForward: 0
   debugStrafe: 0
   debugTurn: 0
-  debugIsBiking: 0
   isManualMode: 0
   debugJoystickRawHorizontal: 0
   debugJoystickRawVertical: 0
@@ -171,7 +170,7 @@ MonoBehaviour:
   debugJoystickVerticalCenter: 0
   debugJoystickProcessedHorizontal: 0
   debugJoystickProcessedVertical: 0
---- !u!1001 &4016277830818757027
+--- !u!1001 &937176334315122480
 PrefabInstance:
   m_ObjectHideFlags: 0
   serializedVersion: 2
@@ -191,7 +190,7 @@ PrefabInstance:
     - target: {fileID: -8679921383154817045, guid: bb54faf7421e14149bc7168390fe89c8,
         type: 3}
       propertyPath: m_LocalPosition.y
-      value: 0
+      value: -0.124
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: bb54faf7421e14149bc7168390fe89c8,
         type: 3}
@@ -236,7 +235,7 @@ PrefabInstance:
     - target: {fileID: 919132149155446097, guid: bb54faf7421e14149bc7168390fe89c8,
         type: 3}
       propertyPath: m_Name
-      value: Female_Adult_05 1
+      value: Female_Adult_05 1 (1)
       objectReference: {fileID: 0}
     - target: {fileID: 5866666021909216657, guid: bb54faf7421e14149bc7168390fe89c8,
         type: 3}
@@ -245,11 +244,11 @@ PrefabInstance:
       objectReference: {fileID: 9100000, guid: b320594ef8e747c4aae65c5cee3ea6fc, type: 2}
     m_RemovedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: bb54faf7421e14149bc7168390fe89c8, type: 3}
---- !u!4 &3473988442273553992 stripped
+--- !u!4 &759768669558147291 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: -8679921383154817045, guid: bb54faf7421e14149bc7168390fe89c8,
     type: 3}
-  m_PrefabInstance: {fileID: 4016277830818757027}
+  m_PrefabInstance: {fileID: 937176334315122480}
   m_PrefabAsset: {fileID: 0}
 --- !u!1001 &7035928236119816240
 PrefabInstance:
@@ -266,17 +265,17 @@ PrefabInstance:
     - target: {fileID: -8679921383154817045, guid: eded24c351cb37b4986565571a5bfcd5,
         type: 3}
       propertyPath: m_LocalScale.x
-      value: 3
+      value: 4
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: eded24c351cb37b4986565571a5bfcd5,
         type: 3}
       propertyPath: m_LocalScale.y
-      value: 3
+      value: 4
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: eded24c351cb37b4986565571a5bfcd5,
         type: 3}
       propertyPath: m_LocalScale.z
-      value: 3
+      value: 4
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: eded24c351cb37b4986565571a5bfcd5,
         type: 3}

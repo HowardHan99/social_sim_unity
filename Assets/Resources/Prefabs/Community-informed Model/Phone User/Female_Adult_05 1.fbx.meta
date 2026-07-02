@@ -28,7 +28,9 @@ ModelImporter:
     animationPositionError: 0.5
     animationScaleError: 0.5
     animationWrapMode: 0
-    extraExposedTransformPaths: []
+    extraExposedTransformPaths:
+    - Bip01/Bip01 Pelvis/Bip01 Spine/Bip01 Spine1/Bip01 Spine2/Bip01 Neck/Bip01 R
+      Clavicle/Bip01 R UpperArm/Bip01 R Forearm/Bip01 R Hand
     extraUserProperties: []
     clipAnimations: []
     isReadable: 0
