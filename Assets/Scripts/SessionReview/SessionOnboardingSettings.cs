@@ -20,7 +20,7 @@ namespace SessionReview
         public static OnboardingPlayerMode PlayerMode { get; private set; } = OnboardingPlayerMode.Robot;
         public static StartupControlMode RobotStartupControl { get; private set; } = StartupControlMode.Manual;
         public static StartupControlMode PwdStartupControl { get; private set; } = StartupControlMode.Auto;
-        public static SEAN.Scenario.Agents.PwdCharacter SelectedPwdCharacter { get; private set; } = SEAN.Scenario.Agents.PwdCharacter.FemaleWheelchair;
+        public static SEAN.Scenario.Agents.PwdCharacter SelectedPwdCharacter { get; private set; } = SEAN.Scenario.Agents.PwdCharacter.FemaleWheelchairUser;
         public static int SelectedSceneIndex { get; private set; } = -1;
         public static string SelectedSceneName { get; private set; } = string.Empty;
         public static bool PendingTrialStart { get; private set; }
@@ -32,7 +32,7 @@ namespace SessionReview
             PlayerMode = OnboardingPlayerMode.Robot;
             RobotStartupControl = StartupControlMode.Manual;
             PwdStartupControl = StartupControlMode.Auto;
-            SelectedPwdCharacter = SEAN.Scenario.Agents.PwdCharacter.FemaleWheelchair;
+            SelectedPwdCharacter = SEAN.Scenario.Agents.PwdCharacter.FemaleWheelchairUser;
             SelectedSceneIndex = -1;
             SelectedSceneName = string.Empty;
             PendingTrialStart = false;

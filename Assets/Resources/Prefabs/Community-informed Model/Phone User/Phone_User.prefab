@@ -15,7 +15,7 @@ GameObject:
   - component: {fileID: 8123456789012345678}
   - component: {fileID: 959083787148873769}
   m_Layer: 0
-  m_Name: Phone User
+  m_Name: Phone_User
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0

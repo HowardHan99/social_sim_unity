@@ -15,7 +15,7 @@ GameObject:
   - component: {fileID: 4902818794188522797}
   - component: {fileID: 8812345678901234567}
   m_Layer: 0
-  m_Name: WalkerMan
+  m_Name: Walker_User
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -99,12 +99,12 @@ MonoBehaviour:
   stickToGround: 1
   groundMask:
     serializedVersion: 2
-    m_Bits: 4294967295
+    m_Bits: 1
   groundOffset: 0
   groundRayStartHeight: 2.5
   groundRayDistance: 6
   blockStepHeight: 1
-  maxStepHeight: 0.12
+  maxStepHeight: 0.3
   slideAlongSteps: 1
   brakeStopThreshold: 0.02
   sPressesToEnableReverse: 2

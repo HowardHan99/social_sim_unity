@@ -127,7 +127,7 @@ namespace SessionReview
         private OnboardingPlayerMode selectedPlayerMode = OnboardingPlayerMode.Robot;
         private StartupControlMode selectedRobotStartupControl = StartupControlMode.Manual;
         private StartupControlMode selectedPwdStartupControl = StartupControlMode.Auto;
-        private SEAN.Scenario.Agents.PwdCharacter selectedPwdCharacter = SEAN.Scenario.Agents.PwdCharacter.FemaleWheelchair;
+        private SEAN.Scenario.Agents.PwdCharacter selectedPwdCharacter = SEAN.Scenario.Agents.PwdCharacter.FemaleWheelchairUser;
         private int selectedSceneIndex = -1;
         private Vector2 onboardingSceneScroll;
         private Vector2 onboardingContentScroll;
@@ -165,7 +165,7 @@ namespace SessionReview
         private readonly Dictionary<SEAN.Scenario.Agents.PwdCharacter, CharacterOnboardingSlot> characterOnboardingSlots =
             new Dictionary<SEAN.Scenario.Agents.PwdCharacter, CharacterOnboardingSlot>();
         private bool characterOnboardingSlotsInitialized;
-        private SEAN.Scenario.Agents.PwdCharacter currentUserSlotCharacter = SEAN.Scenario.Agents.PwdCharacter.FemaleWheelchair;
+        private SEAN.Scenario.Agents.PwdCharacter currentUserSlotCharacter = SEAN.Scenario.Agents.PwdCharacter.FemaleWheelchairUser;
 
         void Awake()
         {
@@ -2374,19 +2374,19 @@ namespace SessionReview
 
                 EnsureCharacterOnboardingSlotsInitialized();
 
-                DrawPwdCharacterCardFromSlot(x, characterPickerBaseY, SEAN.Scenario.Agents.PwdCharacter.FemaleWheelchair,
+                DrawPwdCharacterCardFromSlot(x, characterPickerBaseY, SEAN.Scenario.Agents.PwdCharacter.FemaleWheelchairUser,
                     "Female Wheelchair User", femaleWheelchairPreview);
-                DrawPwdCharacterCardFromSlot(x, characterPickerBaseY, SEAN.Scenario.Agents.PwdCharacter.Dogwalker,
-                    "Dogwalker", dogwalkerPreview);
-                DrawPwdCharacterCardFromSlot(x, characterPickerBaseY, SEAN.Scenario.Agents.PwdCharacter.Scooteruser,
+                DrawPwdCharacterCardFromSlot(x, characterPickerBaseY, SEAN.Scenario.Agents.PwdCharacter.DogWalker,
+                    "Dog Walker", dogwalkerPreview);
+                DrawPwdCharacterCardFromSlot(x, characterPickerBaseY, SEAN.Scenario.Agents.PwdCharacter.ScooterUser,
                     "Scooter User", scooterUserPreview);
                 DrawPwdCharacterCardFromSlot(x, characterPickerBaseY, SEAN.Scenario.Agents.PwdCharacter.Cyclist,
                     "Cyclist", cyclistPreview);
-                DrawPwdCharacterCardFromSlot(x, characterPickerBaseY, SEAN.Scenario.Agents.PwdCharacter.Walker,
+                DrawPwdCharacterCardFromSlot(x, characterPickerBaseY, SEAN.Scenario.Agents.PwdCharacter.WalkerUser,
                     "Walker User", walkerPreview);
-                DrawPwdCharacterCardFromSlot(x, characterPickerBaseY, SEAN.Scenario.Agents.PwdCharacter.WhiteCane,
+                DrawPwdCharacterCardFromSlot(x, characterPickerBaseY, SEAN.Scenario.Agents.PwdCharacter.WhiteCaneUser,
                     "White Cane User", whiteCanePreview);
-                DrawPwdCharacterCardFromSlot(x, characterPickerBaseY, SEAN.Scenario.Agents.PwdCharacter.Cane,
+                DrawPwdCharacterCardFromSlot(x, characterPickerBaseY, SEAN.Scenario.Agents.PwdCharacter.CaneUser,
                     "Cane User", canePreview);
                 DrawPwdCharacterCardFromSlot(x, characterPickerBaseY, SEAN.Scenario.Agents.PwdCharacter.FemaleChild,
                     "Female Child", femaleChildPreview);
@@ -2394,7 +2394,7 @@ namespace SessionReview
                     "Male Child", maleChildPreview);
                 DrawPwdCharacterCardFromSlot(x, characterPickerBaseY, SEAN.Scenario.Agents.PwdCharacter.PhoneUser,
                     "Phone User", phoneUserPreview);
-                DrawPwdCharacterCardFromSlot(x, characterPickerBaseY, SEAN.Scenario.Agents.PwdCharacter.MaleWheelchair,
+                DrawPwdCharacterCardFromSlot(x, characterPickerBaseY, SEAN.Scenario.Agents.PwdCharacter.MaleWheelchairUser,
                     "Male Wheelchair User", maleWheelchairPreview);
 
                 y = characterPickerBaseY + GetCharacterOnboardingContentHeight() + 22f;
@@ -2512,18 +2512,18 @@ namespace SessionReview
             float col3 = CommunityCardColumnStep * 2f;
             float col4 = CommunityCardColumnStep * 3f;
 
-            characterOnboardingSlots[SEAN.Scenario.Agents.PwdCharacter.FemaleWheelchair] = CreateCurrentUserPrimarySlot();
-            characterOnboardingSlots[SEAN.Scenario.Agents.PwdCharacter.Dogwalker] =
+            characterOnboardingSlots[SEAN.Scenario.Agents.PwdCharacter.FemaleWheelchairUser] = CreateCurrentUserPrimarySlot();
+            characterOnboardingSlots[SEAN.Scenario.Agents.PwdCharacter.DogWalker] =
                 MakeCommunityCharacterSlot(0f, communitySectionY);
-            characterOnboardingSlots[SEAN.Scenario.Agents.PwdCharacter.Scooteruser] =
+            characterOnboardingSlots[SEAN.Scenario.Agents.PwdCharacter.ScooterUser] =
                 MakeCommunityCharacterSlot(col2, communitySectionY);
             characterOnboardingSlots[SEAN.Scenario.Agents.PwdCharacter.Cyclist] =
                 MakeCommunityCharacterSlot(col3, communitySectionY);
-            characterOnboardingSlots[SEAN.Scenario.Agents.PwdCharacter.Walker] =
+            characterOnboardingSlots[SEAN.Scenario.Agents.PwdCharacter.WalkerUser] =
                 MakeCommunityCharacterSlot(0f, row2Y);
-            characterOnboardingSlots[SEAN.Scenario.Agents.PwdCharacter.WhiteCane] =
+            characterOnboardingSlots[SEAN.Scenario.Agents.PwdCharacter.WhiteCaneUser] =
                 MakeCommunityCharacterSlot(col2, row2Y);
-            characterOnboardingSlots[SEAN.Scenario.Agents.PwdCharacter.Cane] =
+            characterOnboardingSlots[SEAN.Scenario.Agents.PwdCharacter.CaneUser] =
                 MakeCommunityCharacterSlot(col3, row2Y);
             characterOnboardingSlots[SEAN.Scenario.Agents.PwdCharacter.FemaleChild] =
                 MakeCommunityCharacterSlot(0f, row3Y);
@@ -2531,7 +2531,7 @@ namespace SessionReview
                 MakeCommunityCharacterSlot(col2, row3Y);
             characterOnboardingSlots[SEAN.Scenario.Agents.PwdCharacter.PhoneUser] =
                 MakeCommunityCharacterSlot(col3, row3Y);
-            characterOnboardingSlots[SEAN.Scenario.Agents.PwdCharacter.MaleWheelchair] =
+            characterOnboardingSlots[SEAN.Scenario.Agents.PwdCharacter.MaleWheelchairUser] =
                 MakeCommunityCharacterSlot(col4, row3Y);
         }
 
@@ -2555,8 +2555,8 @@ namespace SessionReview
         {
             characterOnboardingSlotsInitialized = false;
             characterOnboardingSlots.Clear();
-            currentUserSlotCharacter = SEAN.Scenario.Agents.PwdCharacter.FemaleWheelchair;
-            selectedPwdCharacter = SEAN.Scenario.Agents.PwdCharacter.FemaleWheelchair;
+            currentUserSlotCharacter = SEAN.Scenario.Agents.PwdCharacter.FemaleWheelchairUser;
+            selectedPwdCharacter = SEAN.Scenario.Agents.PwdCharacter.FemaleWheelchairUser;
             EnsureCharacterOnboardingSlotsInitialized();
             SessionOnboardingSettings.UpdatePwdCharacter(currentUserSlotCharacter);
         }

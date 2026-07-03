@@ -111,7 +111,7 @@ GameObject:
   - component: {fileID: 5546190740272450816}
   - component: {fileID: 5546190740272450817}
   m_Layer: 0
-  m_Name: Dogwalker
+  m_Name: Dog_Walker
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -181,12 +181,12 @@ MonoBehaviour:
   stickToGround: 1
   groundMask:
     serializedVersion: 2
-    m_Bits: 4294967295
+    m_Bits: 1
   groundOffset: 0
   groundRayStartHeight: 2.5
   groundRayDistance: 6
   blockStepHeight: 1
-  maxStepHeight: 0.12
+  maxStepHeight: 0.3
   slideAlongSteps: 1
   brakeStopThreshold: 0.02
   sPressesToEnableReverse: 2

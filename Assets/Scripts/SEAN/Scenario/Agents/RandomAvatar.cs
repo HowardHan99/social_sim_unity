@@ -4,7 +4,7 @@ using UnityEngine.SceneManagement;
 
 namespace SEAN.Scenario.Agents
 {
-    public enum PwdCharacter { MaleWheelchair, FemaleWheelchair, Random, Scooteruser, Dogwalker, Cyclist, Walker, WhiteCane, Cane, FemaleChild, MaleChild, PhoneUser }
+    public enum PwdCharacter { MaleWheelchairUser, FemaleWheelchairUser, Random, ScooterUser, DogWalker, Cyclist, WalkerUser, WhiteCaneUser, CaneUser, FemaleChild, MaleChild, PhoneUser }
 
     public class RandomAvatar : MonoBehaviour
     {
@@ -32,7 +32,7 @@ namespace SEAN.Scenario.Agents
 
         [Header("PWD Player")]
         public bool isPwdPlayer = false;
-        public PwdCharacter pwdCharacter = PwdCharacter.MaleWheelchair;
+        public PwdCharacter pwdCharacter = PwdCharacter.MaleWheelchairUser;
         public GameObject pwdAvatarPrefabMale;
         public GameObject pwdAvatarPrefabFemale;
         public GameObject pwdAvatarPrefabScooteruser;
@@ -484,21 +484,21 @@ namespace SEAN.Scenario.Agents
         {
             switch (gender)
             {
-                case PwdCharacter.MaleWheelchair:
+                case PwdCharacter.MaleWheelchairUser:
                     return pwdAvatarPrefabMale != null ? pwdAvatarPrefabMale : pwdAvatarPrefab;
-                case PwdCharacter.FemaleWheelchair:
+                case PwdCharacter.FemaleWheelchairUser:
                     return pwdAvatarPrefabFemale != null ? pwdAvatarPrefabFemale : pwdAvatarPrefab;
-                case PwdCharacter.Scooteruser:
+                case PwdCharacter.ScooterUser:
                     return pwdAvatarPrefabScooteruser != null ? pwdAvatarPrefabScooteruser : pwdAvatarPrefab;
-                case PwdCharacter.Dogwalker:
+                case PwdCharacter.DogWalker:
                     return pwdAvatarPrefabDogwalker != null ? pwdAvatarPrefabDogwalker : pwdAvatarPrefab;
                 case PwdCharacter.Cyclist:
                     return pwdAvatarPrefabCyclist != null ? pwdAvatarPrefabCyclist : pwdAvatarPrefab;
-                case PwdCharacter.Walker:
+                case PwdCharacter.WalkerUser:
                     return pwdAvatarPrefabWalker != null ? pwdAvatarPrefabWalker : pwdAvatarPrefab;
-                case PwdCharacter.WhiteCane:
+                case PwdCharacter.WhiteCaneUser:
                     return pwdAvatarPrefabWhiteCane != null ? pwdAvatarPrefabWhiteCane : pwdAvatarPrefab;
-                case PwdCharacter.Cane:
+                case PwdCharacter.CaneUser:
                     return pwdAvatarPrefabCane != null ? pwdAvatarPrefabCane : pwdAvatarPrefab;
                 case PwdCharacter.FemaleChild:
                     return pwdAvatarPrefabFemaleChild != null ? pwdAvatarPrefabFemaleChild : pwdAvatarPrefab;

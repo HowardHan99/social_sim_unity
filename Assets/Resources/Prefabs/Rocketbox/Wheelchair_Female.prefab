@@ -122,7 +122,7 @@ GameObject:
   - component: {fileID: 4962500337539298440}
   - component: {fileID: 2081518030440339551}
   m_Layer: 0
-  m_Name: Wheelchair_Female 1
+  m_Name: Wheelchair_Female
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -171,10 +171,10 @@ CapsuleCollider:
   m_Material: {fileID: 0}
   m_IsTrigger: 0
   m_Enabled: 1
-  m_Radius: 0.6393762
-  m_Height: 1.6323113
+  m_Radius: 0.66130406
+  m_Height: 1.5017684
   m_Direction: 1
-  m_Center: {x: 0.023415983, y: 0.5425241, z: 0.13742381}
+  m_Center: {x: 0.023415983, y: 0.6077956, z: -0.022945106}
 --- !u!114 &4962500337539298440
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -205,7 +205,7 @@ MonoBehaviour:
   toggleModeKey: 303
   useWASD: 1
   startInManualMode: 0
-  enableJoystick: 1
+  enableJoystick: 0
   joystickHorizontalAxis: LogitechTwist
   joystickVerticalAxis: joystickVerticalAxis
   joystickStartAxis: L1
@@ -223,12 +223,12 @@ MonoBehaviour:
   stickToGround: 1
   groundMask:
     serializedVersion: 2
-    m_Bits: 4294967295
+    m_Bits: 1
   groundOffset: 0
   groundRayStartHeight: 2.5
   groundRayDistance: 6
   blockStepHeight: 1
-  maxStepHeight: 0.12
+  maxStepHeight: 0.3
   slideAlongSteps: 1
   brakeStopThreshold: 0.02
   sPressesToEnableReverse: 2
@@ -242,7 +242,6 @@ MonoBehaviour:
   debugForward: 0
   debugStrafe: 0
   debugTurn: 0
-  debugIsBiking: 0
   isManualMode: 0
   debugJoystickRawHorizontal: 0
   debugJoystickRawVertical: 0
