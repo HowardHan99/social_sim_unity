@@ -93,7 +93,7 @@ MonoBehaviour:
   pwdGender: 0
   pwdAvatarPrefabMale: {fileID: 6004020823855633571, guid: f9f89412d43f4f34d8dae9bdd5aa10d8,
     type: 3}
-  pwdAvatarPrefabFemale: {fileID: 4123353721614615874, guid: bba6774b950b2c843ad5d47502eaa9d4,
+  pwdAvatarPrefabFemale: {fileID: 1997235664789785290, guid: 80bdd74e4a8848547b3cc98d6996ac43,
     type: 3}
   startObjectName: start
   goalObjectName: end
