@@ -68,7 +68,19 @@ namespace SessionReview
                 fontSize = 12
             };
 
-            string status = t.endReason == TrialEndReason.Completion ? "[COMPLETED]" : "[TIMEOUT]";
+            string status;
+            switch (t.endReason)
+            {
+                case TrialEndReason.Completion:
+                    status = "[COMPLETED]";
+                    break;
+                case TrialEndReason.Manual:
+                    status = "[ENDED]";
+                    break;
+                default:
+                    status = "[TIMEOUT]";
+                    break;
+            }
             GUILayout.Label($"{status} {t.trialName} #{t.trialNumber}", headerStyle);
             GUILayout.Label($"Duration: {t.Duration:F1}s  ({t.startTime:F1}s - {t.endTime:F1}s)");
             GUILayout.Space(sectionGap);

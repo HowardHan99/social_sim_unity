@@ -8,7 +8,8 @@ namespace SessionReview
     public enum TrialEndReason
     {
         Completion,
-        Timeout
+        Timeout,
+        Manual
     }
 
     [Serializable]
@@ -342,6 +343,16 @@ namespace SessionReview
 
             if (addedAny)
                 RegisterAllWithRecorder();
+        }
+
+        /// <summary>
+        /// Ends the current interaction on demand (e.g. from a UI button) and lets the normal
+        /// post-trial flow take over. No-op if no trial is currently tracked.
+        /// </summary>
+        public void EndCurrentTrialManually()
+        {
+            if (!tracking) return;
+            FinishCurrentTrial(TrialEndReason.Manual);
         }
 
         private void FinishCurrentTrial(TrialEndReason reason)

@@ -59,6 +59,27 @@ public class RuntimeEditor : MonoBehaviour
         mainCamera = camera;
     }
 
+    /// <summary>
+    /// Ensures <see cref="mainCamera"/> points at a live camera. Unity's overloaded ==
+    /// reports a destroyed object as null, so this recovers both from a never-assigned
+    /// camera (NullReferenceException) and from one destroyed by a trial restart / scene
+    /// reload (MissingReferenceException). Returns false if no usable camera exists.
+    /// </summary>
+    bool EnsureCamera()
+    {
+        if (mainCamera != null)
+            return true;
+
+        if (RuntimeEditorManager.Instance != null && RuntimeEditorManager.Instance.ActiveRaycastCamera != null)
+        {
+            mainCamera = RuntimeEditorManager.Instance.ActiveRaycastCamera;
+            return true;
+        }
+
+        mainCamera = Camera.main;
+        return mainCamera != null;
+    }
+
     void Start()
     {
         if (mainCamera == null)
@@ -321,6 +342,9 @@ public class RuntimeEditor : MonoBehaviour
             Debug.Log("[Raycast] Pointer is over UI. Ignoring click.");
             return;
         }
+
+        if (!EnsureCamera())
+            return;
 
         Ray ray = mainCamera.ScreenPointToRay(Input.mousePosition);
 
