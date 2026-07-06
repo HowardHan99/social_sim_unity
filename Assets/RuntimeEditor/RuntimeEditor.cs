@@ -722,6 +722,13 @@ public class RuntimeEditor : MonoBehaviour
 
     bool IsClickOnUI()
     {
+        if (SessionReview.SessionReviewManager.Instance != null &&
+            SessionReview.SessionReviewManager.Instance.IsPointerOverWorldBuildingUi())
+        {
+            Debug.Log("[Raycast] Pointer is over world-building UI. Ignoring click.");
+            return true;
+        }
+
         if (EventSystem.current == null) return false;
 
         if (EventSystem.current.IsPointerOverGameObject()) return true;

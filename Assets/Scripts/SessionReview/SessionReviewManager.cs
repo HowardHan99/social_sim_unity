@@ -1303,30 +1303,13 @@ namespace SessionReview
 
         private void DrawWorldBuildingSidePanels()
         {
-            float panelWidth = GetWorldBuildingSidePanelWidth();
+            GetWorldBuildingSidePanelRects(
+                out Rect generateRect,
+                out Rect charactersRect,
+                out Rect objectsRect);
+
             IReadOnlyList<WorldBuildingSpawnUiRow> objectRows = WorldBuildingSpawnLibrary.LastObjectUiRows;
             IReadOnlyList<WorldBuildingSpawnUiRow> characterRows = WorldBuildingSpawnLibrary.LastCharacterUiRows;
-
-            float generateHeight = GetWorldBuildingGenerateObjectsPanelHeight();
-            float charactersHeight = GetWorldBuildingSpawnCardPanelHeight(
-                characterRows,
-                worldBuildingAddCharactersMinimized,
-                WorldBuildingSidePanelHeaderHeight);
-            float objectsHeight = GetWorldBuildingSpawnCardPanelHeight(
-                objectRows,
-                worldBuildingAddObjectsMinimized,
-                WorldBuildingAddObjectsExpandedHeaderHeight);
-
-            float yBottom = Screen.height - WorldBuildingSidePanelMargin;
-            float x = Screen.width - panelWidth - WorldBuildingSidePanelMargin;
-
-            Rect generateRect = new Rect(x, yBottom - generateHeight, panelWidth, generateHeight);
-            yBottom = generateRect.y - WorldBuildingSidePanelGap;
-
-            Rect charactersRect = new Rect(x, yBottom - charactersHeight, panelWidth, charactersHeight);
-            yBottom = charactersRect.y - WorldBuildingSidePanelGap;
-
-            Rect objectsRect = new Rect(x, yBottom - objectsHeight, panelWidth, objectsHeight);
 
             DrawWorldBuildingGenerateObjectsPanel(generateRect);
             DrawWorldBuildingAddCharactersPanel(charactersRect, characterRows);
@@ -1446,6 +1429,9 @@ namespace SessionReview
             float scrollInnerHeight = rowCount * (WorldBuildingSpawnPaletteCardHeight + WorldBuildingSpawnPaletteCardGap)
                                       + WorldBuildingSpawnPaletteCardGap;
             float scrollViewportH = Mathf.Clamp(scrollInnerHeight, scrollAreaMin, scrollAreaMax);
+            scrollViewportH = Mathf.Min(scrollViewportH, Mathf.Max(0f, panelRect.height - headerHeight - 16f));
+            if (scrollViewportH <= 0f)
+                return;
 
             float innerPad = 12f;
             float scrollBarReserve = 18f;
@@ -1483,15 +1469,15 @@ namespace SessionReview
             float innerW = panelRect.width - pad * 2f;
             float y = panelRect.y + WorldBuildingSidePanelHeaderHeight + 10f;
 
-            GUI.Label(new Rect(panelRect.x + pad, y, innerW, 18f), "Describe an object:");
+            GUI.Label(new Rect(panelRect.x + pad, y, innerW, 18f), "Describe an object (placeholder):");
             y += 20f;
 
             aiGenerationPrompt = GUI.TextField(new Rect(panelRect.x + pad, y, innerW, 22f), aiGenerationPrompt ?? string.Empty);
             y += 28f;
 
-            if (GUI.Button(new Rect(panelRect.x + pad, y, innerW, 28f), "Generate"))
+            if (GUI.Button(new Rect(panelRect.x + pad, y, innerW, 28f), "Add Cardboard Box"))
             {
-                Debug.Log($"[WorldBuilding/AI] Generate clicked. Prompt='{aiGenerationPrompt}'");
+                Debug.Log($"[WorldBuilding/AI] Placeholder clicked. Prompt='{aiGenerationPrompt}'");
                 GeneratePlaceholderObject();
             }
         }
@@ -1575,7 +1561,24 @@ namespace SessionReview
             return ContainsWorldBuildingSidePanel(guiPoint);
         }
 
+        public bool IsPointerOverWorldBuildingUi()
+        {
+            return inWorldBuildingMode && IsMouseOverWorldBuildingUi();
+        }
+
         private bool ContainsWorldBuildingSidePanel(Vector2 guiPoint)
+        {
+            GetWorldBuildingSidePanelRects(
+                out Rect generateRect,
+                out Rect charactersRect,
+                out Rect objectsRect);
+
+            return generateRect.Contains(guiPoint) ||
+                   charactersRect.Contains(guiPoint) ||
+                   objectsRect.Contains(guiPoint);
+        }
+
+        private void GetWorldBuildingSidePanelRects(out Rect generateRect, out Rect charactersRect, out Rect objectsRect)
         {
             float panelWidth = GetWorldBuildingSidePanelWidth();
             IReadOnlyList<WorldBuildingSpawnUiRow> objectRows = WorldBuildingSpawnLibrary.LastObjectUiRows;
@@ -1591,21 +1594,47 @@ namespace SessionReview
                 worldBuildingAddObjectsMinimized,
                 WorldBuildingAddObjectsExpandedHeaderHeight);
 
+            float maxStackHeight = Mathf.Max(
+                WorldBuildingSidePanelHeaderHeight,
+                Screen.height - WorldBuildingSidePanelMargin * 2f);
+            float stackHeight = generateHeight + charactersHeight + objectsHeight + WorldBuildingSidePanelGap * 2f;
+            float overflow = Mathf.Max(0f, stackHeight - maxStackHeight);
+            ReducePanelHeightForOverflow(
+                ref objectsHeight,
+                worldBuildingAddObjectsMinimized,
+                WorldBuildingAddObjectsExpandedHeaderHeight,
+                ref overflow);
+            ReducePanelHeightForOverflow(
+                ref charactersHeight,
+                worldBuildingAddCharactersMinimized,
+                WorldBuildingSidePanelHeaderHeight,
+                ref overflow);
+
             float yBottom = Screen.height - WorldBuildingSidePanelMargin;
             float x = Screen.width - panelWidth - WorldBuildingSidePanelMargin;
 
-            Rect generateRect = new Rect(x, yBottom - generateHeight, panelWidth, generateHeight);
-            if (generateRect.Contains(guiPoint))
-                return true;
+            generateRect = new Rect(x, yBottom - generateHeight, panelWidth, generateHeight);
 
             yBottom = generateRect.y - WorldBuildingSidePanelGap;
-            Rect charactersRect = new Rect(x, yBottom - charactersHeight, panelWidth, charactersHeight);
-            if (charactersRect.Contains(guiPoint))
-                return true;
+            charactersRect = new Rect(x, yBottom - charactersHeight, panelWidth, charactersHeight);
 
             yBottom = charactersRect.y - WorldBuildingSidePanelGap;
-            Rect objectsRect = new Rect(x, yBottom - objectsHeight, panelWidth, objectsHeight);
-            return objectsRect.Contains(guiPoint);
+            objectsRect = new Rect(x, yBottom - objectsHeight, panelWidth, objectsHeight);
+        }
+
+        private static void ReducePanelHeightForOverflow(
+            ref float height,
+            bool minimized,
+            float minHeight,
+            ref float overflow)
+        {
+            if (overflow <= 0f || minimized)
+                return;
+
+            float availableReduction = Mathf.Max(0f, height - minHeight);
+            float reduction = Mathf.Min(availableReduction, overflow);
+            height -= reduction;
+            overflow -= reduction;
         }
 
         private void DrawSpawnPreviewCard(Rect rect, string label, string spawnId, Texture2D thumbnail)

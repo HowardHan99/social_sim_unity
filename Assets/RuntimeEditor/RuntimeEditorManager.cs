@@ -1416,9 +1416,9 @@ public class RuntimeEditorManager : MonoBehaviour
             return;
 
         var box = root.AddComponent<BoxCollider>();
-        if (TryGetRendererBounds(root, out Bounds bounds))
+        if (TryGetLocalRendererBounds(root, out Bounds bounds))
         {
-            box.center = root.transform.InverseTransformPoint(bounds.center);
+            box.center = bounds.center;
             box.size = bounds.size;
         }
         else
@@ -1541,6 +1541,50 @@ public class RuntimeEditorManager : MonoBehaviour
             else
             {
                 bounds.Encapsulate(renderer.bounds);
+            }
+        }
+
+        return hasBounds;
+    }
+
+    static bool TryGetLocalRendererBounds(GameObject root, out Bounds bounds)
+    {
+        bounds = default;
+        bool hasBounds = false;
+
+        foreach (Renderer renderer in root.GetComponentsInChildren<Renderer>(true))
+        {
+            if (renderer == null)
+                continue;
+
+            Bounds localBounds = new Bounds(
+                root.transform.InverseTransformPoint(renderer.bounds.center),
+                Vector3.zero);
+
+            Vector3 extents = renderer.bounds.extents;
+            Vector3[] corners =
+            {
+                renderer.bounds.center + new Vector3(-extents.x, -extents.y, -extents.z),
+                renderer.bounds.center + new Vector3(-extents.x, -extents.y, extents.z),
+                renderer.bounds.center + new Vector3(-extents.x, extents.y, -extents.z),
+                renderer.bounds.center + new Vector3(-extents.x, extents.y, extents.z),
+                renderer.bounds.center + new Vector3(extents.x, -extents.y, -extents.z),
+                renderer.bounds.center + new Vector3(extents.x, -extents.y, extents.z),
+                renderer.bounds.center + new Vector3(extents.x, extents.y, -extents.z),
+                renderer.bounds.center + new Vector3(extents.x, extents.y, extents.z)
+            };
+
+            for (int i = 0; i < corners.Length; i++)
+                localBounds.Encapsulate(root.transform.InverseTransformPoint(corners[i]));
+
+            if (!hasBounds)
+            {
+                bounds = localBounds;
+                hasBounds = true;
+            }
+            else
+            {
+                bounds.Encapsulate(localBounds);
             }
         }
 
@@ -1736,6 +1780,13 @@ public class RuntimeEditorManager : MonoBehaviour
 
     bool IsClickOnUI()
     {
+        if (SessionReviewManager.Instance != null &&
+            SessionReviewManager.Instance.IsPointerOverWorldBuildingUi())
+        {
+            Debug.Log("[Raycast] Pointer is over world-building UI. Ignoring click.");
+            return true;
+        }
+
         if (EventSystem.current == null) return false;
 
         if (EventSystem.current.IsPointerOverGameObject()) return true;
