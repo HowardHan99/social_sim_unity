@@ -101,6 +101,10 @@ Assets/openaiapikey.txt.meta
 /Assets/Samples/Unity Render Streaming
 /Assets/Samples
 *.rerunstate
-*.meta
+# NOTE: Do NOT add a blanket "*.meta" here. It comes after the
+# "!/[Aa]ssets/**/*.meta" rule above and, being the last match, re-ignores
+# every Unity asset .meta — dropping all GUIDs. That causes "Missing
+# Prefab/Script with guid" errors and prefab children spawning at the wrong
+# (default) transform, e.g. the wheelchair separating from the seated body.
 Assets/Rerun
 /SessionLogs
