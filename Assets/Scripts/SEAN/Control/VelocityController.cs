@@ -32,6 +32,10 @@ namespace SEAN.Control
         public float manualLinearSpeed = 0.8f;
         public float manualAngularSpeed = 20.0f;
 
+        [Header("Speed Scaling (live scenario tuning)")]
+        [Tooltip("Live speed multiplier for this robot. Scales the commanded linear+angular velocity (auto ROS cmd_vel and manual) so the same path is driven faster/slower. 1 = unchanged. Set live from the Agent Speed overlay.")]
+        public float speedScale = 1.0f;
+
         [Header("Startup Control")]
         public bool startInManualMode = false;
 
@@ -73,6 +77,9 @@ namespace SEAN.Control
         public bool enforceManualSpeedLimit = true;
         public float manualMaxPlanarSpeed = 0.8f;
         public bool useDirectManualRotation = true;
+
+        [Tooltip("Read Arrow keys instead of WASD for manual driving. Set automatically so the human's role uses WASD and the other manual role uses arrows.")]
+        public bool manualUseArrowKeys = false;
 
         // Debug fields to show last received ROS commands in Inspector
         [Header("Debug ROS Speeds (Read-Only)")]
@@ -199,6 +206,8 @@ namespace SEAN.Control
 
         [Header("On-Screen Debug Overlay")]
         public bool showOnScreenDebug = true;
+        [Tooltip("Log verbose [TURNDIAG] turning diagnostics to the Console. Off by default; it spams while turning.")]
+        public bool logTurnDiagnostics = false;
         public KeyCode debugOverlayToggleKey = KeyCode.F1;
         public Vector2 debugOverlayPosition = new Vector2(15f, 15f);
         public Vector2 debugOverlaySize = new Vector2(620f, 180f);
@@ -216,6 +225,10 @@ namespace SEAN.Control
         private readonly HashSet<string> rosMonitorSubscribedTopics = new HashSet<string>();
         private float lastSBrakePressRealtime = -1f;
         private bool JoystickPresent => enableJoystickManualControl && UnityEngine.Input.GetJoystickNames().Length > 0;
+        // Only the human's active role drives with the joystick. The other manual role
+        // is remapped to the arrow keys (manualUseArrowKeys) and must never read the
+        // shared joystick, otherwise both agents move together.
+        private bool ManualUsesJoystick => JoystickPresent && !manualUseArrowKeys;
         private float joystickLinearCenter;
         private float joystickAngularCenter;
         private bool joystickCenterCaptured;
@@ -299,7 +312,7 @@ namespace SEAN.Control
 
             float joystickLinearInput = 0f;
             float joystickAngularInput = 0f;
-            if (JoystickPresent)
+            if (ManualUsesJoystick)
             {
                 if (!joystickCenterCaptured)
                     CaptureJoystickCenter();
@@ -321,7 +334,7 @@ namespace SEAN.Control
                 manualDesiredLin = manualLinearSpeed * joystickLinearInput;
                 manualDesiredAng = manualAngularSpeed * joystickAngularInput;
 
-                if (Mathf.Abs(joystickAngularInput) > 0.01f && Time.frameCount % 15 == 0)
+                if (logTurnDiagnostics && Mathf.Abs(joystickAngularInput) > 0.01f && Time.frameCount % 15 == 0)
                     Debug.Log($"[TURNDIAG] MANUAL-path rawAng={rawAngularInput:F3} proc={joystickAngularInput:F3} manualAngularSpeed={manualAngularSpeed} desiredAng={manualDesiredAng:F3}", this);
             }
             else
@@ -334,9 +347,9 @@ namespace SEAN.Control
                 DebugJoystickAngularCenter = 0f;
             }
 
-            bool wHeld = UnityEngine.Input.GetKey(KeyCode.W);
-            bool sHeld = UnityEngine.Input.GetKey(KeyCode.S);
-            bool sPressed = UnityEngine.Input.GetKeyDown(KeyCode.S);
+            bool wHeld = ManualKeyHeld(KeyCode.W, KeyCode.UpArrow);
+            bool sHeld = ManualKeyHeld(KeyCode.S, KeyCode.DownArrow);
+            bool sPressed = ManualKeyDown(KeyCode.S, KeyCode.DownArrow);
             float nowRealtime = Time.realtimeSinceStartup;
 
             if (!sHeld &&
@@ -384,11 +397,11 @@ namespace SEAN.Control
                 }
             }
 
-            if (UnityEngine.Input.GetKey(KeyCode.A))
+            if (ManualKeyHeld(KeyCode.A, KeyCode.LeftArrow))
             {
                 manualDesiredAng = manualAngularSpeed;
             }
-            else if (UnityEngine.Input.GetKey(KeyCode.D))
+            else if (ManualKeyHeld(KeyCode.D, KeyCode.RightArrow))
             {
                 manualDesiredAng = -manualAngularSpeed;
             }
@@ -537,10 +550,16 @@ namespace SEAN.Control
                 appliedAngVelocity *= ratio;
             }
 
+            // Live scenario speed scaling: scale linear and angular together so the
+            // commanded arc (path shape) is preserved and only the traversal speed changes.
+            float effectiveSpeedScale = Mathf.Max(0f, speedScale);
+            appliedLinVelocity *= effectiveSpeedScale;
+            appliedAngVelocity *= effectiveSpeedScale;
+
             DebugAppliedLinSpeed = appliedLinVelocity;
             DebugAppliedAngSpeed = appliedAngVelocity;
 
-            if (Mathf.Abs(appliedAngVelocity) > 0.01f && Time.frameCount % 15 == 0)
+            if (logTurnDiagnostics && Mathf.Abs(appliedAngVelocity) > 0.01f && Time.frameCount % 15 == 0)
                 Debug.Log($"[TURNDIAG] APPLY manualActive={manualControlActive} bypass={bypassUnityVelocityPostProcessing} target={targetAngVelocity:F3} applied={appliedAngVelocity:F3} directRot={(manualControlActive && useDirectManualRotation)}", this);
 
             if (manualControlActive && useDirectManualRotation)
@@ -574,11 +593,14 @@ namespace SEAN.Control
 
             if (manualControlActive && enforceManualSpeedLimit)
             {
+                // Raise the manual speed cap with the live scale so the slider stays
+                // effective past the default manual limit.
+                float scaledManualMaxPlanarSpeed = manualMaxPlanarSpeed * effectiveSpeedScale;
                 Vector3 planarVelocity = Vector3.ProjectOnPlane(rb.velocity, Vector3.up);
                 float planarSpeed = planarVelocity.magnitude;
-                if (planarSpeed > manualMaxPlanarSpeed)
+                if (planarSpeed > scaledManualMaxPlanarSpeed)
                 {
-                    Vector3 clampedPlanarVelocity = planarVelocity.normalized * manualMaxPlanarSpeed;
+                    Vector3 clampedPlanarVelocity = planarVelocity.normalized * scaledManualMaxPlanarSpeed;
                     rb.velocity = new Vector3(clampedPlanarVelocity.x, rb.velocity.y, clampedPlanarVelocity.z);
                 }
             }
@@ -790,6 +812,18 @@ namespace SEAN.Control
             if (axisName == "RVertical")
                 return "LogitechThrottle";
             return axisName;
+        }
+
+        // Manual driving reads WASD normally, or the arrow keys when this robot is not
+        // the human's active role (so a robot + PWD both in manual don't move together).
+        private bool ManualKeyHeld(KeyCode wasdKey, KeyCode arrowKey)
+        {
+            return UnityEngine.Input.GetKey(manualUseArrowKeys ? arrowKey : wasdKey);
+        }
+
+        private bool ManualKeyDown(KeyCode wasdKey, KeyCode arrowKey)
+        {
+            return UnityEngine.Input.GetKeyDown(manualUseArrowKeys ? arrowKey : wasdKey);
         }
 
         private float GetAxisSafely(string axisName)
@@ -1166,6 +1200,14 @@ namespace SEAN.Control
 
             startInManualMode = isManual;
             manualControlActive = isManual;
+
+            // Hide the live ROS-planned path while a human is driving -- in manual mode the
+            // planner's trajectory is irrelevant and just clutters the view. Restored on the
+            // switch back to ROS/auto control. Tracked as an independent suppression reason so
+            // it doesn't fight the session-review suppression.
+            if (planVisualizer != null)
+                planVisualizer.SetRenderingSuppressed(
+                    global::SEAN.Display.PlanVisualizer.SuppressionReason.ManualControl, manualControlActive);
 
             if (manualControlActive)
             {

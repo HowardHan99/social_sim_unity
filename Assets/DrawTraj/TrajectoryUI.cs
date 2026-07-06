@@ -25,6 +25,9 @@ public class TrajectoryUI : MonoBehaviour
     private GUIStyle debugStyle;
     private bool stylesBuilt;
 
+    // Draggable/resizable/closable chrome for the default control buttons.
+    private readonly SessionReview.ReviewPanels.State controlsPanel = new SessionReview.ReviewPanels.State();
+
     // Bounding rects of the draw-mode control panel and the touch-debug box (GUI space,
     // origin top-left). TrajectoryManager queries BlocksInputAt() so taps on these don't
     // also draw or pan the camera.
@@ -58,64 +61,58 @@ public class TrajectoryUI : MonoBehaviour
             return;
         }
 
-        float x = anchor.x;
-        float y = Screen.height + anchor.y;
+        // Default control panel: draggable / resizable / closable window chrome.
+        // The old floating "Play=.. FollowMode=.." diagnostic HUD now lives inside
+        // the review Metrics panel (MetricsOverlayUI).
+        float defaultHeight = SessionReview.ReviewPanels.TitleH + buttonHeight * 4f + buttonSpacing * 4f + 8f;
+        Rect defaultRect = new Rect(24f, Screen.height - defaultHeight - 24f, buttonWidth + 24f, defaultHeight);
+        if (SessionReview.ReviewPanels.Begin(controlsPanel, this, "Trajectory", defaultRect, out Rect content))
+            DrawControlsPanelBody(content);
+        SessionReview.ReviewPanels.End(controlsPanel);
+    }
 
+    private void DrawControlsPanelBody(Rect content)
+    {
         bool hasFollowTrajectory = manager.HasFollowTrajectory;
         string showHideLabel = "Show/Hide Traj";
         string drawLabel = "Draw Traj";
         string followLabel = manager.IsFollowMode ? "Stop Follow" : "Follow Traj";
 
-        bool showSpeedRow = manager.IsFollowMode && hasFollowTrajectory;
-        float speedRowHeight = showSpeedRow ? (buttonHeight + buttonSpacing) : 0f;
-        float panelHeightButtons = buttonHeight * 3f + buttonSpacing * 2f + 24f + speedRowHeight;
-        GUI.Box(new Rect(x - 12f, y - 12f, buttonWidth + 24f, panelHeightButtons), GUIContent.none, panelStyle);
+        // Responsive: buttons and text scale with the panel size.
+        float scale = controlsPanel.FontScale;
+        var bStyle = new GUIStyle(buttonStyle) { fontSize = Mathf.RoundToInt(17f * scale) };
+        var bActiveStyle = new GUIStyle(buttonActiveStyle) { fontSize = Mathf.RoundToInt(17f * scale) };
+        var hStyle = new GUIStyle(hintStyle) { fontSize = Mathf.RoundToInt(15f * scale) };
 
-        if (GUI.Button(new Rect(x, y, buttonWidth, buttonHeight), showHideLabel, buttonStyle))
+        float bh = buttonHeight * scale;
+        float x = content.x;
+        float y = content.y;
+        float w = content.width;
+        float step = bh + buttonSpacing * scale;
+
+        if (GUI.Button(new Rect(x, y, w, bh), showHideLabel, bStyle))
             manager.ToggleVisibility();
 
-        if (GUI.Button(new Rect(x, y + buttonHeight + buttonSpacing, buttonWidth, buttonHeight), drawLabel, buttonStyle))
+        if (GUI.Button(new Rect(x, y + step, w, bh), drawLabel, bStyle))
             manager.EnterDrawMode();
 
         GUI.enabled = hasFollowTrajectory;
-        if (GUI.Button(
-            new Rect(x, y + (buttonHeight + buttonSpacing) * 2f, buttonWidth, buttonHeight),
-            followLabel,
-            manager.IsFollowMode ? buttonActiveStyle : buttonStyle))
+        if (GUI.Button(new Rect(x, y + step * 2f, w, bh), followLabel,
+            manager.IsFollowMode ? bActiveStyle : bStyle))
         {
             manager.ToggleFollowMode();
         }
         GUI.enabled = true;
 
-        // Diagnostic HUD — positioned below the Export ROI panel (panel occupies
-        // y=70..450 on the right edge), so it stays visible whether Export is open or not.
+        if (manager.IsFollowMode && hasFollowTrajectory)
         {
-            float hudW = 360f;
-            float hudH = 120f;
-            Rect hudRect = new Rect(Screen.width - hudW - 20f, 470f, hudW, hudH);
-            GUI.Box(hudRect, GUIContent.none, panelStyle);
-            string skip = string.IsNullOrEmpty(manager.LastFollowSkipReason) ? "follow OK" : $"follow SKIP: {manager.LastFollowSkipReason}";
-            GUI.Label(new Rect(hudRect.x + 8f, hudRect.y + 4f, hudRect.width - 16f, 22f),
-                $"Play={manager.ReviewIsPlaying}  t={manager.ReviewNormalizedTime:P0}  rate={manager.ReviewPlaybackSpeed:F2}x  toggles={manager.ReviewToggleCount}", hintStyle);
-            GUI.Label(new Rect(hudRect.x + 8f, hudRect.y + 24f, hudRect.width - 16f, 22f),
-                $"FollowMode={manager.IsFollowMode}  HasTraj={manager.HasFollowTrajectory}", hintStyle);
-            GUI.Label(new Rect(hudRect.x + 8f, hudRect.y + 44f, hudRect.width - 16f, 22f),
-                $"dist={manager.LastFollowDistance:F2}m  speed={manager.EffectiveFollowSpeed:F2}m/s", hintStyle);
-            GUI.Label(new Rect(hudRect.x + 8f, hudRect.y + 64f, hudRect.width - 16f, 22f),
-                $"elapsed={manager.LastFollowElapsed:F2}s", hintStyle);
-            GUI.Label(new Rect(hudRect.x + 8f, hudRect.y + 86f, hudRect.width - 16f, 30f),
-                skip, hintStyle);
-        }
-
-        if (showSpeedRow)
-        {
-            float rowY = y + (buttonHeight + buttonSpacing) * 3f;
-            float labelW = 70f;
-            float sliderW = buttonWidth - labelW;
+            float rowY = y + step * 3f;
+            float labelW = 70f * scale;
+            float sliderW = Mathf.Max(40f, w - labelW);
             float speed = manager.EffectiveFollowSpeed;
-            GUI.Label(new Rect(x, rowY, labelW, buttonHeight), $"{speed:0.00} m/s", hintStyle);
+            GUI.Label(new Rect(x, rowY, labelW, bh), $"{speed:0.00} m/s", hStyle);
             float mult = GUI.HorizontalSlider(
-                new Rect(x + labelW, rowY + buttonHeight * 0.35f, sliderW, buttonHeight),
+                new Rect(x + labelW, rowY + bh * 0.35f, sliderW, bh),
                 manager.FollowSpeedMultiplier,
                 manager.followSpeedMultiplierMin,
                 manager.followSpeedMultiplierMax);

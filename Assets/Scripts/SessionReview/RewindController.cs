@@ -84,11 +84,13 @@ namespace SessionReview
 
         private MultiAgentTrajectoryRenderer trajectoryRenderer;
         private TrajectoryManager drawTrajectoryManager;
+        private GhostRobotComparison ghostComparison;
 
         [Header("Plan Path")]
         [SerializeField] private Color activePlanColor = new Color(0.2f, 1f, 0.3f, 0.9f);
         [SerializeField] private float activePlanWidth = 0.14f;
         private LineRenderer activePlanLine;
+        private const string ActivePlanLegendKey = "active_plan";
 
         [Header("Signal Replay")]
         [SerializeField] private float lightingReplayHoldSeconds = 1.1f;
@@ -140,6 +142,17 @@ namespace SessionReview
             rewindComfortBlur = gameObject.GetComponent<ComfortMotionBlur>();
             if (rewindComfortBlur == null)
                 rewindComfortBlur = gameObject.AddComponent<ComfortMotionBlur>();
+
+            ghostComparison = gameObject.GetComponent<GhostRobotComparison>();
+            if (ghostComparison == null)
+                ghostComparison = gameObject.AddComponent<GhostRobotComparison>();
+        }
+
+        /// <summary>Toggle the Ghost-Robot proxemics comparison (drawn / planned / past-trial).</summary>
+        public void ToggleGhostComparison()
+        {
+            if (ghostComparison != null)
+                ghostComparison.ToggleGhosts();
         }
 
         public void EnterRewind(TrialRecord trial, StateRecording recording,
@@ -152,6 +165,14 @@ namespace SessionReview
             currentRecording = recording;
             controlModeLog = modeLog;
             trajectoryRenderer = trajRenderer;
+            // Expose the live "active plan" line in the Review Legend so "Hide All"/"Show All"
+            // and its own row can toggle it (UpdateActivePlanPath rebuilds it every frame, so it
+            // can only be governed by a flag the renderer owns, not by disabling it directly).
+            // Default the ROS plan to hidden in review; it stays recorded and can be turned on
+            // from the legend row (or "Show All") when the reviewer wants to see it.
+            if (trajectoryRenderer != null)
+                trajectoryRenderer.RegisterExternalLegendGroup(
+                    ActivePlanLegendKey, "ROS Nav Plan", activePlanColor, initiallyVisible: false);
             drawTrajectoryManager = FindObjectOfType<TrajectoryManager>();
             timeOffset = recordingTimeOffset;
             signalAnnotations = annotations ?? trial.signalAnnotations ?? new List<SignalAnnotation>();
@@ -192,8 +213,71 @@ namespace SessionReview
             isPlaying = false;
             playbackSpeed = 1f;
 
+            ConfigureGhostComparison();
+
             ApplyStateAtCurrentTime();
             SetPerspective(PerspectiveMode.TopDown);
+        }
+
+        /// <summary>
+        /// Assembles the three ghost sources for the proxemics comparison: the drawn path
+        /// (TrajectoryManager), the most complete recorded ROS nav plan for this trial, and
+        /// the previous trial's window so the past-trial ghost can be sampled by normalized time.
+        /// </summary>
+        private void ConfigureGhostComparison()
+        {
+            if (ghostComparison == null)
+                return;
+
+            var sean = SEAN.SEAN.instance;
+            string robotId = (sean != null && sean.robot != null && sean.robot.base_link != null)
+                ? SessionTracker.GetObjectId(sean.robot.base_link)
+                : null;
+
+            // Reference planned route: the longest recorded plan snapshot in this trial's
+            // window (the most complete route to the goal).
+            Vector3[] plannedRoute = null;
+            if (liveRecorder != null)
+            {
+                var snaps = liveRecorder.GetPlanSnapshots(RecStartTime, RecEndTime);
+                float bestLen = 0f;
+                foreach (var snap in snaps)
+                {
+                    if (snap.positions == null || snap.positions.Length < 2)
+                        continue;
+                    float len = 0f;
+                    for (int i = 1; i < snap.positions.Length; i++)
+                        len += Vector3.Distance(snap.positions[i - 1], snap.positions[i]);
+                    if (len > bestLen)
+                    {
+                        bestLen = len;
+                        plannedRoute = snap.positions;
+                    }
+                }
+            }
+
+            // Previous trial in this session (same in-memory recorder timelines).
+            bool hasPrev = false;
+            float prevRecStart = 0f;
+            float prevRecDur = 0f;
+            var archive = FindObjectOfType<TrialDataArchive>();
+            if (archive != null)
+            {
+                int idx = archive.Trials.IndexOf(currentTrial);
+                if (idx > 0)
+                {
+                    var prev = archive.GetTrial(idx - 1);
+                    if (prev != null && prev.Duration > 0f)
+                    {
+                        hasPrev = true;
+                        prevRecStart = prev.startTime - timeOffset;
+                        prevRecDur = prev.Duration;
+                    }
+                }
+            }
+
+            ghostComparison.Begin(this, liveRecorder, drawTrajectoryManager, robotId,
+                plannedRoute, hasPrev, prevRecStart, prevRecDur);
         }
 
         public void ExitRewind()
@@ -220,6 +304,8 @@ namespace SessionReview
 
             ClearTrails();
             ClearReplayBehaviors();
+            if (ghostComparison != null)
+                ghostComparison.End();
             transformCache.Clear();
             RestoreLiveCameraDrivers();
             currentTrial = null;
@@ -524,7 +610,7 @@ namespace SessionReview
                 lastTriggeredVlmAnnotationIndex = -1;
                 lastTriggeredLightingAnnotationIndex = -1;
                 activeLightingReplayCandidates.Clear();
-                Debug.Log($"[SessionReview] Replay moved backward to t={currentTime:F2}; reset signal replay state.");
+                SessionReview.SessionReviewLog.Log($"[SessionReview] Replay moved backward to t={currentTime:F2}; reset signal replay state.");
                 lastEvaluatedSignalTime = currentTime;
                 return;
             }
@@ -570,7 +656,7 @@ namespace SessionReview
                 if (activeLightingReplayCandidates.Contains(i))
                     continue;
 
-                Debug.Log($"[SessionReview] LightingAnnotation entered replay window at t={currentTime:F2} (annotation t={annotation.timestamp:F2}, type={annotation.type}).");
+                SessionReview.SessionReviewLog.Log($"[SessionReview] LightingAnnotation entered replay window at t={currentTime:F2} (annotation t={annotation.timestamp:F2}, type={annotation.type}).");
                 TriggerLightingReplay(annotation, i);
                 activeLightingReplayCandidates.Add(i);
             }
@@ -590,7 +676,7 @@ namespace SessionReview
             if (lastTriggeredLightingAnnotationIndex == annotationIndex)
                 return;
 
-            Debug.Log($"[SessionReview] LightingAnnotation replay trigger at t={currentTime:F2} for annotation #{annotationIndex} ({annotation.type}).");
+            SessionReview.SessionReviewLog.Log($"[SessionReview] LightingAnnotation replay trigger at t={currentTime:F2} for annotation #{annotationIndex} ({annotation.type}).");
             switch (annotation.type)
             {
                 case SignalAnnotationType.LightingLeft:
@@ -699,7 +785,7 @@ namespace SessionReview
 
             manualLightingReplayTestActive = !manualLightingReplayTestActive;
             reviewSignalLightController.SetReviewSignalState(manualLightingReplayTestActive, manualLightingReplayTestActive);
-            Debug.Log($"[SessionReview] Lighting replay test toggled: active={manualLightingReplayTestActive}.");
+            SessionReview.SessionReviewLog.Log($"[SessionReview] Lighting replay test toggled: active={manualLightingReplayTestActive}.");
         }
 
         public void PlayAudioReplayTest()
@@ -717,7 +803,7 @@ namespace SessionReview
             if (string.IsNullOrWhiteSpace(speechText))
                 speechText = "Replay audio test.";
 
-            Debug.Log($"[SessionReview] Audio replay test speaking: {speechText}");
+            SessionReview.SessionReviewLog.Log($"[SessionReview] Audio replay test speaking: {speechText}");
             reviewTtsManager.PlaySpeech(speechText);
         }
 
@@ -1451,9 +1537,13 @@ namespace SessionReview
         {
             if (liveRecorder == null) return;
 
+            // Honor the Review Legend toggle ("Hide All"/"Show All" or the plan's own row).
+            bool planVisible = trajectoryRenderer == null ||
+                               trajectoryRenderer.IsExternalGroupVisible(ActivePlanLegendKey);
+
             Vector3[] plan = liveRecorder.GetPlanAtTime(currentTime);
 
-            if (plan == null || plan.Length < 2)
+            if (!planVisible || plan == null || plan.Length < 2)
             {
                 if (activePlanLine != null)
                     activePlanLine.enabled = false;
@@ -1503,37 +1593,96 @@ namespace SessionReview
             }
         }
 
+        private GUIStyle progressBoxStyle;
+        private GUIStyle progressStatusStyle;
+        private GUIStyle progressHintStyle;
+        private Texture2D progressBgTex;
+        private bool progressStylesBuilt;
+
+        // When false, the status line ("Speed / View / Trails") and controls hint are
+        // hidden and the bar collapses to just the wide scrubber.
+        private bool showReplayInfo = true;
+        public void ToggleReplayInfo() => showReplayInfo = !showReplayInfo;
+
+        // Content is capped to this width and centered so the bar reads as a control
+        // card instead of stretching edge-to-edge (with huge dead gaps) on wide screens.
+        private const float ProgressBarMaxWidth = 1600f;
+
+        private void EnsureProgressBarStyles()
+        {
+            if (progressStylesBuilt)
+                return;
+            progressStylesBuilt = true;
+
+            progressBgTex = new Texture2D(1, 1);
+            progressBgTex.SetPixel(0, 0, new Color(0.06f, 0.07f, 0.09f, 0.94f));
+            progressBgTex.Apply();
+
+            progressBoxStyle = new GUIStyle(GUI.skin.box)
+            {
+                border = new RectOffset(0, 0, 0, 0),
+                padding = new RectOffset(0, 0, 0, 0),
+                normal = { background = progressBgTex }
+            };
+            progressStatusStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 21,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleCenter,
+                normal = { textColor = new Color(0.94f, 0.96f, 1f) }
+            };
+            progressHintStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 14,
+                alignment = TextAnchor.MiddleCenter,
+                normal = { textColor = new Color(0.62f, 0.68f, 0.76f) }
+            };
+        }
+
         void OnGUI()
         {
             if (!isRewinding) return;
 
-            float barWidth = Screen.width - 40f;
-            float barY = Screen.height - 70f;
+            EnsureProgressBarStyles();
 
-            GUI.Box(new Rect(15, barY - 5, barWidth + 10, 65), "");
+            // Centered control card, capped width so it never stretches edge-to-edge.
+            // Collapses to just the scrubber when the info text is hidden.
+            float barHeight = showReplayInfo ? 98f : 40f;
+            float panelW = Mathf.Min(Screen.width - 40f, ProgressBarMaxWidth);
+            float panelX = (Screen.width - panelW) * 0.5f;
+            float panelY = Screen.height - barHeight - 14f;
 
+            GUI.Box(new Rect(panelX, panelY, panelW, barHeight), GUIContent.none, progressBoxStyle);
+
+            float innerX = panelX + 28f;
+            float innerW = panelW - 56f;
+
+            // Scrubber. Vertically centered when the info text is hidden.
+            float sliderY = showReplayInfo ? panelY + 16f : panelY + (barHeight - 22f) * 0.5f;
             float newT = GUI.HorizontalSlider(
-                new Rect(20, barY, barWidth, 20),
+                new Rect(innerX, sliderY, innerW, 22f),
                 NormalizedTime, 0f, 1f);
-
             if (Mathf.Abs(newT - NormalizedTime) > 0.001f)
                 SetNormalizedTime(newT);
 
-            float labelY = barY + 24f;
-            float elapsed = currentTime - RecStartTime;
-            string timeStr = $"{elapsed:F1}s / {RecDuration:F1}s";
-            string speedStr = $"{playbackSpeed:F2}x";
-            string playStr = isPlaying ? "||" : ">";
-            string perspStr = perspectiveMode.ToString();
-            string trailStr = showTrails ? "Trails:ON" : "Trails:OFF";
-            string controlsStr = perspectiveMode == PerspectiveMode.FreeCam
-                ? "RMB:Look  MMB:Pan  WASD:Move  Q/E:Up/Down  Wheel:Zoom  Shift:Fast  Esc:Exit"
-                : "Space:Play  Left/Right:Step  [/]:Speed/Trials  F1-F5:View  G:Trails  Esc:Exit";
+            if (showReplayInfo)
+            {
+                // Single centered status line with clear spacing between fields.
+                float elapsed = currentTime - RecStartTime;
+                const string sep = "        ";
+                string status =
+                    $"{(isPlaying ? "||" : ">")}  {elapsed:F1}s / {RecDuration:F1}s{sep}" +
+                    $"Speed  {playbackSpeed:F2}x{sep}" +
+                    $"View  {perspectiveMode}{sep}" +
+                    $"Trails  {(showTrails ? "ON" : "OFF")}";
+                GUI.Label(new Rect(innerX, panelY + 44f, innerW, 28f), status, progressStatusStyle);
 
-            GUI.Label(new Rect(20, labelY, barWidth, 20),
-                $"{playStr} {timeStr}  Speed:{speedStr}  [{perspStr}]  {trailStr}");
-            GUI.Label(new Rect(20, labelY + 16, barWidth, 20),
-                controlsStr);
+                // Controls hint, centered below.
+                string controlsStr = perspectiveMode == PerspectiveMode.FreeCam
+                    ? "RMB Look     MMB Pan     WASD Move     Q/E Up-Down     Wheel Zoom     Shift Fast     I Info     Esc Exit"
+                    : "Space Play     Left/Right Step     [ / ] Speed & Trials     F1-F5 View     G Trails     F6 Ghosts     I Info     Esc Exit";
+                GUI.Label(new Rect(innerX, panelY + 76f, innerW, 20f), controlsStr, progressHintStyle);
+            }
 
             if (showSignalReplayStatus)
                 DrawSignalReplayStatus();

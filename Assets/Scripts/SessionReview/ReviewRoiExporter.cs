@@ -207,7 +207,7 @@ namespace SessionReview
 
             string jsonPath = Path.Combine(exportFolder, "review_roi_export.json");
             File.WriteAllText(jsonPath, JsonUtility.ToJson(data, true));
-            Debug.Log($"[SessionReview] Review ROI export saved to: {exportFolder}");
+            SessionReview.SessionReviewLog.Log($"[SessionReview] Review ROI export saved to: {exportFolder}");
             return exportFolder;
         }
 

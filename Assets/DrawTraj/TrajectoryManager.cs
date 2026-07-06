@@ -400,6 +400,52 @@ public class TrajectoryManager : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// The path currently being drawn, for the live Ghost-Robot preview while in draw
+    /// mode: the in-progress stroke if one is active, else the most recent finished
+    /// stroke this session. Returns false when nothing has been drawn yet (callers then
+    /// fall back to the saved follow-trajectory).
+    /// </summary>
+    public bool TryGetLiveDrawnPath(out Vector3[] points)
+    {
+        points = null;
+
+        if (_activeRenderer != null && _activeRenderer.Points != null && _activeRenderer.Points.Count >= 2)
+        {
+            points = _activeRenderer.Points.ToArray();
+            return true;
+        }
+
+        for (int i = _sessionRenderers.Count - 1; i >= 0; i--)
+        {
+            var r = _sessionRenderers[i];
+            if (r != null && r.Points != null && r.Points.Count >= 2)
+            {
+                points = r.Points.ToArray();
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Evaluates a pose along the drawn follow-trajectory at a normalized progress
+    /// (0 = start, 1 = end). Used by the review Ghost-Robot comparison to place a
+    /// ghost on the drawn path in lockstep with the replay clock. Read-only: does not
+    /// move the real robot or require Follow mode to be on.
+    /// </summary>
+    public bool TryEvaluateFollowPoseAtNormalized(float normalized, out Vector3 position, out Quaternion rotation)
+    {
+        position = Vector3.zero;
+        rotation = Quaternion.identity;
+        if (!HasFollowTrajectory)
+            return false;
+
+        float distance = Mathf.Clamp01(normalized) * _followTrajectoryLength;
+        return TryEvaluateFollowPoseAtDistance(distance, out position, out rotation);
+    }
+
     public bool ApplyFollowTrajectoryToRobot(float elapsedSeconds)
     {
         if (!IsFollowMode)

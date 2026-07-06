@@ -262,6 +262,7 @@ namespace SEAN.Scenario.Agents
             manualCtrl.startInManualMode = SessionReview.SessionOnboardingSettings.PwdStartupControl == SessionReview.StartupControlMode.Manual;
 
             AttachCameraToHead(avatarObject);
+            AttachPlayerMiniScreens(avatarObject);
 
             // Disable the Agent_X scene object since PWDPlayer is independent
             gameObject.SetActive(false);
@@ -396,7 +397,7 @@ namespace SEAN.Scenario.Agents
                 }
             }
 
-            Vector3 thirdPersonOffset = new Vector3(0f, 1.4f, -2.2f);
+            Vector3 thirdPersonOffset = new Vector3(0f, 1.9f, -1.5f);
             Vector3 spawnPos = avatar.transform.position + avatar.transform.rotation * thirdPersonOffset;
 
             if (wheelchairCam != null)
@@ -444,6 +445,66 @@ namespace SEAN.Scenario.Agents
 
             foreach (var camScript in avatar.GetComponentsInChildren<IVI.CameraScript>(true))
                 camScript.allowMouseScrollZoom = false;
+        }
+
+        // Player-side equivalent of the robot's two on-screen mini views
+        // (Robot.camera_overhead + Robot.camera_first, see OverheadCamera.prefab).
+        // Adds a top-down and a first-person panel in the top corners. They are
+        // created DISABLED on the main display (0); SessionReviewManager owns their
+        // lifecycle: ActivatePwdCameraAsMain() enables them (keeping display 0)
+        // while a human drives the PWD, and RestoreRobotGameplayCameras() hides
+        // them for robot play (both recognize the names below). This avoids them
+        // overlapping the robot's own minis during onboarding / robot play.
+        // View-only: no ROS publishing and no extra AudioListener.
+        private void AttachPlayerMiniScreens(GameObject avatar)
+        {
+            // Match the PWD main view, which SessionReviewManager moves to display 0
+            // when the human drives the PWD. Higher depth so the panels draw on top
+            // of the full-screen main view within their rects.
+            const int playerDisplay = 0;
+            const float miniDepth = 20f;
+
+            // Top-left top-down and top-right first-person, matching the robot
+            // layout (OverheadCamera.prefab uses the same 0.03/0.72 rect).
+            var topDownRect = new Rect(0.03f, 0.72f, 0.25f, 0.25f);
+            var firstPersonRect = new Rect(0.72f, 0.72f, 0.25f, 0.25f);
+
+            // Top-down: orthographic, looking straight down, following the avatar.
+            // Parented to the avatar so it tracks position like the robot overhead.
+            GameObject topDownObj = new GameObject("PWDOverheadCamera");
+            topDownObj.transform.SetParent(avatar.transform, false);
+            topDownObj.transform.localPosition = new Vector3(0f, 3.5f, 0f);
+            topDownObj.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+            Camera topDownCam = topDownObj.AddComponent<Camera>();
+            topDownCam.orthographic = true;
+            topDownCam.orthographicSize = 3f;
+            topDownCam.nearClipPlane = 0.3f;
+            topDownCam.farClipPlane = 200f;
+            topDownCam.clearFlags = CameraClearFlags.Skybox;
+            topDownCam.targetDisplay = playerDisplay;
+            topDownCam.rect = topDownRect;
+            topDownCam.depth = miniDepth;
+            topDownCam.enabled = false; // SessionReviewManager enables during PWD play
+
+            // First-person: forward-facing from roughly eye height, offset slightly
+            // ahead so the avatar's own head does not fill the panel. Kept level by
+            // FirstPersonCameraLevel so wheelchair pitch/roll never tilts the view
+            // (it un-parents and drives its own transform, so no static local pose).
+            GameObject firstPersonObj = new GameObject("PWDFirstPersonCamera");
+            firstPersonObj.transform.SetParent(avatar.transform, false);
+            Camera firstPersonCam = firstPersonObj.AddComponent<Camera>();
+            firstPersonCam.fieldOfView = 60f;
+            firstPersonCam.nearClipPlane = 0.1f;
+            firstPersonCam.farClipPlane = 200f;
+            firstPersonCam.clearFlags = CameraClearFlags.Skybox;
+            firstPersonCam.targetDisplay = playerDisplay;
+            firstPersonCam.rect = firstPersonRect;
+            firstPersonCam.depth = miniDepth;
+            firstPersonCam.enabled = false; // SessionReviewManager enables during PWD play
+            var firstPersonLevel = firstPersonObj.AddComponent<IVI.FirstPersonCameraLevel>();
+            firstPersonLevel.eyeOffset = new Vector3(0f, 1.15f, 0.35f);
+
+            Debug.Log($"[PWD] Created top-down + first-person mini screens on '{avatar.name}' (enabled during PWD play)");
         }
 
         private Transform FindBoneRecursive(Transform root, string boneName)

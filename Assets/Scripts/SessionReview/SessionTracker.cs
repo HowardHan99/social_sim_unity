@@ -50,9 +50,14 @@ namespace SessionReview
     {
         public event OnTrialEnded TrialEnded;
 
+        /// <summary>Raised once every primary agent (robot + PWD) has reached its goal,
+        /// so the review UI can stop the session and open the replay.</summary>
+        public event Action SessionFullyComplete;
+
         private SEAN.SEAN sean;
         private bool subscribedToRobotTask;
         private bool tracking;
+        private bool trialArchived;
         private float trialStartTime;
         private ushort trialNumber;
         private string trialName;
@@ -194,6 +199,7 @@ namespace SessionReview
             }
 
             tracking = true;
+            trialArchived = false;
             RegisterAllWithRecorder();
             pendingRosterRefresh = true;
             rosterRefreshUntilTime = Time.time + 1.0f;
@@ -228,7 +234,7 @@ namespace SessionReview
                     trajectoryRecorder.TrackAgent(id, agent.transform);
             }
 
-            Debug.Log($"[SessionReview] Registered {agentRoles.Count} agents with trajectory recorder.");
+            SessionReview.SessionReviewLog.Log($"[SessionReview] Registered {agentRoles.Count} agents with trajectory recorder.");
         }
 
         void Update()
@@ -255,30 +261,58 @@ namespace SessionReview
                 {
                     agentArrivals[id].arrived = true;
                     agentArrivals[id].arrivalTime = Time.time;
+                    // Freeze this agent's trail once it arrives; the rest of the
+                    // roster keeps being logged and keeps navigating.
+                    trajectoryRecorder?.UntrackAgent(id);
                 }
             }
 
-            if (pwdNavigable != null)
+            // Detect goal arrival for the two primary agents by distance to their
+            // actual goals. This is robust even when a waypoint PWD immediately turns
+            // back toward its start (which makes the agent's own CloseEnough() unreliable)
+            // or when the PWD is being driven manually.
+            TrackPwdArrival();
+            TrackRobotArrival();
+
+            EvaluateTrialProgress();
+        }
+
+        // Archive the trial for review the first time any primary agent finishes (or the
+        // controlled task times out), keeping the session running; then, once EVERY primary
+        // agent has arrived, stop the session and hand off to review.
+        private void EvaluateTrialProgress()
+        {
+            if (!tracking) return;
+
+            CountPrimaryArrivals(out int total, out int arrived);
+            bool anyArrived = arrived > 0;
+            bool allArrived = total > 0 && arrived >= total;
+            bool taskEnded = sean != null && sean.robotTask != null && !sean.robotTask.isRunning;
+
+            if (!trialArchived && (anyArrived || taskEnded))
+                ArchiveTrial(anyArrived ? TrialEndReason.Completion : TrialEndReason.Timeout);
+
+            if (trialArchived && allArrived)
             {
-                string pwdId = GetObjectId(pwdController.gameObject);
-                if (!string.IsNullOrEmpty(pwdId) && agentArrivals.ContainsKey(pwdId) && !agentArrivals[pwdId].arrived)
-                {
-                    if (pwdNavigable.CloseEnough())
-                    {
-                        agentArrivals[pwdId].arrived = true;
-                        agentArrivals[pwdId].arrivalTime = Time.time;
-
-                        if (ShouldFinishTrialOnPwdArrival())
-                        {
-                            FinishCurrentTrial(TrialEndReason.Completion);
-                            return;
-                        }
-                    }
-                }
+                tracking = false;
+                SessionReview.SessionReviewLog.Log(
+                    "[SessionReview] All primary agents reached their goals -- stopping session and opening review.");
+                SessionFullyComplete?.Invoke();
             }
+        }
 
-            if (!sean.robotTask.isRunning && tracking)
-                FinishCurrentTrial(TrialEndReason.Timeout);
+        private void CountPrimaryArrivals(out int total, out int arrived)
+        {
+            total = 0;
+            arrived = 0;
+            foreach (var kv in agentRoles)
+            {
+                if (kv.Value != AgentRole.Robot && kv.Value != AgentRole.PWDPlayer)
+                    continue;
+                total++;
+                if (agentArrivals.TryGetValue(kv.Key, out AgentArrivalInfo info) && info.arrived)
+                    arrived++;
+            }
         }
 
         private void RefreshTrackingRosterIfNeeded()
@@ -344,10 +378,22 @@ namespace SessionReview
                 RegisterAllWithRecorder();
         }
 
+        /// <summary>Ends the current trial outright (archive + stop tracking). Used when a
+        /// brand-new task starts while a trial is still active.</summary>
         private void FinishCurrentTrial(TrialEndReason reason)
         {
             if (!tracking) return;
+            ArchiveTrial(reason);
             tracking = false;
+        }
+
+        /// <summary>Snapshots the trial and raises <see cref="TrialEnded"/> so it is archived
+        /// and reviewable. Fires at most once per trial; does not stop tracking, so remaining
+        /// agents keep navigating and being logged.</summary>
+        private void ArchiveTrial(TrialEndReason reason)
+        {
+            if (trialArchived) return;
+            trialArchived = true;
 
             Vector3 robotGoalPosition = GetGoalPosition(sean != null && sean.robotTask != null ? sean.robotTask.robotGoal : null, out bool hasRobotGoalPosition);
             Vector3 playerGoalPosition = GetGoalPosition(sean != null && sean.robotTask != null ? sean.robotTask.playerGoal : null, out bool hasPlayerGoalPosition);
@@ -370,15 +416,87 @@ namespace SessionReview
             TrialEnded?.Invoke(info);
         }
 
+        private void MarkArrived(string id)
+        {
+            if (string.IsNullOrEmpty(id) || !agentArrivals.ContainsKey(id) || agentArrivals[id].arrived)
+                return;
+            agentArrivals[id].arrived = true;
+            agentArrivals[id].arrivalTime = Time.time;
+            // Freeze this agent's trail once it arrives; the rest of the roster keeps moving.
+            trajectoryRecorder?.UntrackAgent(id);
+        }
+
+        private void TrackRobotArrival()
+        {
+            if (sean == null || sean.robotTask == null || sean.robot == null || sean.robot.base_link == null)
+                return;
+
+            GameObject robotGoal = sean.robotTask.robotGoal;
+            if (robotGoal == null)
+                return;
+
+            string robotId = GetRobotObjectId();
+            if (string.IsNullOrEmpty(robotId) || !agentArrivals.ContainsKey(robotId) || agentArrivals[robotId].arrived)
+                return;
+
+            float dist = SEAN.Util.Geometry.GroundPlaneDist(
+                sean.robot.base_link.transform.position, robotGoal.transform.position);
+            if (dist <= sean.robotTask.completionDistance)
+                MarkArrived(robotId);
+        }
+
+        // The PWD/pedestrian is not reliably classified by its own CloseEnough() (a waypoint
+        // PWD flips its destination back to the start the instant it touches the goal, and a
+        // manually-driven PWD may not update destPos at all). Detect arrival by distance to
+        // its real goal instead, latched once reached.
+        private void TrackPwdArrival()
+        {
+            if (pwdController == null)
+                return;
+
+            string pwdId = GetObjectId(pwdController.gameObject);
+            if (string.IsNullOrEmpty(pwdId) || !agentArrivals.ContainsKey(pwdId) || agentArrivals[pwdId].arrived)
+                return;
+
+            if (TryGetPwdGoal(out Vector3 goalPos))
+            {
+                float dist = SEAN.Util.Geometry.GroundPlaneDist(pwdController.transform.position, goalPos);
+                if (dist <= Parameters.CLOSE_ENOUGH_MIN_DIST)
+                    MarkArrived(pwdId);
+            }
+            else if (pwdNavigable != null && pwdNavigable.CloseEnough())
+            {
+                // No resolvable goal (e.g. graph-nav PWD): fall back to the agent's own notion.
+                MarkArrived(pwdId);
+            }
+        }
+
+        private bool TryGetPwdGoal(out Vector3 goal)
+        {
+            goal = Vector3.zero;
+            if (pwdController == null)
+                return false;
+
+            var sfpwd = pwdController.GetComponent<IVI.SFPWDAgent>();
+            if (sfpwd != null && sfpwd.useWaypoints)
+            {
+                goal = sfpwd.waypointGoal;
+                return true;
+            }
+
+            if (sean != null && sean.robotTask != null && sean.robotTask.playerGoal != null)
+            {
+                goal = sean.robotTask.playerGoal.transform.position;
+                return true;
+            }
+
+            return false;
+        }
+
         private string GetRobotObjectId()
         {
             if (sean.robot == null || sean.robot.base_link == null) return null;
             return GetObjectId(sean.robot.base_link);
-        }
-
-        private static bool ShouldFinishTrialOnPwdArrival()
-        {
-            return SessionOnboardingSettings.PlayerMode == OnboardingPlayerMode.Human;
         }
 
         private static bool IsPwdPlayerController(ManualWheelchairController controller)

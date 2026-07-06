@@ -98,6 +98,7 @@ namespace SessionReview
         private ControlModeLog controlModeLog;
 
         private LiveTrajectoryRecorder trajectoryRecorder;
+        private string latestTrialFolder;
 
         void Start()
         {
@@ -154,6 +155,7 @@ namespace SessionReview
             Trials.Add(record);
 
             string trialFolder = CreateTrialFolder(record);
+            latestTrialFolder = trialFolder;
             SaveTrialRecord(record, trialFolder);
 
             if (trajectoryRecorder != null)
@@ -281,7 +283,7 @@ namespace SessionReview
             string path = Path.Combine(LogFolder, folderName);
             if (!Directory.Exists(path))
                 Directory.CreateDirectory(path);
-            Debug.Log($"[SessionReview] Trial folder: {path}");
+            SessionReview.SessionReviewLog.Log($"[SessionReview] Trial folder: {path}");
             return path;
         }
 
@@ -302,7 +304,49 @@ namespace SessionReview
             var data = new TrialArchiveData { trials = Trials };
             string json = JsonUtility.ToJson(data, true);
             File.WriteAllText(path, json);
-            Debug.Log($"[SessionReview] All trials index saved to: {path}");
+            SessionReview.SessionReviewLog.Log($"[SessionReview] All trials index saved to: {path}");
+        }
+
+        /// <summary>
+        /// Extend the most-recently archived trial's end time (e.g. it was archived when the
+        /// first agent arrived, and now the whole session has completed). Recomputes the
+        /// derived data over the longer window and re-saves so review + logs cover the full run.
+        /// </summary>
+        public void FinalizeLatestTrial(float endTime, TrialEndReason reason)
+        {
+            var record = LatestTrial;
+            if (record == null)
+                return;
+
+            if (endTime > record.endTime)
+                record.endTime = endTime;
+            record.endReason = reason;
+            record.metrics = CaptureMetrics();
+
+            if (controlModeLog != null)
+            {
+                record.controlModeEntries = controlModeLog.GetEntriesInRange(record.startTime, record.endTime);
+                record.controlSummaries = ComputeControlSummaries(record);
+            }
+
+            if (trajectoryRecorder != null)
+            {
+                float recStart = record.startTime - trajectoryRecorder.RecordingStartTime;
+                float recEnd = record.endTime - trajectoryRecorder.RecordingStartTime;
+                record.vlmCaptures = trajectoryRecorder.GetVLMCaptures(recStart, recEnd);
+                record.signalAnnotations = trajectoryRecorder.GetSignalAnnotations(recStart, recEnd);
+            }
+
+            if (!string.IsNullOrEmpty(latestTrialFolder))
+            {
+                SaveTrialRecord(record, latestTrialFolder);
+                if (trajectoryRecorder != null)
+                    trajectoryRecorder.SaveTrialTrajectories(latestTrialFolder, record);
+                if (controlModeLog != null)
+                    controlModeLog.SaveToFile(Path.Combine(latestTrialFolder, "control_modes"), record.startTime, record.endTime);
+            }
+
+            SaveTrials();
         }
 
         public TrialRecord GetTrial(int index)

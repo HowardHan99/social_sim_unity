@@ -247,6 +247,10 @@ namespace SEAN.Tasks
 
             if (hasPreparedTaskPreview)
             {
+                // The preview was prepared when the trial-start prompt appeared, which locked
+                // in start/goal at that moment. Let tasks whose goals come from scene markers
+                // (CustomStartGoal) re-read them, so edits made while the prompt was up count.
+                RefreshPreparedTask();
                 UpdatePositions();
                 UpdateCameras();
                 if (PublishGoal)
@@ -266,6 +270,13 @@ namespace SEAN.Tasks
                 onNewTask.Invoke();
             }
         }
+
+        /// <summary>
+        /// Called before a previously-prepared task preview is started or republished, so the
+        /// task can re-sync its start/goal from live scene state. Default: keep the prepared
+        /// preview as-is (random tasks must not re-roll between preview and start).
+        /// </summary>
+        protected virtual void RefreshPreparedTask() { }
 
         public bool PrepareTaskPreview()
         {
@@ -297,6 +308,7 @@ namespace SEAN.Tasks
             if (!hasPreparedTaskPreview || !PublishGoal)
                 return;
 
+            RefreshPreparedTask();
             Publish(interactiveGoal);
         }
 

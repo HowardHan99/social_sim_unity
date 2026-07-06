@@ -26,6 +26,11 @@ namespace SEAN.Display
 
         private RosMessageTypes.Nav.MPath message;
         private bool started = false;
+        private bool suppressedForReview = false;
+        private bool suppressedForManualControl = false;
+
+        /// <summary>The line is hidden while any reason is active.</summary>
+        private bool RenderingSuppressed => suppressedForReview || suppressedForManualControl;
 
         // settings for rendering path
         public Material LightSaberMaterial;
@@ -37,6 +42,7 @@ namespace SEAN.Display
         private Vector3[] renderPathPositions;
 
         VolumetricLineStripBehavior lineStripBehavior;
+        MeshRenderer lineMeshRenderer;
 
         /// <summary>
         /// Returns a copy of the current planned path positions, or null if no plan exists.
@@ -47,6 +53,50 @@ namespace SEAN.Display
             if (renderPathPositions == null || renderPathPositions.Length == 0)
                 return null;
             return (Vector3[])renderPathPositions.Clone();
+        }
+
+        /// <summary>Independent reasons the live ROS plan line may be hidden.</summary>
+        public enum SuppressionReason { SessionReview, ManualControl }
+
+        /// <summary>
+        /// When suppressed, the live ROS plan line is force-hidden and will NOT re-render even if
+        /// new plan messages keep arriving. Reasons are tracked independently (the line stays
+        /// hidden while any is active) so callers don't clobber each other:
+        ///  - SessionReview freezes the sim but can't stop ROS republishing the global plan
+        ///    (message delivery runs in Update, unaffected by Time.timeScale), so a one-shot
+        ///    clear would immediately reappear; review shows its own hideable snapshot copy.
+        ///  - ManualControl hides the planned path while a human is driving the robot.
+        /// </summary>
+        public void SetRenderingSuppressed(SuppressionReason reason, bool suppressed)
+        {
+            switch (reason)
+            {
+                case SuppressionReason.SessionReview: suppressedForReview = suppressed; break;
+                case SuppressionReason.ManualControl: suppressedForManualControl = suppressed; break;
+            }
+            ApplySuppressionState();
+        }
+
+        /// <summary>Back-compat overload for session-review callers.</summary>
+        public void SetRenderingSuppressed(bool suppressed)
+        {
+            SetRenderingSuppressed(SuppressionReason.SessionReview, suppressed);
+        }
+
+        private void ApplySuppressionState()
+        {
+            if (RenderingSuppressed)
+            {
+                if (lineStripBehavior != null)
+                    EnableLineStrip(false);
+            }
+            else
+            {
+                // Restore the last rendered plan line, if we still have one. (Going through
+                // ProcessMessage would be skipped by the stamp gate for an unchanged message.)
+                if (lineStripBehavior != null && renderPathPositions != null && renderPathPositions.Length > 0)
+                    EnableLineStrip(true);
+            }
         }
 
         public void ClearCurrentPlan()
@@ -95,7 +145,17 @@ namespace SEAN.Display
 
         void EnableLineStrip(bool enable)
         {
+            if (lineStripBehavior == null)
+                return;
             lineStripBehavior.enabled = enable;
+
+            // Disabling the behaviour alone does NOT stop rendering: the line is a mesh drawn
+            // by the MeshRenderer (RequireComponent on VolumetricLineStripBehavior), which stays
+            // enabled and keeps drawing the last plan. Toggle the renderer so the line truly hides.
+            if (lineMeshRenderer == null)
+                lineMeshRenderer = lineStripBehavior.GetComponent<MeshRenderer>();
+            if (lineMeshRenderer != null)
+                lineMeshRenderer.enabled = enable;
         }
 
         void ProcessMessage()
@@ -138,7 +198,10 @@ namespace SEAN.Display
                 }
                 renderPathPositions = pathPositions.ToArray<Vector3>();
                 lineStripBehavior.UpdateLineVertices(renderPathPositions);
-                EnableLineStrip(true);
+                // Always compute + store the plan (LiveTrajectoryRecorder reads
+                // renderPathPositions); only actually draw it when not suppressed. Manual control
+                // and session review hide the line but keep the data flowing to the recorder.
+                EnableLineStrip(!RenderingSuppressed);
             }
             else
             {
