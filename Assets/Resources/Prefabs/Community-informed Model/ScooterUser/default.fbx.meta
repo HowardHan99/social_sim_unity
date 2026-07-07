@@ -1,14 +1,9 @@
 fileFormatVersion: 2
-guid: 80342ea92837fd8448cc47ecb876a1db
+guid: 88df1cf26884bda469bf4429a93481b6
 ModelImporter:
   serializedVersion: 20300
   internalIDToNameTable: []
-  externalObjects:
-  - first:
-      type: UnityEngine:Texture2D
-      assembly: UnityEngine.CoreModule
-      name: map_ScooterG1_BaseColor
-    second: {fileID: 2800000, guid: 4301f3859dd3c834f83766d92b8f0506, type: 3}
+  externalObjects: {}
   materials:
     materialImportMode: 2
     materialName: 0

@@ -3,17 +3,7 @@ guid: 6a743d7a5c547c34590c153d21e652bd
 ModelImporter:
   serializedVersion: 20300
   internalIDToNameTable: []
-  externalObjects:
-  - first:
-      type: UnityEngine:Texture2D
-      assembly: UnityEngine.CoreModule
-      name: 3D Stylized Animated Dogs Kit - BaseColor
-    second: {fileID: 2800000, guid: 9898488030b7384438c194699392e5f6, type: 3}
-  - first:
-      type: UnityEngine:Texture2D
-      assembly: UnityEngine.CoreModule
-      name: 3D Stylized Animated Dogs Kit - Normal
-    second: {fileID: 2800000, guid: 5bd9af133b721c94ca6d0c13bd998237, type: 3}
+  externalObjects: {}
   materials:
     materialImportMode: 2
     materialName: 0
