@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System;
@@ -50,6 +51,11 @@ namespace SessionReview
         [SerializeField] private KeyCode exportReviewKey = KeyCode.E;
         [SerializeField] private bool requirePlanBeforeTrialStart = true;
         [SerializeField] private bool allowStartWithoutRosBackend = true;
+
+        [Header("Test Scene")]
+        [Tooltip("Auto-enabled when the active scene is named TestScene. Keeps PWD manual control "
+                 + "active without Start Trial and skips onboarding on play.")]
+        [SerializeField] private bool allowPwdManualControlWithoutTrial;
 
         private SessionTracker sessionTracker;
         private ControlModeLog controlModeLog;
@@ -166,6 +172,27 @@ namespace SessionReview
             Instance = this;
             EnsureComponents();
             LoadOnboardingPreviewTextures();
+            ApplyTestScenePwdManualDefaults();
+        }
+
+        /// <summary>
+        /// TestScene-only: immediate PWD manual driving without onboarding or Start Trial.
+        /// </summary>
+        private void ApplyTestScenePwdManualDefaults()
+        {
+            if (!IsNamedTestScene())
+                return;
+
+            allowPwdManualControlWithoutTrial = true;
+            showOnboardingOnStart = false;
+        }
+
+        private static bool IsNamedTestScene()
+        {
+            return string.Equals(
+                SceneManager.GetActiveScene().name,
+                "TestScene",
+                StringComparison.OrdinalIgnoreCase);
         }
 
         private void EnsureComponents()
@@ -214,10 +241,28 @@ namespace SessionReview
 
             InitializeOnboardingSelection();
 
-            if (showOnboardingOnStart && !SessionOnboardingSettings.HasCompletedOnboarding)
+            if (allowPwdManualControlWithoutTrial)
+            {
+                selectedPlayerMode = OnboardingPlayerMode.Human;
+                selectedPwdStartupControl = StartupControlMode.Manual;
+                StartCoroutine(EnableTestScenePwdManualControl());
+            }
+            else if (showOnboardingOnStart && !SessionOnboardingSettings.HasCompletedOnboarding)
+            {
                 SetOnboardingVisible(true);
+            }
             else if (SessionOnboardingSettings.HasCompletedOnboarding && SessionOnboardingSettings.PendingTrialStart)
+            {
                 ShowTrialStartPrompt();
+            }
+        }
+
+        private IEnumerator EnableTestScenePwdManualControl()
+        {
+            // PWDPlayer + ManualWheelchairController finish InitAfterBase on the next frame.
+            yield return null;
+            yield return null;
+            ApplyStartupControlDefaults();
         }
 
         void OnDestroy()
@@ -2152,6 +2197,9 @@ namespace SessionReview
 
         private bool ShouldAllowPwdMovement()
         {
+            if (allowPwdManualControlWithoutTrial && !inRewindMode && !inWorldBuildingMode)
+                return true;
+
             var sean = SEAN.SEAN.instance;
             return !showOnboarding &&
                    !showTrialStartPrompt &&
