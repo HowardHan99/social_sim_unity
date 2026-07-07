@@ -8,9 +8,14 @@ namespace IVI
     {
         [Header("Control Settings")]
         public float moveSpeed = 0.8f;
+        [Tooltip("Live speed multiplier for manual driving. Scales moveSpeed so the Agent Speed overlay can retune this pedestrian live. 1 = unchanged.")]
+        public float speedScale = 1.0f;
         public float rotationSpeed = 240f;
         public KeyCode toggleModeKey = KeyCode.RightShift;
         public bool useWASD = true;
+
+        [Tooltip("Read Arrow keys instead of WASD for manual driving. Set automatically so the human's role uses WASD and the other manual role uses arrows.")]
+        public bool manualUseArrowKeys = false;
         public bool startInManualMode = false;
         public bool enableJoystick = true;
         public string joystickHorizontalAxis = "LogitechTwist";
@@ -61,6 +66,12 @@ namespace IVI
         private Quaternion spawnRotation;
         private WheelchairCameraSmoothing camSmoothing;
         private bool JoystickPresent => enableJoystick && Input.GetJoystickNames().Length > 0;
+        // Only the human's active role drives with the joystick. The other manual role
+        // is remapped to the arrow keys (manualUseArrowKeys) and must never read the
+        // shared joystick, otherwise both agents move together.
+        private bool ManualUsesJoystick => JoystickPresent && !manualUseArrowKeys;
+        // moveSpeed after applying the live scenario speed multiplier.
+        private float EffectiveMoveSpeed => moveSpeed * Mathf.Max(0f, speedScale);
         private bool lastJoystickStartPressed;
         private bool lastJoystickTogglePressed;
         private float joystickHorizontalCenter;
@@ -156,7 +167,7 @@ namespace IVI
             float manualDesiredLin = currentManualLinearSpeed;
             float manualDesiredAng = 0f;
 
-            if (JoystickPresent)
+            if (ManualUsesJoystick)
             {
                 if (!joystickCenterCaptured)
                     CaptureJoystickCenter();
@@ -165,7 +176,7 @@ namespace IVI
                 float v = ProcessJoystickInput(ReadJoystickAxis(joystickVerticalAxis, invertJoystickVertical, joystickVerticalCenter), EffectiveJoystickDeadzone(), joystickLinearFullThrow, joystickLinearSensitivity, joystickLinearResponseExponent);
                 debugJoystickProcessedHorizontal = h;
                 debugJoystickProcessedVertical = v;
-                manualDesiredLin = moveSpeed * v;
+                manualDesiredLin = EffectiveMoveSpeed * v;
                 manualDesiredAng = rotationSpeed * h;
             }
             else
@@ -179,9 +190,9 @@ namespace IVI
                 debugJoystickProcessedVertical = 0f;
             }
 
-            bool wHeld = Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow);
-            bool sHeld = Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.DownArrow);
-            bool sPressed = Input.GetKeyDown(KeyCode.S) || Input.GetKeyDown(KeyCode.DownArrow);
+            bool wHeld = ManualKeyHeld(KeyCode.W, KeyCode.UpArrow);
+            bool sHeld = ManualKeyHeld(KeyCode.S, KeyCode.DownArrow);
+            bool sPressed = ManualKeyDown(KeyCode.S, KeyCode.DownArrow);
             float nowRealtime = Time.realtimeSinceStartup;
 
             if (!sHeld &&
@@ -206,7 +217,7 @@ namespace IVI
 
             if (wHeld)
             {
-                manualDesiredLin = moveSpeed;
+                manualDesiredLin = EffectiveMoveSpeed;
                 debugSBrakePressCount = 0;
                 lastSBrakePressRealtime = -1f;
             }
@@ -222,21 +233,21 @@ namespace IVI
                 }
                 else if (nearStop)
                 {
-                    manualDesiredLin = reverseArmed ? -moveSpeed : 0f;
+                    manualDesiredLin = reverseArmed ? -EffectiveMoveSpeed : 0f;
                 }
                 else
                 {
-                    manualDesiredLin = -moveSpeed;
+                    manualDesiredLin = -EffectiveMoveSpeed;
                 }
             }
 
             if (useWASD)
             {
-                if (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow))
+                if (ManualKeyHeld(KeyCode.A, KeyCode.LeftArrow))
                 {
                     manualDesiredAng = -rotationSpeed;
                 }
-                else if (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow))
+                else if (ManualKeyHeld(KeyCode.D, KeyCode.RightArrow))
                 {
                     manualDesiredAng = rotationSpeed;
                 }
@@ -370,7 +381,10 @@ namespace IVI
         {
             if (!initialized) return;
 
-            if (SessionReviewManager.Instance != null && SessionReviewManager.Instance.IsWorldBuildingModeActive)
+            // Live driving readout; hide it during review / world-building so it doesn't
+            // overlap those overlays (it sits top-left, under the review Metrics panel).
+            if (SessionReviewManager.Instance != null &&
+                (SessionReviewManager.Instance.IsReviewModeActive || SessionReviewManager.Instance.IsWorldBuildingModeActive))
                 return;
 
             string mode = isManualMode ? "MANUAL" : "AUTO";
@@ -378,9 +392,11 @@ namespace IVI
             string vel = isManualMode
                 ? $"{manualVelocity.magnitude:F1}"
                 : (sfpwdAgent != null ? $"{sfpwdAgent.velocity.magnitude:F1}" : "--");
-            string controlHint = JoystickPresent
+            string controlHint = ManualUsesJoystick
                 ? "Joystick + keyboard active"
-                : "RShift: toggle | W/S brake+reverse | A/D turn | H stop";
+                : (manualUseArrowKeys
+                    ? "RShift: toggle | Up/Down brake+reverse | Left/Right turn | H stop"
+                    : "RShift: toggle | W/S brake+reverse | A/D turn | H stop");
             GUI.Box(new Rect(10, 10, 300, 60),
                 $"[{mode}] Pos:{pos} Vel:{vel}\n{controlHint}");
         }
@@ -435,6 +451,18 @@ namespace IVI
             if (axisName == "RVertical")
                 return "LogitechThrottle";
             return axisName;
+        }
+
+        // Manual driving reads WASD normally, or the arrow keys when the PWD is not the
+        // human's active role (so a robot + PWD both in manual don't move together).
+        private bool ManualKeyHeld(KeyCode wasdKey, KeyCode arrowKey)
+        {
+            return Input.GetKey(manualUseArrowKeys ? arrowKey : wasdKey);
+        }
+
+        private bool ManualKeyDown(KeyCode wasdKey, KeyCode arrowKey)
+        {
+            return Input.GetKeyDown(manualUseArrowKeys ? arrowKey : wasdKey);
         }
 
         private float GetAxisSafely(string axisName)

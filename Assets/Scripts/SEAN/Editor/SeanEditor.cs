@@ -14,7 +14,6 @@ namespace SEAN.Editor
         SerializedProperty AgentControllerProperty;
         SerializedProperty ControlledAgentProperty;
         SerializedProperty TopDownViewOnlyProperty;
-        SerializedProperty TaskCompletionDistanceProperty;
         SerializedProperty NumPwDSFAgentsProperty;
 
         void OnEnable()
@@ -78,11 +77,16 @@ namespace SEAN.Editor
             serializedObject.ApplyModifiedProperties();
 
 
-            SerializedObject taskCompletionSerializedObject = new SerializedObject(currentTask);
-            TaskCompletionDistanceProperty = taskCompletionSerializedObject.FindProperty("completionDistance");
-            taskCompletionSerializedObject.Update();
-            EditorGUILayout.PropertyField(TaskCompletionDistanceProperty);
-            taskCompletionSerializedObject.ApplyModifiedProperties();
+            // Tasks.Base.completionDistance is [System.NonSerialized], so it has NO SerializedProperty --
+            // FindProperty returns null and EditorGUILayout.PropertyField(null) throws the
+            // "IsChildrenIncluded" NullReferenceException. Draw it as a plain field instead.
+            if (currentTask != null)
+            {
+                EditorGUI.BeginChangeCheck();
+                float newCompletionDistance = EditorGUILayout.FloatField("Completion Distance", currentTask.completionDistance);
+                if (EditorGUI.EndChangeCheck())
+                    currentTask.completionDistance = newCompletionDistance;
+            }
         }
     }
 }

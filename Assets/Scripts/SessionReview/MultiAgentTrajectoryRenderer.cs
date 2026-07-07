@@ -68,17 +68,11 @@ namespace SessionReview
         [SerializeField] private float annotationHaloRadius = 0.22f;
         [SerializeField] private float annotationYOffset = 0.12f;
 
-        [Header("Auto Plan Path")]
-        [SerializeField] private Color planPathColor = new Color(0.2f, 1f, 0.3f, 0.85f);
-        [SerializeField] private float planPathLineWidth = 0.12f;
-        [SerializeField] private bool showPlanPaths = true;
-
         private GameObject overlayParent;
         private List<LineRenderer> trajectoryLines = new List<LineRenderer>();
         private List<LineRenderer> arrowLines = new List<LineRenderer>();
         private List<LineRenderer> stopCircleLines = new List<LineRenderer>();
         private List<GameObject> stopSpheres = new List<GameObject>();
-        private List<LineRenderer> planPathLines = new List<LineRenderer>();
         private List<LineRenderer> annotationLines = new List<LineRenderer>();
         private List<GameObject> vlmMarkers = new List<GameObject>();
         private List<GameObject> annotationMarkers = new List<GameObject>();
@@ -93,6 +87,7 @@ namespace SessionReview
             public bool toggleable;
         }
         private List<LegendEntry> legendEntries = new List<LegendEntry>();
+        private readonly ReviewPanels.State legendPanel = new ReviewPanels.State();
         private class VisibilityGroup
         {
             public bool visible = true;
@@ -149,7 +144,7 @@ namespace SessionReview
             int agentsFound = 0;
             bool stopLegendAdded = false;
 
-            Debug.Log($"[SessionReview] Rendering trajectories. Trial has {trial.agentRoles.Count} agents. " +
+            SessionReview.SessionReviewLog.Log($"[SessionReview] Rendering trajectories. Trial has {trial.agentRoles.Count} agents. " +
                       $"Recording has {recording.timelineDict.Count} timelines. " +
                       $"Window: rec[{recStart:F1}, {recEnd:F1}]");
 
@@ -251,18 +246,6 @@ namespace SessionReview
                     $"Recording window: [{recStart:F1}, {recEnd:F1}], " +
                     $"Agents in trial: {trial.agentRoles.Count}, " +
                     $"Timelines in recording: {recording.timelineDict.Count}");
-
-            if (showPlanPaths && planSnapshots != null && planSnapshots.Count > 0)
-            {
-                CreatePlanPathLines(planSnapshots);
-                legendEntries.Add(new LegendEntry
-                {
-                    key = "plan_path",
-                    label = "ROS Nav Plan",
-                    color = planPathColor,
-                    toggleable = true
-                });
-            }
 
             var vlmEvents = vlmCaptures ?? trial.vlmCaptures;
             List<SignalAnnotation> annotationsToRender = signalAnnotations ?? trial.signalAnnotations;
@@ -390,7 +373,7 @@ namespace SessionReview
                 lr.material.mainTextureScale = new Vector2(1f / 0.3f, 1f);
             }
 
-            Debug.Log($"[SessionReview] Line for \"{id}\" ({role}): color={color}, gradient={gradient != null}, points={positions.Count}");
+            SessionReview.SessionReviewLog.Log($"[SessionReview] Line for \"{id}\" ({role}): color={color}, gradient={gradient != null}, points={positions.Count}");
             trajectoryLines.Add(lr);
         }
 
@@ -525,7 +508,7 @@ namespace SessionReview
             }
 
             if (circlesCreated > 0)
-                Debug.Log($"[SessionReview] Stop spheres for \"{id}\": {circlesCreated}");
+                SessionReview.SessionReviewLog.Log($"[SessionReview] Stop spheres for \"{id}\": {circlesCreated}");
 
             return circlesCreated;
         }
@@ -602,7 +585,7 @@ namespace SessionReview
             }
             }
 
-            Debug.Log($"[SessionReview] VLM annotations: {events.Count}");
+            SessionReview.SessionReviewLog.Log($"[SessionReview] VLM annotations: {events.Count}");
         }
 
         private void CreateSignalAnnotations(List<SignalAnnotation> annotations)
@@ -620,9 +603,9 @@ namespace SessionReview
             }
 
             if (vlmCount > 0)
-                Debug.Log($"[SessionReview] VLMAnnotation rendered: {vlmCount}");
+                SessionReview.SessionReviewLog.Log($"[SessionReview] VLMAnnotation rendered: {vlmCount}");
             if (lightingCount > 0)
-                Debug.Log($"[SessionReview] LightingAnnotation rendered: {lightingCount}");
+                SessionReview.SessionReviewLog.Log($"[SessionReview] LightingAnnotation rendered: {lightingCount}");
         }
 
         private void CreateAnnotationBeacon(int index, SignalAnnotation annotation)
@@ -929,55 +912,44 @@ namespace SessionReview
             lr.endColor = color;
         }
 
-        private void CreatePlanPathLines(List<PlanPathSnapshot> snapshots)
-        {
-            // Only render the last (final) planned path -- the intermediate
-            // replans are noise; what matters is where the planner intended
-            // the robot to go at the end of the trial.
-            PlanPathSnapshot lastSnap = null;
-            for (int s = snapshots.Count - 1; s >= 0; s--)
-            {
-                if (snapshots[s].positions != null && snapshots[s].positions.Length >= 2)
-                { lastSnap = snapshots[s]; break; }
-            }
-            if (lastSnap == null) return;
-
-            var lineObj = new GameObject("PlanPath_final");
-            lineObj.transform.SetParent(overlayParent.transform);
-            var lr = lineObj.AddComponent<LineRenderer>();
-            RegisterRendererToGroup("plan_path", lr);
-
-            lr.positionCount = lastSnap.positions.Length;
-            for (int i = 0; i < lastSnap.positions.Length; i++)
-            {
-                Vector3 p = lastSnap.positions[i];
-                p.y += 0.08f;
-                lr.SetPosition(i, p);
-            }
-
-            lr.startWidth = planPathLineWidth;
-            lr.endWidth = planPathLineWidth;
-            lr.useWorldSpace = true;
-            lr.numCornerVertices = 4;
-
-            if (lineMaterial != null)
-                lr.material = new Material(lineMaterial);
-            else
-                lr.material = new Material(Shader.Find("Sprites/Default"));
-            lr.material.color = Color.white;
-            lr.startColor = planPathColor;
-            lr.endColor = planPathColor;
-
-            planPathLines.Add(lr);
-
-            Debug.Log($"[SessionReview] Rendered final plan path ({lastSnap.positions.Length} pts, " +
-                      $"from {snapshots.Count} total snapshots)");
-        }
-
         public void SetAllTrajectoryVisibility(bool visible)
         {
             foreach (var key in new List<string>(visibilityGroups.Keys))
                 SetGroupVisibility(key, visible);
+        }
+
+        /// <summary>
+        /// Registers a toggleable legend row + visibility group for a line owned by another
+        /// system (e.g. RewindController's live "active plan" line), so "Show All"/"Hide All"
+        /// and the per-row toggle also govern it. The owner must query IsExternalGroupVisible(key)
+        /// before drawing, because it may rebuild/re-enable its renderer every frame.
+        /// </summary>
+        public void RegisterExternalLegendGroup(string key, string label, Color color, bool initiallyVisible = true)
+        {
+            if (string.IsNullOrEmpty(key))
+                return;
+
+            GetOrCreateVisibilityGroup(key).visible = initiallyVisible;
+
+            for (int i = 0; i < legendEntries.Count; i++)
+            {
+                if (legendEntries[i].key == key)
+                    return; // already registered (e.g. re-entering review)
+            }
+
+            legendEntries.Add(new LegendEntry
+            {
+                key = key,
+                label = label,
+                color = color,
+                toggleable = true
+            });
+        }
+
+        /// <summary>Visibility of an externally-owned group (see RegisterExternalLegendGroup).</summary>
+        public bool IsExternalGroupVisible(string key)
+        {
+            return IsGroupVisible(key);
         }
 
         private void RegisterRendererToGroup(string key, Renderer renderer)
@@ -1072,7 +1044,6 @@ namespace SessionReview
             arrowLines.Clear();
             stopCircleLines.Clear();
             stopSpheres.Clear();
-            planPathLines.Clear();
             annotationLines.Clear();
             vlmMarkers.Clear();
             annotationMarkers.Clear();
@@ -1098,59 +1069,63 @@ namespace SessionReview
         {
             if (!isShowing || legendEntries.Count == 0) return;
 
-            float boxW = 360f;
-            float lineH = 30f;
-            float pad = 12f;
-            float headerH = 22f;
-            float controlsH = 34f;
-            float boxH = pad * 2 + headerH + controlsH + 8f + legendEntries.Count * lineH;
-            const float marginRight = 20f;
-            const float gapAboveEndReviewButton = 12f;
-            // Must stay above SessionReviewManager.DrawEndReviewButton (y = Screen.height - 126, height 34).
-            const float endReviewButtonTopFromBottom = 126f;
-            float endReviewTopY = Screen.height - endReviewButtonTopFromBottom;
-            float x = Screen.width - boxW - marginRight;
-            float y = endReviewTopY - gapAboveEndReviewButton - boxH;
-            y = Mathf.Max(10f, y);
+            // Nominal row/controls heights just to size the default window; the actual
+            // heights are computed responsively in DrawLegendBody from FontScale.
+            float lineH = 40f;
+            float controlsH = 40f;
+            float boxW = 400f;
+            float defaultH = ReviewPanels.TitleH + controlsH + 8f
+                + Mathf.Min(Mathf.Max(legendEntries.Count, 1), 8) * lineH + 12f;
+            float dx = Screen.width - boxW - 20f;
+            float dy = Mathf.Max(10f, Screen.height - defaultH - 140f);
+            Rect defaultRect = new Rect(dx, dy, boxW, defaultH);
 
-            GUI.backgroundColor = new Color(0f, 0f, 0f, 0.75f);
-            GUI.Box(new Rect(x, y, boxW, boxH), "");
+            if (ReviewPanels.Begin(legendPanel, this, "Legend", defaultRect, out Rect content))
+                DrawLegendBody(content);
+            ReviewPanels.End(legendPanel);
+        }
 
-            var headerStyle = new GUIStyle(GUI.skin.label)
-            {
-                fontStyle = FontStyle.Bold,
-                fontSize = 15,
-                normal = { textColor = Color.white }
-            };
+        private void DrawLegendBody(Rect content)
+        {
+            // Responsive: font, row height and swatch all scale with the panel size.
+            float scale = legendPanel.FontScale;
+            int fontSize = Mathf.RoundToInt(17f * scale);
+            float rowLineH = fontSize + 20f;
+            float controlsH = fontSize + 22f;
+            float swatch = fontSize + 2f;
+
             var buttonStyle = new GUIStyle(GUI.skin.button)
             {
-                fontSize = 13,
+                fontSize = fontSize,
                 alignment = TextAnchor.MiddleCenter
             };
             var rowTextStyle = new GUIStyle(GUI.skin.label)
             {
-                fontSize = 13,
+                fontSize = fontSize,
                 alignment = TextAnchor.MiddleLeft,
                 clipping = TextClipping.Clip,
                 padding = new RectOffset(0, 0, 0, 0),
                 normal = { textColor = Color.white }
             };
 
-            GUI.Label(new Rect(x + pad, y + pad, boxW - pad * 2, headerH), "Review Legend", headerStyle);
-
-            float controlsY = y + pad + headerH + 2f;
-            float controlsWidth = (boxW - pad * 2 - 8f) * 0.5f;
-            if (GUI.Button(new Rect(x + pad, controlsY, controlsWidth, 28f), "Show All", buttonStyle))
+            float controlsWidth = (content.width - 8f) * 0.5f;
+            if (GUI.Button(new Rect(content.x, content.y, controlsWidth, controlsH - 6f), "Show All", buttonStyle))
                 SetAllTrajectoryVisibility(true);
-            if (GUI.Button(new Rect(x + pad + controlsWidth + 8f, controlsY, controlsWidth, 28f), "Hide All", buttonStyle))
+            if (GUI.Button(new Rect(content.x + controlsWidth + 8f, content.y, controlsWidth, controlsH - 6f), "Hide All", buttonStyle))
                 SetAllTrajectoryVisibility(false);
+
+            // Scrollable list so the panel stays usable at any resized height.
+            Rect viewport = new Rect(content.x, content.y + controlsH, content.width, Mathf.Max(0f, content.yMax - (content.y + controlsH)));
+            float innerW = content.width - 18f;
+            float innerH = legendEntries.Count * rowLineH;
+            legendPanel.scroll = GUI.BeginScrollView(viewport, legendPanel.scroll, new Rect(0f, 0f, innerW, innerH));
 
             for (int i = 0; i < legendEntries.Count; i++)
             {
                 var entry = legendEntries[i];
-                float ly = controlsY + controlsH + i * lineH;
+                float ly = i * rowLineH;
                 bool visible = IsGroupVisible(entry.key);
-                Rect rowRect = new Rect(x + pad, ly, boxW - pad * 2, lineH - 4f);
+                Rect rowRect = new Rect(0f, ly, innerW, rowLineH - 4f);
 
                 GUI.backgroundColor = visible
                     ? new Color(0.08f, 0.1f, 0.14f, 0.92f)
@@ -1161,19 +1136,28 @@ namespace SessionReview
                 GUI.backgroundColor = visible
                     ? entry.color
                     : new Color(entry.color.r * 0.35f, entry.color.g * 0.35f, entry.color.b * 0.35f, 0.9f);
-                GUI.Box(new Rect(rowRect.x + 8f, rowRect.y + 7f, 14f, 14f), "", GUI.skin.button);
+                float swatchY = rowRect.y + (rowRect.height - swatch) * 0.5f;
+                GUI.Box(new Rect(rowRect.x + 8f, swatchY, swatch, swatch), "", GUI.skin.button);
                 GUI.backgroundColor = prev;
 
                 rowTextStyle.normal.textColor = visible
                     ? Color.white
                     : new Color(0.66f, 0.69f, 0.73f, 1f);
                 string label = visible ? entry.label : $"{entry.label}  [hidden]";
-                Rect labelRect = new Rect(rowRect.x + 30f, rowRect.y + 1f, rowRect.width - 38f, rowRect.height - 2f);
-                if (entry.toggleable && GUI.Button(labelRect, entry.label, GUIStyle.none))
-                    ToggleGroupVisibility(entry.key);
+                Rect labelRect = new Rect(rowRect.x + swatch + 16f, rowRect.y + 1f, rowRect.width - swatch - 24f, rowRect.height - 2f);
                 GUI.Label(labelRect, label, rowTextStyle);
+
+                // Whole-row click toggles visibility (covers the colour swatch too).
+                if (entry.toggleable &&
+                    Event.current.type == EventType.MouseDown &&
+                    rowRect.Contains(Event.current.mousePosition))
+                {
+                    ToggleGroupVisibility(entry.key);
+                    Event.current.Use();
+                }
             }
 
+            GUI.EndScrollView();
             GUI.backgroundColor = Color.white;
         }
     }

@@ -27,5 +27,13 @@ namespace SEAN.Tasks
             return true;
         }
 
+        // This task's start/goal come from hand-placed scene markers, which the user may move
+        // while the trial-start prompt is showing (i.e. after PrepareTaskPreview locked them in).
+        // Re-reading the markers here keeps the published goal in sync with where they are NOW.
+        // NewTask is a pure marker->flag copy, so re-running it is safe (nothing random to re-roll).
+        protected override void RefreshPreparedTask()
+        {
+            NewTask();
+        }
     }
 }

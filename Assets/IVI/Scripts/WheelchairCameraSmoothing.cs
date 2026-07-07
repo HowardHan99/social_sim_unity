@@ -11,7 +11,7 @@ namespace IVI
     public class WheelchairCameraSmoothing : MonoBehaviour
     {
         [Tooltip("Offset behind the avatar in its local space (x=right, y=up, z=forward).")]
-        public Vector3 thirdPersonOffset = new Vector3(0f, 1.4f, -2.2f);
+        public Vector3 thirdPersonOffset = new Vector3(0f, 1.9f, -1.5f);
 
         [Tooltip("Point on the avatar to look at, relative to avatar root (y = height above ground).")]
         public float lookAtHeight = 1.0f;

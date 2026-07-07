@@ -8,10 +8,15 @@ namespace SessionReview
         [SerializeField] private float panelWidth = 420f;
         [SerializeField] private float panelX = 10f;
         [SerializeField] private float panelY = 80f;
+        [SerializeField] private float defaultPanelHeight = 540f;
 
         private bool visible;
         private TrialRecord currentTrial;
-        private Vector2 scrollPosition;
+        private readonly ReviewPanels.State panel = new ReviewPanels.State();
+
+        // Cached so the "Trajectory Follow" diagnostics (previously a separate floating
+        // HUD in TrajectoryUI) can be shown inline with the rest of the review data.
+        private TrajectoryManager trajectoryManager;
 
         public bool IsVisible => visible;
 
@@ -41,31 +46,40 @@ namespace SessionReview
             if (SessionReviewManager.Instance != null && SessionReviewManager.Instance.IsWorldBuildingModeActive)
                 return;
 
-            var t = currentTrial;
-            float lineH = 22f;
-            float sectionGap = 8f;
+            Rect defaultRect = new Rect(panelX, panelY, panelWidth,
+                Mathf.Min(defaultPanelHeight, Screen.height - panelY - 20f));
 
-            int lineCount = 8
-                + t.agentArrivals.Count
-                + t.controlSummaries.Count
-                + (t.metrics != null ? 8 : 0);
-            float contentHeight = lineCount * lineH + sectionGap * 5;
-            float panelHeight = Mathf.Min(contentHeight + 60f, Screen.height - panelY - 20f);
-
-            GUI.Box(new Rect(panelX, panelY, panelWidth, panelHeight), "");
-
-            GUILayout.BeginArea(new Rect(panelX + 8, panelY + 8, panelWidth - 16, panelHeight - 16));
-            scrollPosition = GUILayout.BeginScrollView(scrollPosition);
-
-            GUIStyle headerStyle = new GUIStyle(GUI.skin.label)
+            if (ReviewPanels.Begin(panel, this, "Metrics", defaultRect, out Rect content))
             {
-                fontStyle = FontStyle.Bold,
-                fontSize = 14
+                GUILayout.BeginArea(content);
+                panel.scroll = GUILayout.BeginScrollView(panel.scroll);
+                DrawBody();
+                GUILayout.EndScrollView();
+                GUILayout.EndArea();
+            }
+            ReviewPanels.End(panel);
+        }
+
+        private void DrawBody()
+        {
+            var t = currentTrial;
+            float scale = panel.FontScale;
+            float sectionGap = 8f * scale;
+
+            GUIStyle bodyStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = Mathf.RoundToInt(18f * scale),
+                wordWrap = true
             };
             GUIStyle sectionStyle = new GUIStyle(GUI.skin.label)
             {
                 fontStyle = FontStyle.Bold,
-                fontSize = 12
+                fontSize = Mathf.RoundToInt(20f * scale)
+            };
+            GUIStyle headerStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontStyle = FontStyle.Bold,
+                fontSize = Mathf.RoundToInt(24f * scale)
             };
 
             string status;
@@ -82,7 +96,7 @@ namespace SessionReview
                     break;
             }
             GUILayout.Label($"{status} {t.trialName} #{t.trialNumber}", headerStyle);
-            GUILayout.Label($"Duration: {t.Duration:F1}s  ({t.startTime:F1}s - {t.endTime:F1}s)");
+            GUILayout.Label($"Duration: {t.Duration:F1}s  ({t.startTime:F1}s - {t.endTime:F1}s)", bodyStyle);
             GUILayout.Space(sectionGap);
 
             GUILayout.Label("Agent Roster", sectionStyle);
@@ -91,7 +105,7 @@ namespace SessionReview
                 string arrivalStr = arrival.arrived
                     ? $"arrived @ {arrival.arrivalTime:F1}s"
                     : "not arrived";
-                GUILayout.Label($"  {arrival.agentName} ({arrival.role}): {arrivalStr}");
+                GUILayout.Label($"  {arrival.agentName} ({arrival.role}): {arrivalStr}", bodyStyle);
             }
             GUILayout.Space(sectionGap);
 
@@ -109,8 +123,8 @@ namespace SessionReview
                         breakdown += $"Auto:{cs.autoSeconds:F1}s({cs.autoSeconds / total * 100:F0}%) ";
                     if (cs.staticSeconds > 0)
                         breakdown += $"Static:{cs.staticSeconds:F1}s({cs.staticSeconds / total * 100:F0}%) ";
-                    GUILayout.Label($"  {cs.agentId}: {cs.overallMode}");
-                    GUILayout.Label($"    {breakdown}");
+                    GUILayout.Label($"  {cs.agentId}: {cs.overallMode}", bodyStyle);
+                    GUILayout.Label($"    {breakdown}", bodyStyle);
                 }
                 GUILayout.Space(sectionGap);
             }
@@ -119,20 +133,38 @@ namespace SessionReview
             {
                 var m = t.metrics;
                 GUILayout.Label("Robot Metrics", sectionStyle);
-                GUILayout.Label($"  Path Length: {m.pathLength:F2}m");
-                GUILayout.Label($"  Min Dist to Target: {FormatDist(m.minDistToTarget)}");
-                GUILayout.Label($"  Min Dist to Pedestrian: {FormatDist(m.minDistToPed)}");
+                GUILayout.Label($"  Path Length: {m.pathLength:F2}m", bodyStyle);
+                GUILayout.Label($"  Min Dist to Target: {FormatDist(m.minDistToTarget)}", bodyStyle);
+                GUILayout.Label($"  Min Dist to Pedestrian: {FormatDist(m.minDistToPed)}", bodyStyle);
 
                 GUILayout.Space(sectionGap);
                 GUILayout.Label("Safety Metrics", sectionStyle);
-                GUILayout.Label($"  Robot->Person Collisions: {m.robotOnPersonCollisions}  Person->Robot: {m.personOnRobotCollisions}");
-                GUILayout.Label($"  Object Collisions: {m.objectCollisions}");
-                GUILayout.Label($"  Intimate Violations: R->P:{m.robotOnPersonIntimateViolations} P->R:{m.personOnRobotIntimateViolations}");
-                GUILayout.Label($"  Personal Violations: R->P:{m.robotOnPersonPersonalViolations} P->R:{m.personOnRobotPersonalViolations}");
+                GUILayout.Label($"  Robot->Person Collisions: {m.robotOnPersonCollisions}  Person->Robot: {m.personOnRobotCollisions}", bodyStyle);
+                GUILayout.Label($"  Object Collisions: {m.objectCollisions}", bodyStyle);
+                GUILayout.Label($"  Intimate Violations: R->P:{m.robotOnPersonIntimateViolations} P->R:{m.personOnRobotIntimateViolations}", bodyStyle);
+                GUILayout.Label($"  Personal Violations: R->P:{m.robotOnPersonPersonalViolations} P->R:{m.personOnRobotPersonalViolations}", bodyStyle);
+                GUILayout.Space(sectionGap);
             }
 
-            GUILayout.EndScrollView();
-            GUILayout.EndArea();
+            DrawTrajectoryFollowSection(sectionStyle, bodyStyle);
+        }
+
+        // Formerly a standalone floating HUD in TrajectoryUI ("Play=.. FollowMode=.. follow SKIP..").
+        // Merged here so all review readouts live in one panel.
+        private void DrawTrajectoryFollowSection(GUIStyle sectionStyle, GUIStyle bodyStyle)
+        {
+            if (trajectoryManager == null)
+                trajectoryManager = FindObjectOfType<TrajectoryManager>();
+            if (trajectoryManager == null)
+                return;
+
+            var tm = trajectoryManager;
+            GUILayout.Label("Trajectory Follow", sectionStyle);
+            GUILayout.Label($"  Play: {tm.ReviewIsPlaying}   t: {tm.ReviewNormalizedTime:P0}   rate: {tm.ReviewPlaybackSpeed:F2}x   toggles: {tm.ReviewToggleCount}", bodyStyle);
+            GUILayout.Label($"  FollowMode: {tm.IsFollowMode}   HasTraj: {tm.HasFollowTrajectory}", bodyStyle);
+            GUILayout.Label($"  dist: {tm.LastFollowDistance:F2}m   speed: {tm.EffectiveFollowSpeed:F2}m/s   elapsed: {tm.LastFollowElapsed:F2}s", bodyStyle);
+            string skip = string.IsNullOrEmpty(tm.LastFollowSkipReason) ? "follow OK" : $"follow SKIP: {tm.LastFollowSkipReason}";
+            GUILayout.Label($"  {skip}", bodyStyle);
         }
     }
 }

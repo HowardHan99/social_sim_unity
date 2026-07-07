@@ -29,6 +29,13 @@ namespace SEAN.Input
         void OnGUI()
         {
             if (!showControl) { return; }
+
+            // This is a live-input debug readout; hide it during session review /
+            // world-building so it doesn't clutter those overlays (top-right corner).
+            var review = SessionReview.SessionReviewManager.Instance;
+            if (review != null && (review.IsReviewModeActive || review.IsWorldBuildingModeActive))
+                return;
+
             int w = Screen.width, h = Screen.height;
 
             GUIStyle style = new GUIStyle();

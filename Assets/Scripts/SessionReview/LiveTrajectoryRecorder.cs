@@ -87,7 +87,19 @@ namespace SessionReview
             if (!timelines.ContainsKey(id))
                 timelines[id] = new ObjectStateTimeline { objectId = id, states = new List<ObjectState>() };
 
-            Debug.Log($"[SessionReview] Now tracking: \"{id}\" ({t.gameObject.name})");
+            SessionReview.SessionReviewLog.Log($"[SessionReview] Now tracking: \"{id}\" ({t.gameObject.name})");
+        }
+
+        /// <summary>
+        /// Stop sampling an agent's transform (e.g. once it reaches its goal) while
+        /// keeping the history already recorded so it still shows up in review.
+        /// Safe to call with unknown or already-untracked ids.
+        /// </summary>
+        public void UntrackAgent(string id)
+        {
+            if (string.IsNullOrEmpty(id)) return;
+            if (trackedTransforms.Remove(id))
+                SessionReview.SessionReviewLog.Log($"[SessionReview] Stopped tracking (reached goal): \"{id}\"");
         }
 
         private void SampleAll()
@@ -217,7 +229,7 @@ namespace SessionReview
                 label = "VLM Capture",
                 metadata = string.Empty
             });
-            Debug.Log($"[SessionReview] VLMAnnotation recorded at t={timestamp:F2}, pos={position}, agent={agentId}");
+            SessionReview.SessionReviewLog.Log($"[SessionReview] VLMAnnotation recorded at t={timestamp:F2}, pos={position}, agent={agentId}");
         }
 
         public void RecordSignalAnnotation(SignalAnnotation annotation)
@@ -231,7 +243,7 @@ namespace SessionReview
             signalAnnotations.Add(annotation);
 
             string annotationName = GetAnnotationLogName(annotation.type);
-            Debug.Log($"[SessionReview] {annotationName} recorded at t={annotation.timestamp:F2}, pos={annotation.position}, agent={annotation.agentId}");
+            SessionReview.SessionReviewLog.Log($"[SessionReview] {annotationName} recorded at t={annotation.timestamp:F2}, pos={annotation.position}, agent={annotation.agentId}");
         }
 
         public void AttachMetadataToLatestVlmAnnotation(string agentId, string label, string metadata)
@@ -251,7 +263,7 @@ namespace SessionReview
                 if (!string.IsNullOrWhiteSpace(label))
                     annotation.label = label;
                 annotation.metadata = metadata ?? string.Empty;
-                Debug.Log($"[SessionReview] VLMAnnotation updated with replay metadata for agent={annotation.agentId}");
+                SessionReview.SessionReviewLog.Log($"[SessionReview] VLMAnnotation updated with replay metadata for agent={annotation.agentId}");
                 return;
             }
         }
@@ -397,7 +409,7 @@ namespace SessionReview
             string combinedPath = Path.Combine(trialFolder, "trajectories_all.json");
             File.WriteAllText(combinedPath, JsonUtility.ToJson(combined, true));
 
-            Debug.Log($"[SessionReview] Saved {trialTimelines.Count} agent trajectories to: {trialFolder}");
+            SessionReview.SessionReviewLog.Log($"[SessionReview] Saved {trialTimelines.Count} agent trajectories to: {trialFolder}");
 
             var trialPlans = GetPlanSnapshots(recStart, recEnd);
             if (trialPlans.Count > 0)
@@ -405,7 +417,7 @@ namespace SessionReview
                 var planData = new PlanPathRecording { snapshots = trialPlans };
                 string planFile = Path.Combine(trialFolder, "plan_paths.json");
                 File.WriteAllText(planFile, JsonUtility.ToJson(planData, true));
-                Debug.Log($"[SessionReview] Saved {trialPlans.Count} plan path snapshots to: {planFile}");
+                SessionReview.SessionReviewLog.Log($"[SessionReview] Saved {trialPlans.Count} plan path snapshots to: {planFile}");
             }
 
             var trialVLM = GetVLMCaptures(recStart, recEnd);
@@ -414,7 +426,7 @@ namespace SessionReview
                 var vlmData = new VLMCaptureRecording { events = trialVLM };
                 string vlmFile = Path.Combine(trialFolder, "vlm_captures.json");
                 File.WriteAllText(vlmFile, JsonUtility.ToJson(vlmData, true));
-                Debug.Log($"[SessionReview] Saved {trialVLM.Count} VLM capture events to: {vlmFile}");
+                SessionReview.SessionReviewLog.Log($"[SessionReview] Saved {trialVLM.Count} VLM capture events to: {vlmFile}");
             }
 
             var trialAnnotations = GetSignalAnnotations(recStart, recEnd);
@@ -423,7 +435,7 @@ namespace SessionReview
                 var annotationData = new SignalAnnotationRecording { annotations = trialAnnotations };
                 string annotationFile = Path.Combine(trialFolder, "signal_annotations.json");
                 File.WriteAllText(annotationFile, JsonUtility.ToJson(annotationData, true));
-                Debug.Log($"[SessionReview] Saved {trialAnnotations.Count} signal annotations to: {annotationFile}");
+                SessionReview.SessionReviewLog.Log($"[SessionReview] Saved {trialAnnotations.Count} signal annotations to: {annotationFile}");
             }
         }
     }

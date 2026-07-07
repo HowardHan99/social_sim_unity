@@ -26,6 +26,24 @@ namespace IVI
         //ROBOT REPULSION
         private float robotRepulsion;
 
+        [Header("Oscillation Tuning (live)")]
+        [Tooltip("Padding (m) added to the radii overlap in agent/robot repulsion. Large values push the repulsion/goal balance point far from the robot and cause back-and-forth pacing (was hardcoded 0.5).")]
+        public float personalSpacePad = 0.15f;
+        [Tooltip("Cap on the total social force as a multiple of the max goal force (MASS * DESIRED_SPEED / T). <= 0 disables.")]
+        public float forceCapMultiple = 3f;
+        [Tooltip("Velocity low-pass time constant (s) so a single frame's force spike cannot flip the walking direction. <= 0 disables.")]
+        public float velocitySmoothingTime = 0.1f;
+        [Tooltip("When agent/robot repulsion would push this agent away from its goal, decay speed to zero at this rate (m/s^2) instead of walking backwards. <= 0 disables.")]
+        public float yieldDeceleration = 2f;
+        [Tooltip("Within this distance (m) of the final destination, agent/robot repulsion fades out linearly so goals placed next to the robot stay reachable. <= 0 disables.")]
+        public float goalPriorityRadius = 2f;
+
+        // Agent/robot repulsion captured by the last ComputeForce, used by ShouldYield
+        private Vector3 lastAgentRepulsion;
+        // Distance and speed of the nearest goal-ward neighbor, from the last ComputeForce
+        private float lastBlockerDist = float.PositiveInfinity;
+        private float lastBlockerSpeed;
+
         protected override void Start()
         {
             base.Start();
@@ -57,11 +75,59 @@ namespace IVI
             var accel = totalForce.force / MASS;
             Vector3 nextVelocity = velocity + accel * Time.deltaTime;
             nextVelocity.y = 0;
+
+            if (ShouldYield(nextVelocity))
+            {
+                return Vector3.MoveTowards(velocity, Vector3.zero, yieldDeceleration * Time.deltaTime);
+            }
+
             if (nextVelocity.sqrMagnitude > 0)
             {
                 nextVelocity = nextVelocity.normalized * Mathf.Min(nextVelocity.magnitude, Parameters.MAX_VEL);
             }
-            return nextVelocity;
+            return SmoothVelocity(nextVelocity);
+        }
+
+        // Yield (slow to a stop) when agent/robot repulsion would drive this agent
+        // away from its goal; integrating the reversed force makes it pace back and
+        // forth instead. Wall forces are excluded so they can still push the agent out.
+        private bool ShouldYield(Vector3 nextVelocity)
+        {
+            if (yieldDeceleration <= 0f)
+            {
+                return false;
+            }
+            Vector3 goalVec = nearestGoalPoint - transform.position;
+            goalVec.y = 0;
+            float goalDist = goalVec.magnitude;
+            if (goalDist <= 1e-2f)
+            {
+                return false;
+            }
+            // The goal is closer than whoever is pushing back: it can be reached
+            // without contact, so keep walking.
+            if (lastBlockerDist >= goalDist)
+            {
+                return false;
+            }
+            // A stationary blocker will never clear on its own; waiting would
+            // last forever, so steer around it instead.
+            if (lastBlockerSpeed <= 0.1f)
+            {
+                return false;
+            }
+            Vector3 goalDir = goalVec / goalDist;
+            return Vector3.Dot(nextVelocity, goalDir) < 0f && Vector3.Dot(lastAgentRepulsion, goalDir) < 0f;
+        }
+
+        private Vector3 SmoothVelocity(Vector3 nextVelocity)
+        {
+            if (velocitySmoothingTime <= 0f)
+            {
+                return nextVelocity;
+            }
+            float alpha = 1f - Mathf.Exp(-Time.deltaTime / velocitySmoothingTime);
+            return Vector3.Lerp(velocity, nextVelocity, alpha);
         }
 
         void OnTriggerEnter(Collider other)
@@ -102,6 +168,7 @@ namespace IVI
         private SEAN.Scenario.Agents.SocialForce ComputeForce()
         {
             SEAN.Scenario.Agents.SocialForce totalForce = CalculateAgentForce();
+            lastAgentRepulsion = totalForce.force;
             //print("AgentForce: '" + totalForce.force + "'");
             totalForce.force += CalculateGoalForce();
             //print("AgentForce + GoalForce: '" + totalForce.force + "'");
@@ -130,10 +197,14 @@ namespace IVI
 
             #endregion
 
-            //if (totalForce.force.magnitude > 0)
-            //{
-            //    totalForce.force = totalForce.force.normalized * Mathf.Min(totalForce.force.magnitude, 200);
-            //}
+            if (forceCapMultiple > 0)
+            {
+                float maxForce = forceCapMultiple * MASS * Parameters.DESIRED_SPEED / Parameters.T;
+                if (totalForce.force.magnitude > maxForce)
+                {
+                    totalForce.force = totalForce.force.normalized * maxForce;
+                }
+            }
 
             return totalForce;
         }
@@ -150,6 +221,11 @@ namespace IVI
         {
             SEAN.Scenario.Agents.SocialForce agentForce = new SEAN.Scenario.Agents.SocialForce();
 
+            lastBlockerDist = float.PositiveInfinity;
+            lastBlockerSpeed = 0f;
+            float destDist = SEAN.Util.Geometry.GroundPlaneDist(destPos, transform.position);
+            float goalProximityScale = goalPriorityRadius > 0 ? Mathf.Clamp01(destDist / goalPriorityRadius) : 1f;
+
             foreach (GameObject n in neighbors)
             {
                 if (GO2Agent.ContainsKey(n))
@@ -157,6 +233,8 @@ namespace IVI
                     MonoBehaviour neighbor = GO2Agent[n];
                     Vector3 dir = Vector3.zero;
                     float overlap = 0;
+                    float neighborDist = float.PositiveInfinity;
+                    Vector3 neighborVel = Vector3.zero;
                     float dampenFactor = 1f; // Initialize dampenFactor
                     float neighborRadius = RADIUS; // Default neighbor radius
 
@@ -186,7 +264,8 @@ namespace IVI
                         }
                         
                         // Calculate overlap using this agent's RADIUS and the determined neighborRadius
-                        overlap = (RADIUS + neighborRadius) - dir.magnitude;
+                        neighborDist = dir.magnitude;
+                        overlap = (RADIUS + neighborRadius) - neighborDist;
                         dir = dir.normalized;
                         // dampenFactor = 1f; // Already initialized
                     }
@@ -197,10 +276,12 @@ namespace IVI
                         {
                             dir = transform.position - robot.transform.position;
                             dir.y = 0;
-                            overlap = (RADIUS + ROBOT_RADIUS) - dir.magnitude;
+                            neighborDist = dir.magnitude;
+                            overlap = (RADIUS + ROBOT_RADIUS) - neighborDist;
                             dir = dir.normalized;
                             neighbor = robot; // Keep reference for later use
                             var robotRB = robot.GetComponentInChildren<Rigidbody>();
+                            neighborVel = robotRB.velocity;
                             dampenFactor = robotRB.velocity.magnitude > 0.1f ? robotRepulsion : 1f;
                         } else {
                             // Invalid entry in GO2Agent if neighbor is null and not Robot
@@ -211,16 +292,25 @@ namespace IVI
                     // --- Keep the rest of the force calculation logic --- 
                     Vector3 goalDir = (nearestGoalPoint - transform.position).normalized;
                     var neighborAvatar = neighbor.GetComponent<SEAN.Scenario.Agents.Base>(); // Can be null for Robot
-                    var neighborDir = (neighborAvatar == null ? neighbor.transform.forward : neighborAvatar.velocity) - velocity;
+                    if (neighborAvatar != null)
+                    {
+                        neighborVel = neighborAvatar.velocity;
+                    }
+                    var neighborDir = neighborVel - velocity;
 
-                    overlap += 0.5f;
+                    overlap += personalSpacePad;
                     //if (neighborAvatar.velocity.magnitude == 0)
                     //    overlap += 1f;
 
-                    agentForce.force += Parameters.A * Mathf.Exp(overlap / Parameters.B) * dir * dampenFactor;
+                    agentForce.force += Parameters.A * Mathf.Exp(overlap / Parameters.B) * dir * dampenFactor * goalProximityScale;
 
                     //var neighborDir = neighborAvatar != null && neighborAvatar.path.Count == 0 ? neighbor.transform.forward : neighborAvatar.path[0] - neighborAvatar.transform.position;
                     bool inFront = Vector3.Dot(-dir, goalDir) >= 0.5;
+                    if (inFront && neighborDist < lastBlockerDist)
+                    {
+                        lastBlockerDist = neighborDist;
+                        lastBlockerSpeed = neighborVel.magnitude;
+                    }
                     bool approaching = Vector3.Dot(goalDir, neighborDir.normalized) < 0;
                     if (inFront && approaching)
                     {

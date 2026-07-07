@@ -17,6 +17,8 @@ namespace SessionReview
         [SerializeField] private KeyCode nextTrialKey = KeyCode.RightBracket;
         [SerializeField] private KeyCode playPauseKey = KeyCode.Space;
         [SerializeField] private KeyCode ghostTrailKey = KeyCode.G;
+        [SerializeField] private KeyCode toggleInfoKey = KeyCode.I;
+        [SerializeField] private KeyCode toggleGhostRobotsKey = KeyCode.F6;
 
         [Header("Perspective Keys")]
         [SerializeField] private KeyCode robotFPKey = KeyCode.F1;
@@ -227,7 +229,10 @@ namespace SessionReview
         void Start()
         {
             if (sessionTracker != null)
+            {
                 sessionTracker.TrialEnded += OnTrialEnded;
+                sessionTracker.SessionFullyComplete += OnSessionFullyComplete;
+            }
 
             if (vlmCaptureButton != null)
                 vlmCaptureButton.onClick.AddListener(RecordVLMCapture);
@@ -246,7 +251,10 @@ namespace SessionReview
                 vlmCaptureButton.onClick.RemoveListener(RecordVLMCapture);
 
             if (sessionTracker != null)
+            {
                 sessionTracker.TrialEnded -= OnTrialEnded;
+                sessionTracker.SessionFullyComplete -= OnSessionFullyComplete;
+            }
             if (rewindController != null)
                 rewindController.PlaybackReachedEnd -= HandleReviewPlaybackReachedEnd;
             if (Instance == this)
@@ -262,11 +270,28 @@ namespace SessionReview
 
             reviewTrialIndex = trialArchive.TrialCount - 1;
             latestTrialEndInfo = info;
+            // Show the review menu the instant the first agent arrives, but DO NOT
+            // freeze time: the simulation keeps running so agents that have not yet
+            // reached their goal continue to navigate. Entering review ([Tab]/Review)
+            // still freezes time for replay; the user can do that at any point.
             showPostTrialPrompt = usePostTrialPrompt;
-            if (showPostTrialPrompt)
-                PauseForPostTrialPrompt();
-            Debug.Log($"[SessionReview] Trial #{info.trialNumber} ended ({info.reason}). " +
-                      $"Press [{reviewToggleKey}] to review.");
+            SessionReview.SessionReviewLog.Log($"[SessionReview] Trial #{info.trialNumber} ended ({info.reason}). " +
+                      $"Run continues; press [{reviewToggleKey}] to review.");
+        }
+
+        // Every primary agent (robot + PWD) has reached its goal: nothing left to watch, so
+        // stop the session and drop straight into review. From the review UI, "End Review /
+        // Menu" still leads to Run Again / Choose Scenario / World Building.
+        private void OnSessionFullyComplete()
+        {
+            HidePostTrialPrompt();
+
+            // The trial was archived when the first agent arrived; extend it to now so the
+            // review covers both agents' full paths, then open review on it.
+            trialArchive?.FinalizeLatestTrial(Time.time, TrialEndReason.Completion);
+
+            if (!inRewindMode && trialArchive != null && trialArchive.TrialCount > 0)
+                EnterRewindMode(trialArchive.TrialCount - 1);
         }
 
         void Update()
@@ -320,6 +345,12 @@ namespace SessionReview
 
         private void HandleTrialStartPromptInput()
         {
+            if (Input.GetKeyDown(KeyCode.Escape))
+            {
+                ReturnToOnboardingFromTrialPrompt();
+                return;
+            }
+
             if (Input.GetKeyDown(startTrialKey) || Input.GetKeyDown(KeyCode.KeypadEnter))
             {
                 if (trialStartReady)
@@ -335,6 +366,14 @@ namespace SessionReview
             {
                 HidePostTrialPrompt();
                 EnterRewindMode(trialArchive.TrialCount - 1);
+                return;
+            }
+
+            // Dismiss the menu but keep the run going so the remaining agents can be
+            // watched live; [Tab] still re-opens review at any time.
+            if (Input.GetKeyDown(KeyCode.Escape))
+            {
+                HidePostTrialPrompt();
                 return;
             }
 
@@ -463,7 +502,7 @@ namespace SessionReview
                 GUIUtility.keyboardControl = 0;
                 bool before = rewindController.IsPlaying;
                 rewindController.TogglePlayPause();
-                Debug.Log($"[SessionReview] Space pressed. isPlaying {before} -> {rewindController.IsPlaying}  speed={rewindController.PlaybackSpeed:F2}");
+                SessionReview.SessionReviewLog.Log($"[SessionReview] Space pressed. isPlaying {before} -> {rewindController.IsPlaying}  speed={rewindController.PlaybackSpeed:F2}");
             }
 
             if (Input.GetKeyDown(KeyCode.LeftArrow))
@@ -478,13 +517,13 @@ namespace SessionReview
 
             if (lightingTestPressed)
             {
-                Debug.Log("[SessionReview] Replay lighting test key detected.");
+                SessionReview.SessionReviewLog.Log("[SessionReview] Replay lighting test key detected.");
                 rewindController.ToggleLightingReplayTest();
             }
 
             if (audioTestPressed)
             {
-                Debug.Log("[SessionReview] Replay audio test key detected.");
+                SessionReview.SessionReviewLog.Log("[SessionReview] Replay audio test key detected.");
                 rewindController.PlayAudioReplayTest();
             }
 
@@ -506,6 +545,12 @@ namespace SessionReview
 
             if (Input.GetKeyDown(ghostTrailKey))
                 rewindController.ToggleTrails();
+
+            if (Input.GetKeyDown(toggleInfoKey))
+                rewindController.ToggleReplayInfo();
+
+            if (Input.GetKeyDown(toggleGhostRobotsKey))
+                rewindController.ToggleGhostComparison();
 
             // Trial navigation takes priority over speed when the same keys are bound to both.
             // Speed only fires when no trial switch occurred this frame.
@@ -583,6 +628,11 @@ namespace SessionReview
             Vector2 mouse = Input.mousePosition;
             float guiY = Screen.height - mouse.y;
 
+            // Draggable review panels (Metrics, etc.) manage their own scroll, so scrolling
+            // over one must not also zoom the top-down scene behind it.
+            if (ReviewPanels.AnyPanelContains(new Vector2(mouse.x, guiY)))
+                return true;
+
             Rect topRightStatusRect = new Rect(Screen.width - 340f, 10f, 330f, 50f);
             if (topRightStatusRect.Contains(new Vector2(mouse.x, guiY)))
                 return true;
@@ -603,7 +653,9 @@ namespace SessionReview
                     return true;
             }
 
-            Rect progressBarRect = new Rect(15f, Screen.height - 75f, Screen.width - 30f, 70f);
+            float barW = Mathf.Min(Screen.width - 40f, 1180f);
+            float barX = (Screen.width - barW) * 0.5f;
+            Rect progressBarRect = new Rect(barX, Screen.height - 116f, barW, 110f);
             return progressBarRect.Contains(new Vector2(mouse.x, guiY));
         }
 
@@ -635,6 +687,15 @@ namespace SessionReview
             savedTimeScale = Time.timeScale;
             Time.timeScale = 0f;
 
+            // Suppress the live ROS plan line (GlobalPlanVisualizer) for the whole review.
+            // It is a separate persistent renderer the review "Hide All" menu can't toggle,
+            // and it keeps redrawing whenever ROS republishes the global plan (message delivery
+            // runs in Update, unaffected by the frozen Time.timeScale), so a one-shot clear
+            // reappears immediately. The review overlay shows its own hideable snapshot copy
+            // ("ROS Nav Plan") instead. Restored in ExitReviewMode.
+            foreach (var live in FindObjectsOfType<SEAN.Display.PlanVisualizer>())
+                live.SetRenderingSuppressed(true);
+
             trajectoryRenderer.ShowTrajectories(trial, recording, controlModeLog, planSnapshots, vlmCaptures, signalAnnotations, timeOffset);
             metricsOverlay.ShowTrial(trial);
             rewindController.EnterRewind(trial, recording, controlModeLog, trajectoryRenderer, timeOffset, signalAnnotations);
@@ -658,6 +719,10 @@ namespace SessionReview
 
             // Restore simulation
             Time.timeScale = savedTimeScale;
+
+            // Re-enable the live ROS plan line that was suppressed on review entry.
+            foreach (var live in FindObjectsOfType<SEAN.Display.PlanVisualizer>())
+                live.SetRenderingSuppressed(false);
 
             showReviewExportPanel = false;
             currentReviewTrial = null;
@@ -894,6 +959,10 @@ namespace SessionReview
                 DrawTopDownReviewControls();
 
                 DrawReviewExportPanel();
+
+                // Row of toggles to re-open any review panel (Metrics/Legend/Trajectory)
+                // closed via its title-bar [x].
+                ReviewPanels.DrawToggleBar();
             }
 
             if (inWorldBuildingMode)
@@ -1148,24 +1217,29 @@ namespace SessionReview
         {
             string reasonText = latestTrialEndInfo != null ? latestTrialEndInfo.reason.ToString() : "Completion";
 
-            float width = 420f;
-            float height = 150f;
+            float width = 480f;
+            float height = 176f;
             Rect rect = new Rect((Screen.width - width) * 0.5f, 24f, width, height);
 
             GUI.Box(rect, "");
             GUI.Label(new Rect(rect.x + 18f, rect.y + 16f, rect.width - 36f, 24f),
-                $"SESSION ENDED ({reasonText})");
-            GUI.Label(new Rect(rect.x + 18f, rect.y + 46f, rect.width - 36f, 40f),
-                $"[{replayTrialKey}] Run again    [{reviewToggleKey}] Review panel");
+                $"TRIAL READY TO REVIEW ({reasonText})");
+            GUI.Label(new Rect(rect.x + 18f, rect.y + 44f, rect.width - 36f, 48f),
+                "An agent reached its goal. The run keeps going for the others.\n" +
+                $"[{replayTrialKey}] Run again   [{reviewToggleKey}] Review   [Esc] Keep watching");
 
-            if (GUI.Button(new Rect(rect.x + 18f, rect.y + 98f, 168f, 34f), $"Run Again [{replayTrialKey}]"))
+            float by = rect.y + 108f;
+            if (GUI.Button(new Rect(rect.x + 18f, by, 140f, 34f), $"Run Again [{replayTrialKey}]"))
                 StartNextTrialFromPrompt();
 
-            if (GUI.Button(new Rect(rect.x + 234f, rect.y + 98f, 168f, 34f), $"Review [{reviewToggleKey}]"))
+            if (GUI.Button(new Rect(rect.x + 168f, by, 140f, 34f), $"Review [{reviewToggleKey}]"))
             {
                 HidePostTrialPrompt();
                 EnterRewindMode(trialArchive.TrialCount - 1);
             }
+
+            if (GUI.Button(new Rect(rect.x + 318f, by, 140f, 34f), "Keep Watching [Esc]"))
+                HidePostTrialPrompt();
         }
 
         private void DrawReviewCompletionPrompt()
@@ -1680,73 +1754,111 @@ namespace SessionReview
             bool noRosReady = IsTrialPreviewReadyWithoutRosBackend();
 
             float width = 520f;
-            float height = allowStartWithoutRosBackend ? 312f : 260f;
+            float height = allowStartWithoutRosBackend ? 410f : 384f;
             Rect rect = new Rect((Screen.width - width) * 0.5f, 24f, width, height);
 
             GUI.Box(rect, "");
-            GUI.Label(new Rect(rect.x + 18f, rect.y + 16f, rect.width - 36f, 28f),
+
+            float pad = 18f;
+            float x = rect.x + pad;
+            float w = rect.width - pad * 2f;
+            float y = rect.y + 16f;
+
+            GUI.Label(new Rect(x, y, w, 28f),
                 trialStartReady ? "SESSION READY" : "LOADING SESSION");
-            GUI.Label(new Rect(rect.x + 18f, rect.y + 50f, rect.width - 36f, 48f),
+            y += 34f;
+
+            GUI.Label(new Rect(x, y, w, 24f),
                 trialStartReady
                     ? "Robot, PWD, and cameras are loaded. Start when you are ready."
                     : "Preparing robot, pedestrians, and camera view...");
+            y += 40f;
 
-            float controlsY = rect.y + 104f;
-            GUI.Label(new Rect(rect.x + 18f, controlsY, 220f, 24f), "Robot Control", onboardingSectionStyle);
-            if (DrawChipButton(new Rect(rect.x + 18f, controlsY + 30f, 110f, 34f), "Manual",
+            // Which role the human controls. The camera follows this role.
+            GUI.Label(new Rect(x, y, w, 26f), "You play", onboardingSectionStyle);
+            y += 32f;
+            if (DrawChipButton(new Rect(x, y, 172f, 34f), "Robot",
+                selectedPlayerMode == OnboardingPlayerMode.Robot))
+            {
+                SetPlayerMode(OnboardingPlayerMode.Robot);
+            }
+            if (DrawChipButton(new Rect(x + 182f, y, 172f, 34f), "Human (PWD)",
+                selectedPlayerMode == OnboardingPlayerMode.Human))
+            {
+                SetPlayerMode(OnboardingPlayerMode.Human);
+            }
+            y += 46f;
+
+            // Manual / Auto per role, independent of who the human plays.
+            GUI.Label(new Rect(x, y, 230f, 26f), "Robot Control", onboardingSectionStyle);
+            GUI.Label(new Rect(x + 254f, y, 230f, 26f), "PWD Control", onboardingSectionStyle);
+            y += 32f;
+            if (DrawChipButton(new Rect(x, y, 110f, 34f), "Manual",
                 selectedRobotStartupControl == StartupControlMode.Manual))
             {
                 SetRobotStartupControl(StartupControlMode.Manual);
             }
-            if (DrawChipButton(new Rect(rect.x + 136f, controlsY + 30f, 110f, 34f), "Auto",
+            if (DrawChipButton(new Rect(x + 118f, y, 110f, 34f), "Auto",
                 selectedRobotStartupControl == StartupControlMode.Auto))
             {
                 SetRobotStartupControl(StartupControlMode.Auto);
             }
-
-            GUI.Label(new Rect(rect.x + 272f, controlsY, 220f, 24f), "PWD Control", onboardingSectionStyle);
-            if (DrawChipButton(new Rect(rect.x + 272f, controlsY + 30f, 110f, 34f), "Manual",
+            if (DrawChipButton(new Rect(x + 254f, y, 110f, 34f), "Manual",
                 selectedPwdStartupControl == StartupControlMode.Manual))
             {
                 SetPwdStartupControl(StartupControlMode.Manual);
             }
-            if (DrawChipButton(new Rect(rect.x + 390f, controlsY + 30f, 110f, 34f), "Auto",
+            if (DrawChipButton(new Rect(x + 372f, y, 110f, 34f), "Auto",
                 selectedPwdStartupControl == StartupControlMode.Auto))
             {
                 SetPwdStartupControl(StartupControlMode.Auto);
             }
+            y += 46f;
 
-            GUI.Label(new Rect(rect.x + 18f, rect.y + 176f, rect.width - 36f, 36f),
-                "Robot and PWD can be set independently. The opposite pairing is only the default recommendation.",
+            GUI.Label(new Rect(x, y, w, 34f),
+                "Set roles independently. WASD drives your role; the other manual role uses the arrow keys.",
                 onboardingHintStyle);
+            y += 40f;
 
             if (allowStartWithoutRosBackend)
             {
-                GUI.Label(new Rect(rect.x + 18f, rect.y + 212f, rect.width - 36f, 28f),
+                GUI.Label(new Rect(x, y, w, 22f),
                     trialStartReady
                         ? "ROS-backed start is ready. You can still bypass ROS explicitly if needed."
                         : noRosReady
                             ? "No ROS backend? The scene is ready; only the live planner is missing."
                             : "Preparing non-ROS scene setup before a bypass start is allowed.",
                     onboardingHintStyle);
+                y += 26f;
             }
 
             GUI.enabled = trialStartReady || bypassRosBackendForTrialStart;
-            if (GUI.Button(new Rect(rect.x + 152f, rect.y + 214f, 218f, 36f),
+            if (GUI.Button(new Rect(x, y, w, 34f),
                 trialStartReady ? $"Start Trial [{startTrialKey}]" : "Loading..."))
             {
                 StartTrialFromPrompt();
             }
             GUI.enabled = true;
+            y += 42f;
 
+            float halfW = (w - 10f) * 0.5f;
             if (allowStartWithoutRosBackend)
             {
                 GUI.enabled = trialStartReady || noRosReady;
-                if (GUI.Button(new Rect(rect.x + 152f, rect.y + 258f, 218f, 32f), "Start Without ROS Backend"))
+                if (GUI.Button(new Rect(x, y, halfW, 32f), "Start Without ROS Backend"))
                 {
                     StartTrialWithoutRosBackend();
                 }
                 GUI.enabled = true;
+
+                if (GUI.Button(new Rect(x + halfW + 10f, y, halfW, 32f), "Go Back [Esc]"))
+                {
+                    ReturnToOnboardingFromTrialPrompt();
+                }
+            }
+            else if (GUI.Button(new Rect(x, y, w, 32f), "Go Back [Esc]"))
+            {
+                ReturnToOnboardingFromTrialPrompt();
             }
         }
 
@@ -2329,12 +2441,18 @@ namespace SessionReview
 
         private void ApplyStartupControlDefaults()
         {
+            // The human's chosen role drives with WASD; the other role (if also manual)
+            // is remapped to the arrow keys so the two don't move together.
+            bool robotIsPlayerRole = selectedPlayerMode == OnboardingPlayerMode.Robot;
+            bool pwdIsPlayerRole = selectedPlayerMode == OnboardingPlayerMode.Human;
+
             var velocityController = FindObjectOfType<SEAN.Control.VelocityController>();
             if (velocityController != null)
             {
                 bool robotManual = selectedRobotStartupControl == StartupControlMode.Manual;
                 velocityController.startInManualMode = robotManual;
                 velocityController.SetManualControlActive(robotManual);
+                velocityController.manualUseArrowKeys = !robotIsPlayerRole;
             }
 
             var pwdControllers = FindObjectsOfType<IVI.ManualWheelchairController>(true);
@@ -2346,17 +2464,17 @@ namespace SessionReview
                     continue;
 
                 pwdController.startInManualMode = pwdManual;
+                pwdController.manualUseArrowKeys = !pwdIsPlayerRole;
                 if (allowPwdMovement)
                     UnfreezePwdController(pwdController, pwdManual);
                 else
                     FreezePwdController(pwdController);
             }
 
-            bool usePwdAsMainCamera =
-                selectedPlayerMode == OnboardingPlayerMode.Human &&
-                selectedPwdStartupControl == StartupControlMode.Manual;
-
-            if (usePwdAsMainCamera)
+            // The camera follows whichever role the human is playing, regardless of
+            // whether that role is Manual or Auto (so an all-Auto session watched as the
+            // PWD still shows the PWD view instead of snapping back to the robot).
+            if (pwdIsPlayerRole)
                 ActivatePwdCameraAsMain();
             else
                 RestoreRobotGameplayCameras();
@@ -2410,7 +2528,15 @@ namespace SessionReview
 
         private static readonly HashSet<string> pwdCameraNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "wheelchairCamera", "PWDThirdPersonCamera", "PWDFirstPersonCamera"
+            "wheelchairCamera", "PWDThirdPersonCamera", "PWDFirstPersonCamera", "PWDOverheadCamera"
+        };
+
+        // The PWD's auxiliary on-screen panels (top-down + first-person) created by
+        // RandomAvatar.AttachPlayerMiniScreens. Kept rendering alongside the main
+        // PWD view rather than being disabled with the rest of the cameras.
+        private static readonly HashSet<string> pwdMiniCameraNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "PWDOverheadCamera", "PWDFirstPersonCamera"
         };
 
         private static bool IsPwdCamera(Camera cam)
@@ -2425,6 +2551,11 @@ namespace SessionReview
                     return true;
             }
             return false;
+        }
+
+        private static bool IsPwdMiniCamera(Camera cam)
+        {
+            return cam != null && pwdMiniCameraNames.Contains(cam.name);
         }
 
         private Camera FindPwdCamera()
@@ -2513,7 +2644,7 @@ namespace SessionReview
             if (IsManagedGameplayCamera(legacyMain, sean))
                 return;
 
-            Debug.Log($"[SessionReview] Destroying legacy standalone main camera '{legacyMain.name}'");
+            SessionReview.SessionReviewLog.Log($"[SessionReview] Destroying legacy standalone main camera '{legacyMain.name}'");
             Destroy(legacyMain.gameObject);
         }
 
@@ -2563,10 +2694,25 @@ namespace SessionReview
             {
                 if (cam == pwdCam)
                     continue;
+
+                // Keep the PWD's own top-down / first-person mini panels rendering on
+                // the main display alongside the third-person view (they mirror the
+                // robot's two on-screen views). Everything else is turned off.
+                if (IsPwdMiniCamera(cam))
+                {
+                    cam.gameObject.SetActive(true);
+                    cam.enabled = true;
+                    cam.targetDisplay = 0;
+                    // Ensure the panels composite on top of the full-screen main view.
+                    if (cam.depth <= pwdCam.depth)
+                        cam.depth = pwdCam.depth + 10f;
+                    continue;
+                }
+
                 cam.enabled = false;
             }
 
-            Debug.Log($"[SessionReview] Activated PWD camera '{pwdCam.name}' as main view");
+            SessionReview.SessionReviewLog.Log($"[SessionReview] Activated PWD camera '{pwdCam.name}' as main view");
         }
 
         private void InitializeOnboardingSelection()
@@ -2937,6 +3083,34 @@ namespace SessionReview
             if (!showTrialStartPrompt)
                 return;
             ApplyStartupControlDefaults();
+        }
+
+        private void SetPlayerMode(OnboardingPlayerMode mode)
+        {
+            // Switch which role the human controls WITHOUT resetting the Manual/Auto
+            // choices (unlike ApplyRecommendedStartupControlsForPlayerMode). If the ready
+            // prompt is open this re-applies the camera + WASD/arrow scheme immediately.
+            if (selectedPlayerMode == mode)
+                return;
+            selectedPlayerMode = mode;
+            RefreshOnboardingWarmupState();
+            ApplyStartupControlsIfTrialPromptVisible();
+        }
+
+        private void ReturnToOnboardingFromTrialPrompt()
+        {
+            // Restore the time the ready prompt froze before reopening onboarding, so
+            // onboarding captures the running timescale rather than the frozen 0.
+            if (trialStartPromptPausedTime)
+            {
+                Time.timeScale = savedTimeScale;
+                trialStartPromptPausedTime = false;
+            }
+
+            showTrialStartPrompt = false;
+            trialStartReady = false;
+            trialWarmupPending = false;
+            SetOnboardingVisible(true);
         }
 
         private bool CanWarmupCurrentSelectionInActiveScene()
