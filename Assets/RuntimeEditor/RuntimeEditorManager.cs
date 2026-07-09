@@ -4,6 +4,7 @@ using UnityEngine.EventSystems;
 using UnityEngine.UI;
 using TMPro;
 using System.Collections;
+using SessionReview;
 
 [System.Serializable]
 public class SpawnableObject
@@ -83,6 +84,24 @@ public class RuntimeEditorManager : MonoBehaviour
     [Tooltip("Show an on-screen debug HUD describing what each click hits, resolves to, and the action taken.")]
     public bool showClickDebug = true;
 
+    bool worldBuildingHelpOpen;
+    bool worldBuildingHelpPopupRectValid;
+    Rect worldBuildingHelpPopupRect;
+    bool clickDebugMinimized;
+    const float WorldBuildingHelperPanelHeaderHeight = 36f;
+    const float WorldBuildingHelpButtonSize = 36f;
+    const float WorldBuildingHelpMargin = 16f;
+    const float WorldBuildingHelpPopupWidth = 420f;
+    public string worldBuildingSupplementaryHelpText;
+
+    public void CloseWorldBuildingHelpPopup()
+    {
+        worldBuildingHelpOpen = false;
+        worldBuildingHelpPopupRectValid = false;
+    }
+    const float PanelMinimizeToggleWidth = 28f;
+    const float PanelMinimizeToggleHeight = 22f;
+
     // Last-click diagnostics rendered by the debug HUD.
     private string _clickDebug = "(no click yet)";
 
@@ -101,6 +120,20 @@ public class RuntimeEditorManager : MonoBehaviour
 
     public GameObject CurrentSelectedObject => currentSelectedObject;
     public Camera ActiveRaycastCamera => mainCamera;
+
+    public bool ContainsWorldBuildingHelperUi(Vector2 guiPoint)
+    {
+        if (!isEditorActive)
+            return false;
+
+        if (showClickDebug && GetClickDebugPanelRect().Contains(guiPoint))
+            return true;
+
+        if (highlightMoveableObjects && ContainsWorldBuildingHelpUi(guiPoint))
+            return true;
+
+        return false;
+    }
 
     // Event that other systems can subscribe to
     public delegate void EditorModeChanged(bool isActive);
@@ -843,8 +876,8 @@ public class RuntimeEditorManager : MonoBehaviour
     {
         if (!isEditorActive) return;
 
-        // Legend explaining the moveable outline; shown in both normal and World Building modes.
-        DrawMoveableLegend();
+        // Moveable legend + optional controls, combined in a ? help popup.
+        DrawWorldBuildingHelpButtonAndPopup();
 
         // Debug HUD describing the last click; shown in both modes when enabled.
         DrawClickDebug();
@@ -907,6 +940,25 @@ public class RuntimeEditorManager : MonoBehaviour
         if (!showClickDebug)
             return;
 
+        Rect panel = GetClickDebugPanelRect();
+        var style = new GUIStyle(GUI.skin.box)
+        {
+            fontSize = 12,
+            alignment = TextAnchor.UpperLeft,
+            wordWrap = true,
+            richText = false
+        };
+        style.normal.textColor = Color.yellow;
+
+        if (clickDebugMinimized)
+        {
+            GUI.Box(panel, GUIContent.none, style);
+            GUI.Label(new Rect(panel.x + 10f, panel.y + 8f, panel.width - PanelMinimizeToggleWidth - 24f, 20f),
+                "Click debug", style);
+            DrawPanelMinimizeToggle(panel, ref clickDebugMinimized);
+            return;
+        }
+
         string cam = mainCamera != null ? mainCamera.name : "NULL";
         string sel = currentSelectedObject != null ? currentSelectedObject.name : "(none)";
 
@@ -918,36 +970,24 @@ public class RuntimeEditorManager : MonoBehaviour
             $"Bind key held: {(allowRuntimeBinding && Input.GetKey(bindMoveableKey))}\n" +
             $"Last click:\n{_clickDebug}";
 
-        var style = new GUIStyle(GUI.skin.box)
-        {
-            fontSize = 12,
-            alignment = TextAnchor.UpperLeft,
-            wordWrap = true,
-            richText = false
-        };
-        style.normal.textColor = Color.yellow;
-
-        float w = 360f;
-        float h = 168f;
-        GUI.Box(new Rect(Screen.width - w - 12f, 12f, w, h), text, style);
+        GUI.Box(panel, text, style);
+        DrawPanelMinimizeToggle(panel, ref clickDebugMinimized);
     }
 
-    /// <summary>
-    /// Bottom-left on-screen legend explaining what the in-scene moveable outline means and how to
-    /// bind non-moveable objects at runtime.
-    /// </summary>
-    void DrawMoveableLegend()
+    Rect GetClickDebugPanelRect()
+    {
+        const float w = 360f;
+        const float x = 12f;
+        if (clickDebugMinimized)
+            return new Rect(Screen.width - w - x, 12f, w, WorldBuildingHelperPanelHeaderHeight);
+
+        return new Rect(Screen.width - w - x, 12f, w, 168f);
+    }
+
+    void DrawWorldBuildingHelpButtonAndPopup()
     {
         if (!highlightMoveableObjects)
             return;
-
-        const float pad = 10f;
-        const float swatch = 16f;
-        float panelW = 290f;
-        float panelH = allowRuntimeBinding ? 92f : 48f;
-        var panel = new Rect(16f, Screen.height - panelH - 16f, panelW, panelH);
-
-        GUI.Box(panel, GUIContent.none);
 
         var label = new GUIStyle(GUI.skin.label)
         {
@@ -957,24 +997,175 @@ public class RuntimeEditorManager : MonoBehaviour
         };
         label.normal.textColor = Color.white;
 
-        // Color swatch matching the wireframe color.
-        var swatchRect = new Rect(panel.x + pad, panel.y + pad, swatch, swatch);
-        Color prev = GUI.color;
-        GUI.color = moveableHighlightColor;
-        GUI.DrawTexture(swatchRect, Texture2D.whiteTexture);
-        GUI.color = prev;
-
-        GUI.Label(
-            new Rect(swatchRect.xMax + 8f, panel.y + pad - 2f, panelW - swatch - pad * 2f - 8f, 20f),
-            "Outlined = moveable (drag it)", label);
-
-        if (allowRuntimeBinding)
+        var sectionStyle = new GUIStyle(label)
         {
+            fontStyle = FontStyle.Bold
+        };
+
+        var helpButtonStyle = new GUIStyle(GUI.skin.button)
+        {
+            alignment = TextAnchor.MiddleCenter,
+            fontSize = 18,
+            fontStyle = FontStyle.Bold,
+            padding = new RectOffset(0, 0, 0, 0),
+            margin = new RectOffset(0, 0, 0, 0),
+        };
+
+        if (worldBuildingHelpOpen)
+        {
+            float popupHeight = GetWorldBuildingHelpPopupHeight(label);
+            Rect popupRect = GetWorldBuildingHelpPopupRect(popupHeight);
+            worldBuildingHelpPopupRect = popupRect;
+            worldBuildingHelpPopupRectValid = true;
+            GUI.Box(popupRect, GUIContent.none);
+
+            const float pad = 12f;
+            const float closeButtonSize = 28f;
+            float contentWidth = popupRect.width - pad * 2f - closeButtonSize - 4f;
+            float y = popupRect.y + pad;
+
+            Rect closeRect = new Rect(
+                popupRect.xMax - closeButtonSize - pad,
+                popupRect.y + pad - 2f,
+                closeButtonSize,
+                closeButtonSize);
+            if (GUI.Button(closeRect, "X", GetMinimizeToggleButtonStyle()))
+                CloseWorldBuildingHelpPopup();
+
+            GUI.Label(new Rect(popupRect.x + pad, y, contentWidth, 22f), "Help", sectionStyle);
+            y += 28f;
+
+            if (!string.IsNullOrEmpty(worldBuildingSupplementaryHelpText))
+            {
+                GUI.Label(new Rect(popupRect.x + pad, y, popupRect.width - pad * 2f, 22f), "Controls", sectionStyle);
+                y += 24f;
+
+                float controlsHeight = label.CalcHeight(new GUIContent(worldBuildingSupplementaryHelpText), popupRect.width - pad * 2f);
+                GUI.Label(new Rect(popupRect.x + pad, y, popupRect.width - pad * 2f, controlsHeight), worldBuildingSupplementaryHelpText, label);
+                y += controlsHeight + 12f;
+            }
+
+            const float swatch = 16f;
+            var swatchRect = new Rect(popupRect.x + pad, y + 2f, swatch, swatch);
+            Color prev = GUI.color;
+            GUI.color = moveableHighlightColor;
+            GUI.DrawTexture(swatchRect, Texture2D.whiteTexture);
+            GUI.color = prev;
+
             GUI.Label(
-                new Rect(panel.x + pad, panel.y + pad + swatch + 6f, panelW - pad * 2f, 58f),
-                $"Hold [{bindMoveableKey}] + click an un-outlined object to make it moveable.\n" +
-                $"Hold [{bindMoveableKey}] + drag a box to add many at once.", label);
+                new Rect(swatchRect.xMax + 8f, y, popupRect.width - pad * 2f - swatch - 8f, 22f),
+                "Moveable Legend",
+                sectionStyle);
+            y += 26f;
+
+            string legendText = allowRuntimeBinding
+                ? $"Outlined objects can be dragged. Hold [{bindMoveableKey}] + click an un-outlined object to make it moveable.\n" +
+                  $"Hold [{bindMoveableKey}] + drag a box to add many at once."
+                : "Outlined objects can be dragged.";
+            float legendHeight = label.CalcHeight(new GUIContent(legendText), popupRect.width - pad * 2f);
+            GUI.Label(new Rect(popupRect.x + pad, y, popupRect.width - pad * 2f, legendHeight), legendText, label);
+            return;
         }
+
+        worldBuildingHelpPopupRectValid = false;
+        if (GUI.Button(GetWorldBuildingHelpButtonRect(), "?", helpButtonStyle))
+            worldBuildingHelpOpen = true;
+    }
+
+    float GetWorldBuildingHelpPopupHeight(GUIStyle bodyStyle)
+    {
+        const float pad = 12f;
+        float contentWidth = WorldBuildingHelpPopupWidth - pad * 2f;
+        float height = pad + 28f;
+
+        if (!string.IsNullOrEmpty(worldBuildingSupplementaryHelpText))
+        {
+            height += 24f;
+            height += bodyStyle.CalcHeight(new GUIContent(worldBuildingSupplementaryHelpText), contentWidth) + 12f;
+        }
+
+        string legendText = allowRuntimeBinding
+            ? $"Outlined objects can be dragged. Hold [{bindMoveableKey}] + click an un-outlined object to make it moveable.\n" +
+              $"Hold [{bindMoveableKey}] + drag a box to add many at once."
+            : "Outlined objects can be dragged.";
+        height += 26f;
+        height += bodyStyle.CalcHeight(new GUIContent(legendText), contentWidth);
+
+        return height + pad;
+    }
+
+    Rect GetWorldBuildingHelpButtonRect()
+    {
+        return new Rect(
+            WorldBuildingHelpMargin,
+            Screen.height - WorldBuildingHelpButtonSize - WorldBuildingHelpMargin,
+            WorldBuildingHelpButtonSize,
+            WorldBuildingHelpButtonSize);
+    }
+
+    Rect GetWorldBuildingHelpPopupRect(float popupHeight)
+    {
+        Rect anchorRect = GetWorldBuildingHelpButtonRect();
+        float bottomY = anchorRect.y + anchorRect.height;
+        return new Rect(
+            anchorRect.x,
+            bottomY - popupHeight,
+            WorldBuildingHelpPopupWidth,
+            popupHeight);
+    }
+
+    bool ContainsWorldBuildingHelpUi(Vector2 guiPoint)
+    {
+        if (worldBuildingHelpOpen)
+        {
+            if (worldBuildingHelpPopupRectValid)
+                return worldBuildingHelpPopupRect.Contains(guiPoint);
+
+            // Popup is open but OnGUI has not run yet this frame; use a safe fallback height.
+            return GetWorldBuildingHelpPopupRect(320f).Contains(guiPoint);
+        }
+
+        return GetWorldBuildingHelpButtonRect().Contains(guiPoint);
+    }
+
+    static GUIStyle minimizeToggleButtonStyle;
+
+    static GUIStyle GetMinimizeToggleButtonStyle()
+    {
+        if (minimizeToggleButtonStyle == null)
+        {
+            minimizeToggleButtonStyle = new GUIStyle(GUI.skin.button)
+            {
+                alignment = TextAnchor.MiddleCenter,
+                padding = new RectOffset(0, 0, 0, 0),
+                margin = new RectOffset(0, 0, 0, 0),
+                clipping = TextClipping.Overflow,
+            };
+        }
+
+        return minimizeToggleButtonStyle;
+    }
+
+    public static void DrawMinimizeToggleButton(Rect toggleRect, ref bool minimized)
+    {
+        string toggleLabel = minimized ? "+" : "\u2014";
+        if (GUI.Button(toggleRect, toggleLabel, GetMinimizeToggleButtonStyle()))
+        {
+            minimized = !minimized;
+            if (minimized)
+                GUI.FocusControl(null);
+        }
+    }
+
+    static void DrawPanelMinimizeToggle(Rect panelRect, ref bool minimized)
+    {
+        Rect toggleRect = new Rect(
+            panelRect.xMax - PanelMinimizeToggleWidth - 8f,
+            panelRect.y + 6f,
+            PanelMinimizeToggleWidth,
+            PanelMinimizeToggleHeight);
+
+        DrawMinimizeToggleButton(toggleRect, ref minimized);
     }
 
     // ===== LAYER MANAGEMENT HELPER METHODS =====
@@ -1164,6 +1355,9 @@ public class RuntimeEditorManager : MonoBehaviour
         Vector3 spawnPosition = GetSpawnPosition();
 
         GameObject spawnedObject = Instantiate(spawnableObject.prefab, spawnPosition, Quaternion.identity);
+        if (WorldBuildingSpawnLibrary.IsCharacterSpawnPrefab(spawnableObject.prefab.name))
+            PrepareCharacterSpawnForWorldBuilding(spawnedObject, spawnPosition);
+
         if (spawnedObject.GetComponent<SEAN.Scenario.Obstacles.TrackedObstacle>() == null)
         {
             var obstacle = spawnedObject.AddComponent<SEAN.Scenario.Obstacles.TrackedObstacle>();
@@ -1191,6 +1385,210 @@ public class RuntimeEditorManager : MonoBehaviour
 
         // Top-down / ortho: ray usually points into the scene; avoid using world-space forward alone (can miss the ground).
         return ray.GetPoint(spawnDistance);
+    }
+
+    void PrepareCharacterSpawnForWorldBuilding(GameObject obj, Vector3 spawnPoint)
+    {
+        AlignSpawnedObjectToSpawnPoint(obj, spawnPoint);
+        EnsureRootSelectionCollider(obj);
+        DisableEmbeddedViewCameras(obj);
+        DisableSpawnedWorldUi(obj);
+        DisableChildColliders(obj);
+        FreezeSpawnedPhysics(obj);
+        DisableSpawnedAgentControllers(obj);
+    }
+
+    void AlignSpawnedObjectToSpawnPoint(GameObject obj, Vector3 spawnPoint)
+    {
+        if (obj == null || !TryGetRendererBounds(obj, out Bounds bounds))
+            return;
+
+        Vector3 adjustment = new Vector3(
+            spawnPoint.x - bounds.center.x,
+            spawnPoint.y - bounds.min.y,
+            spawnPoint.z - bounds.center.z);
+        obj.transform.position += adjustment;
+    }
+
+    void EnsureRootSelectionCollider(GameObject root)
+    {
+        if (root == null || root.GetComponent<Collider>() != null)
+            return;
+
+        var box = root.AddComponent<BoxCollider>();
+        if (TryGetLocalRendererBounds(root, out Bounds bounds))
+        {
+            box.center = bounds.center;
+            box.size = bounds.size;
+        }
+        else
+        {
+            box.center = new Vector3(0f, 0.7f, 0f);
+            box.size = new Vector3(0.8f, 1.4f, 1.1f);
+        }
+    }
+
+    void DisableEmbeddedViewCameras(GameObject obj)
+    {
+        if (obj == null)
+            return;
+
+        foreach (Camera camera in obj.GetComponentsInChildren<Camera>(true))
+        {
+            if (camera != null)
+                camera.enabled = false;
+        }
+
+        foreach (AudioListener listener in obj.GetComponentsInChildren<AudioListener>(true))
+        {
+            if (listener != null)
+                listener.enabled = false;
+        }
+
+        foreach (IVI.WheelchairCameraSmoothing smoothing in obj.GetComponentsInChildren<IVI.WheelchairCameraSmoothing>(true))
+        {
+            if (smoothing != null)
+                Destroy(smoothing);
+        }
+
+        foreach (IVI.CameraScript cameraScript in obj.GetComponentsInChildren<IVI.CameraScript>(true))
+        {
+            if (cameraScript != null)
+                cameraScript.enabled = false;
+        }
+    }
+
+    void DisableSpawnedWorldUi(GameObject obj)
+    {
+        if (obj == null)
+            return;
+
+        foreach (Canvas canvas in obj.GetComponentsInChildren<Canvas>(true))
+        {
+            if (canvas != null)
+                canvas.enabled = false;
+        }
+    }
+
+    void DisableChildColliders(GameObject root)
+    {
+        if (root == null)
+            return;
+
+        Collider rootCollider = root.GetComponent<Collider>();
+        foreach (Collider collider in root.GetComponentsInChildren<Collider>(true))
+        {
+            if (collider == null || collider == rootCollider)
+                continue;
+            collider.enabled = false;
+        }
+    }
+
+    void FreezeSpawnedPhysics(GameObject obj)
+    {
+        if (obj == null)
+            return;
+
+        foreach (Rigidbody rb in obj.GetComponentsInChildren<Rigidbody>(true))
+        {
+            if (rb == null)
+                continue;
+            rb.velocity = Vector3.zero;
+            rb.angularVelocity = Vector3.zero;
+            rb.isKinematic = true;
+        }
+    }
+
+    void DisableSpawnedAgentControllers(GameObject obj)
+    {
+        if (obj == null)
+            return;
+
+        foreach (IVI.ManualWheelchairController controller in obj.GetComponentsInChildren<IVI.ManualWheelchairController>(true))
+        {
+            if (controller != null)
+                controller.enabled = false;
+        }
+
+        foreach (IVI.SFPWDAgent agent in obj.GetComponentsInChildren<IVI.SFPWDAgent>(true))
+        {
+            if (agent != null)
+                agent.enabled = false;
+        }
+
+        foreach (CharacterController characterController in obj.GetComponentsInChildren<CharacterController>(true))
+        {
+            if (characterController != null)
+                characterController.enabled = false;
+        }
+    }
+
+    static bool TryGetRendererBounds(GameObject root, out Bounds bounds)
+    {
+        bounds = default;
+        bool hasBounds = false;
+
+        foreach (Renderer renderer in root.GetComponentsInChildren<Renderer>(true))
+        {
+            if (renderer == null)
+                continue;
+
+            if (!hasBounds)
+            {
+                bounds = renderer.bounds;
+                hasBounds = true;
+            }
+            else
+            {
+                bounds.Encapsulate(renderer.bounds);
+            }
+        }
+
+        return hasBounds;
+    }
+
+    static bool TryGetLocalRendererBounds(GameObject root, out Bounds bounds)
+    {
+        bounds = default;
+        bool hasBounds = false;
+
+        foreach (Renderer renderer in root.GetComponentsInChildren<Renderer>(true))
+        {
+            if (renderer == null)
+                continue;
+
+            Bounds localBounds = new Bounds(
+                root.transform.InverseTransformPoint(renderer.bounds.center),
+                Vector3.zero);
+
+            Vector3 extents = renderer.bounds.extents;
+            Vector3[] corners =
+            {
+                renderer.bounds.center + new Vector3(-extents.x, -extents.y, -extents.z),
+                renderer.bounds.center + new Vector3(-extents.x, -extents.y, extents.z),
+                renderer.bounds.center + new Vector3(-extents.x, extents.y, -extents.z),
+                renderer.bounds.center + new Vector3(-extents.x, extents.y, extents.z),
+                renderer.bounds.center + new Vector3(extents.x, -extents.y, -extents.z),
+                renderer.bounds.center + new Vector3(extents.x, -extents.y, extents.z),
+                renderer.bounds.center + new Vector3(extents.x, extents.y, -extents.z),
+                renderer.bounds.center + new Vector3(extents.x, extents.y, extents.z)
+            };
+
+            for (int i = 0; i < corners.Length; i++)
+                localBounds.Encapsulate(root.transform.InverseTransformPoint(corners[i]));
+
+            if (!hasBounds)
+            {
+                bounds = localBounds;
+                hasBounds = true;
+            }
+            else
+            {
+                bounds.Encapsulate(localBounds);
+            }
+        }
+
+        return hasBounds;
     }
 
     void RegisterEditableObject(GameObject obj)
@@ -1383,6 +1781,13 @@ public class RuntimeEditorManager : MonoBehaviour
 
     bool IsClickOnUI()
     {
+        if (SessionReviewManager.Instance != null &&
+            SessionReviewManager.Instance.IsPointerOverWorldBuildingUi())
+        {
+            Debug.Log("[Raycast] Pointer is over world-building UI. Ignoring click.");
+            return true;
+        }
+
         if (EventSystem.current == null) return false;
 
         if (EventSystem.current.IsPointerOverGameObject()) return true;

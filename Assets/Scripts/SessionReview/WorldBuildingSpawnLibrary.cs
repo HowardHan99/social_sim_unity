@@ -25,9 +25,13 @@ namespace SessionReview
     {
         private static List<SpawnableObject> _lastSpawnables = new List<SpawnableObject>();
         private static List<WorldBuildingSpawnUiRow> _lastUiRows = new List<WorldBuildingSpawnUiRow>();
+        private static List<WorldBuildingSpawnUiRow> _lastObjectUiRows = new List<WorldBuildingSpawnUiRow>();
+        private static List<WorldBuildingSpawnUiRow> _lastCharacterUiRows = new List<WorldBuildingSpawnUiRow>();
 
         public static IReadOnlyList<SpawnableObject> LastSpawnables => _lastSpawnables;
         public static IReadOnlyList<WorldBuildingSpawnUiRow> LastUiRows => _lastUiRows;
+        public static IReadOnlyList<WorldBuildingSpawnUiRow> LastObjectUiRows => _lastObjectUiRows;
+        public static IReadOnlyList<WorldBuildingSpawnUiRow> LastCharacterUiRows => _lastCharacterUiRows;
 
         public static void RefreshFromResources()
         {
@@ -36,6 +40,8 @@ namespace SessionReview
             {
                 _lastSpawnables = new List<SpawnableObject>();
                 _lastUiRows = new List<WorldBuildingSpawnUiRow>();
+                _lastObjectUiRows = new List<WorldBuildingSpawnUiRow>();
+                _lastCharacterUiRows = new List<WorldBuildingSpawnUiRow>();
                 return;
             }
 
@@ -48,6 +54,8 @@ namespace SessionReview
 
             _lastSpawnables = new List<SpawnableObject>();
             _lastUiRows = new List<WorldBuildingSpawnUiRow>();
+            _lastObjectUiRows = new List<WorldBuildingSpawnUiRow>();
+            _lastCharacterUiRows = new List<WorldBuildingSpawnUiRow>();
 
             for (int i = 0; i < prefabs.Length; i++)
             {
@@ -67,13 +75,35 @@ namespace SessionReview
                     spawnButton = null
                 });
 
-                _lastUiRows.Add(new WorldBuildingSpawnUiRow
+                var uiRow = new WorldBuildingSpawnUiRow
                 {
                     SpawnId = id,
                     DisplayName = HumanizePrefabName(prefab.name),
                     Thumbnail = thumbnail
-                });
+                };
+                _lastUiRows.Add(uiRow);
+
+                if (IsCharacterSpawnPrefab(prefab.name))
+                    _lastCharacterUiRows.Add(uiRow);
+                else
+                    _lastObjectUiRows.Add(uiRow);
             }
+        }
+
+        public static bool IsCharacterSpawnPrefab(string prefabName)
+        {
+            if (string.IsNullOrEmpty(prefabName))
+                return false;
+
+            string n = prefabName.ToLowerInvariant();
+            if (n.Contains("wheelchair"))
+                return true;
+            if (n.Contains("urs") && (n.Contains("user") || n.Contains("guest") || n.Contains("host")))
+                return true;
+            if (n.Contains("avatar") || n.Contains("pedestrian") || n.Contains("pwd"))
+                return true;
+
+            return false;
         }
 
         public static string HumanizePrefabName(string raw)

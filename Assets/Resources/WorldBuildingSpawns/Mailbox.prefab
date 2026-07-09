@@ -14,8 +14,6 @@ GameObject:
   - component: {fileID: 8044644568170218402}
   - component: {fileID: 8044644568170218403}
   - component: {fileID: 8044644568170218460}
-  - component: {fileID: 8044644568170218400}
-  - component: {fileID: 8044644568170218401}
   - component: {fileID: 8044644568170218407}
   m_Layer: 3
   m_Name: Mailbox
@@ -127,49 +125,6 @@ MonoBehaviour:
   id: 2
   type: box
   showDebug: 0
---- !u!114 &8044644568170218400
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 8044644568170218461}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 411743824, guid: 2198c5915bc2d4348bd36bcb1b631201, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  isObservedComponentsExpanded: 0
-  replayIdentity:
-    id: 11302
-  prefabIdentity:
-    id: 55760
-  observedComponents:
-  - {fileID: 8044644568170218401}
-  runtimeComponents:
-  - {fileID: 8044644568170218401}
-  isPrefab: 1
-  prefabType: 1
---- !u!114 &8044644568170218401
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 8044644568170218461}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: -864523685, guid: 2198c5915bc2d4348bd36bcb1b631201, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  noManagingObject: 0
-  replayIdentity:
-    id: 50913
-  replayObject:
-    reference: {fileID: 8044644568170218400}
-  positionFlags: 263
-  rotationFlags: 263
-  scaleFlags: 0
 --- !u!114 &8044644568170218407
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -183,9 +138,3 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   objectId: 
-  replayObject: {fileID: 8044644568170218400}
-  trackTransform: 1
-  trackRigidbody: 1
-  trackAnimator: 1
-  customProperties: []
-  debugMode: 1

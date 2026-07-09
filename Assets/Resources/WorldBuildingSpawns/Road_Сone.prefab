@@ -10,6 +10,7 @@ GameObject:
   m_Component:
   - component: {fileID: 7898762007372619874}
   - component: {fileID: 8608626170332890370}
+  - component: {fileID: -7996921867366626328}
   m_Layer: 0
   m_Name: "Road_\u0421one"
   m_TagString: Untagged
@@ -44,8 +45,21 @@ BoxCollider:
   m_IsTrigger: 0
   m_Enabled: 1
   serializedVersion: 2
-  m_Size: {x: 0.34909248, y: 0.5048052, z: 0.27768993}
-  m_Center: {x: -0.019158363, y: 0.2475974, z: -0.0040026307}
+  m_Size: {x: 0.7044106, y: 2.0298352, z: 0.27768993}
+  m_Center: {x: -0.011190027, y: 1.0101125, z: -0.0040026307}
+--- !u!114 &-7996921867366626328
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7410069136807279320}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1c19610482eb06543aa9acbc1aa7d22e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  objectId: 
 --- !u!1 &8660534184957503938
 GameObject:
   m_ObjectHideFlags: 0

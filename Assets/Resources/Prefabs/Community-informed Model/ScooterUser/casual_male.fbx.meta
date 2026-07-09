@@ -1,19 +1,9 @@
 fileFormatVersion: 2
-guid: 7a733c5d1747fa740a03604782e6e5e8
+guid: 137b52ae09b3743429ae623d9f834e09
 ModelImporter:
   serializedVersion: 20300
   internalIDToNameTable: []
-  externalObjects:
-  - first:
-      type: UnityEngine:Texture2D
-      assembly: UnityEngine.CoreModule
-      name: casual_man_color
-    second: {fileID: 2800000, guid: 992a95a9758f07a44beb82fca22daada, type: 3}
-  - first:
-      type: UnityEngine:Texture2D
-      assembly: UnityEngine.CoreModule
-      name: casual_man_normal
-    second: {fileID: 2800000, guid: 98080be714930c54080ae86fe50a8345, type: 3}
+  externalObjects: {}
   materials:
     materialImportMode: 2
     materialName: 0

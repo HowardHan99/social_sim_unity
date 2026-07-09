@@ -12,7 +12,7 @@ GameObject:
   - component: {fileID: 6538986470266186814}
   - component: {fileID: 9033045222738483444}
   m_Layer: 0
-  m_Name: Road_Decal_01 (6)
+  m_Name: Road_Decal
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0

@@ -2490,9 +2490,6 @@ GameObject:
   - component: {fileID: 7104284622883413327}
   - component: {fileID: 5835606314758933786}
   - component: {fileID: 7727025963761580217}
-  - component: {fileID: 426270120587482905}
-  - component: {fileID: 4124256187456353036}
-  - component: {fileID: 87409124266486172}
   m_Layer: 0
   m_Name: Wheelchair_male_01
   m_TagString: Untagged
@@ -2574,70 +2571,6 @@ CapsuleCollider:
   m_Height: 1.2988102
   m_Direction: 1
   m_Center: {x: 0.03395766, y: 0.7212198, z: 0}
---- !u!114 &426270120587482905
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 7296701733076765955}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 411743824, guid: 2198c5915bc2d4348bd36bcb1b631201, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  isObservedComponentsExpanded: 0
-  replayIdentity:
-    id: 5103
-  prefabIdentity:
-    id: 24035
-  observedComponents:
-  - {fileID: 4124256187456353036}
-  - {fileID: 87409124266486172}
-  runtimeComponents:
-  - {fileID: 4124256187456353036}
-  - {fileID: 87409124266486172}
-  isPrefab: 1
-  prefabType: 1
---- !u!114 &4124256187456353036
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 7296701733076765955}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: -864523685, guid: 2198c5915bc2d4348bd36bcb1b631201, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  noManagingObject: 0
-  replayIdentity:
-    id: 27288
-  replayObject:
-    reference: {fileID: 426270120587482905}
-  positionFlags: 263
-  rotationFlags: 263
-  scaleFlags: 0
---- !u!114 &87409124266486172
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 7296701733076765955}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 536437719, guid: 2198c5915bc2d4348bd36bcb1b631201, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  noManagingObject: 0
-  replayIdentity:
-    id: 48394
-  replayObject:
-    reference: {fileID: 426270120587482905}
-  observedAnimator: {fileID: 7104284622883413327}
-  recordFlags: 238
 --- !u!1 &7535567861691957510
 GameObject:
   m_ObjectHideFlags: 0
@@ -3187,6 +3120,7 @@ GameObject:
   - component: {fileID: 5832967285196336535}
   - component: {fileID: 4233706782636717734}
   - component: {fileID: 4949564536763849970}
+  - component: {fileID: 3291471284241084306}
   m_Layer: 0
   m_Name: WheelchairUser_URS
   m_TagString: Untagged
@@ -3220,7 +3154,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 8518203048896102333}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: decb088abd7ec9747b6e9a1011c046b2, type: 3}
   m_Name: 
@@ -3334,7 +3268,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 8518203048896102333}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: d8db48a86c216984492c52d1586282ca, type: 3}
   m_Name: 
@@ -3373,6 +3307,19 @@ MonoBehaviour:
   moveSpeed: 5
   rotateSpeed: 5
   jumpSpeed: 0
+--- !u!65 &3291471284241084306
+BoxCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8518203048896102333}
+  m_Material: {fileID: 0}
+  m_IsTrigger: 0
+  m_Enabled: 1
+  serializedVersion: 2
+  m_Size: {x: 1, y: 1, z: 1}
+  m_Center: {x: 0, y: 0, z: 0}
 --- !u!1 &8575765408570073906
 GameObject:
   m_ObjectHideFlags: 0
