@@ -131,7 +131,7 @@ public class TrajectoryUI : MonoBehaviour
 
         const float headerH = 26f;
         const float hintH = 46f;
-        const int rows = 7;      // undo, clear, zoom row, pencil, detect/debug row, finish, cancel
+        const int rows = 8;      // undo, clear, zoom row, pencil, detect/debug row, traj/ghosts row, finish, cancel
         float contentH = headerH + 6f + hintH + 8f + bh * rows + sp * (rows - 1);
 
         Rect panel = new Rect(x - pad, top - pad, bw + pad * 2f, contentH + pad * 2f);
@@ -179,6 +179,28 @@ public class TrajectoryUI : MonoBehaviour
             manager.ShowTouchDebug ? "Debug: ON" : "Debug: OFF",
             manager.ShowTouchDebug ? buttonActiveStyle : buttonStyle))
             manager.ShowTouchDebug = !manager.ShowTouchDebug;
+        cy += bh + sp;
+
+        // Comparison overlays: the trial trajectory lines + Legend panel, and the
+        // ghost robots (drawn / planned / driven), so the stroke being drawn can be
+        // compared against them without leaving draw mode.
+        var trialTraj = GetTrialTrajectoryRenderer();
+        var ghosts = GetGhostComparison();
+
+        GUI.enabled = trialTraj != null;
+        bool trajShowing = trialTraj != null && trialTraj.IsShowing;
+        if (GUI.Button(new Rect(x, cy, halfW, bh),
+            trajShowing ? "Traj: ON" : "Traj: OFF",
+            trajShowing ? buttonActiveStyle : buttonStyle))
+            trialTraj.SetVisible(!trajShowing);
+
+        GUI.enabled = ghosts != null;
+        bool ghostsOn = ghosts != null && ghosts.ShowGhosts;
+        if (GUI.Button(new Rect(x + halfW + sp, cy, halfW, bh),
+            ghostsOn ? "Ghosts: ON" : "Ghosts: OFF",
+            ghostsOn ? buttonActiveStyle : buttonStyle))
+            ghosts.ToggleGhosts();
+        GUI.enabled = true;
         cy += bh + sp;
 
         if (GUI.Button(new Rect(x, cy, bw, bh), "Finish & Save", finishStyle))
@@ -348,5 +370,23 @@ public class TrajectoryUI : MonoBehaviour
     {
         var reviewManager = SessionReview.SessionReviewManager.Instance;
         return reviewManager != null && reviewManager.IsReviewUiActive;
+    }
+
+    /// <summary>The review trial-trajectory overlay (lines + Legend panel), if reviewing.</summary>
+    private static SessionReview.MultiAgentTrajectoryRenderer GetTrialTrajectoryRenderer()
+    {
+        var reviewManager = SessionReview.SessionReviewManager.Instance;
+        return reviewManager != null
+            ? reviewManager.GetComponent<SessionReview.MultiAgentTrajectoryRenderer>()
+            : null;
+    }
+
+    /// <summary>The ghost-robot comparison component (lives beside RewindController), if reviewing.</summary>
+    private static SessionReview.GhostRobotComparison GetGhostComparison()
+    {
+        var reviewManager = SessionReview.SessionReviewManager.Instance;
+        return reviewManager != null
+            ? reviewManager.GetComponent<SessionReview.GhostRobotComparison>()
+            : null;
     }
 }

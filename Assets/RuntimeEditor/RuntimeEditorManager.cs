@@ -1265,8 +1265,8 @@ public class RuntimeEditorManager : MonoBehaviour
 
     /// <summary>
     /// Resolves a clicked object up to its logical entity root so the WHOLE thing is selected/moved, not a
-    /// child mesh. Prefers the highest ancestor carrying a root marker (TrackedObstacle / Robot / MoveableProp);
-    /// if none, falls back to the nearest visible-mesh ancestor.
+    /// child mesh. Prefers the highest ancestor carrying a root marker (TrackedObstacle / Robot / TrackedAgent
+    /// / MoveableProp); if none, falls back to the nearest visible-mesh ancestor.
     /// </summary>
     static GameObject ResolvePropRoot(GameObject obj)
     {
@@ -1279,6 +1279,7 @@ public class RuntimeEditorManager : MonoBehaviour
             GameObject go = t.gameObject;
             if (go.GetComponent<SEAN.Scenario.Obstacles.TrackedObstacle>() != null
                 || go.GetComponent<SEAN.Scenario.Robot>() != null
+                || go.GetComponent<SEAN.Scenario.Trajectory.TrackedAgent>() != null
                 || go.GetComponent<MoveableProp>() != null)
             {
                 markerRoot = go; // keep climbing so we end on the HIGHEST marked ancestor (the entity root)

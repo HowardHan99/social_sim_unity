@@ -71,6 +71,7 @@ namespace SessionReview
         private int trialWarmupDelayFrames;
         private int trialWarmupGoalRepublishFrames;
         private TrialEndInfo latestTrialEndInfo;
+        private bool sessionFullyComplete;
         private TrialRecord currentReviewTrial;
         private Rerun.StateRecording currentReviewRecording;
         private float currentReviewTimeOffset;
@@ -245,6 +246,7 @@ namespace SessionReview
 
             reviewTrialIndex = trialArchive.TrialCount - 1;
             latestTrialEndInfo = info;
+            sessionFullyComplete = false;
             // Show the review menu the instant the first agent arrives, but DO NOT
             // freeze time: the simulation keeps running so agents that have not yet
             // reached their goal continue to navigate. Entering review ([Tab]/Review)
@@ -254,19 +256,31 @@ namespace SessionReview
                       $"Run continues; press [{reviewToggleKey}] to review.");
         }
 
-        // Every primary agent (robot + PWD) has reached its goal: nothing left to watch, so
-        // stop the session and drop straight into review. From the review UI, "End Review /
-        // Menu" still leads to Run Again / Choose Scenario / World Building.
+        // Every primary agent (robot + PWD) has reached its goal: pause the run and surface
+        // the post-trial menu instead of dropping straight into review. The user enters
+        // review from the menu ([Tab]/Review) when they choose to.
         private void OnSessionFullyComplete()
         {
-            HidePostTrialPrompt();
-
             // The trial was archived when the first agent arrived; extend it to now so the
-            // review covers both agents' full paths, then open review on it.
+            // review covers both agents' full paths.
             trialArchive?.FinalizeLatestTrial(Time.time, TrialEndReason.Completion);
+            sessionFullyComplete = true;
 
-            if (!inRewindMode && trialArchive != null && trialArchive.TrialCount > 0)
-                EnterRewindMode(trialArchive.TrialCount - 1);
+            // Already reviewing or world building: leave the user where they are; the
+            // finalized trial stays reachable through those modes' own menus.
+            if (inRewindMode || inWorldBuildingMode)
+                return;
+
+            if (!usePostTrialPrompt)
+            {
+                // Prompt disabled in the inspector: keep the direct-to-review handoff.
+                if (trialArchive != null && trialArchive.TrialCount > 0)
+                    EnterRewindMode(trialArchive.TrialCount - 1);
+                return;
+            }
+
+            showPostTrialPrompt = true;
+            PauseForPostTrialPrompt();
         }
 
         void Update()
@@ -344,8 +358,9 @@ namespace SessionReview
                 return;
             }
 
-            // Dismiss the menu but keep the run going so the remaining agents can be
-            // watched live; [Tab] still re-opens review at any time.
+            // Dismiss the menu and unfreeze time (mid-run: remaining agents keep
+            // navigating; after full completion: the scene simply idles);
+            // [Tab] still re-opens review at any time.
             if (Input.GetKeyDown(KeyCode.Escape))
             {
                 HidePostTrialPrompt();
@@ -715,6 +730,7 @@ namespace SessionReview
 
             HidePostTrialPrompt();
             latestTrialEndInfo = null;
+            sessionFullyComplete = false;
 
             var sean = SEAN.SEAN.instance;
             if (sean == null || sean.robotTask == null)
@@ -1167,11 +1183,22 @@ namespace SessionReview
             Rect rect = new Rect((Screen.width - width) * 0.5f, 24f, width, height);
 
             GUI.Box(rect, "");
-            GUI.Label(new Rect(rect.x + 18f, rect.y + 16f, rect.width - 36f, 24f),
-                $"TRIAL READY TO REVIEW ({reasonText})");
-            GUI.Label(new Rect(rect.x + 18f, rect.y + 44f, rect.width - 36f, 48f),
-                "An agent reached its goal. The run keeps going for the others.\n" +
-                $"[{replayTrialKey}] Run again   [{reviewToggleKey}] Review   [Esc] Keep watching");
+            if (sessionFullyComplete)
+            {
+                GUI.Label(new Rect(rect.x + 18f, rect.y + 16f, rect.width - 36f, 24f),
+                    $"TRIAL COMPLETE ({reasonText})");
+                GUI.Label(new Rect(rect.x + 18f, rect.y + 44f, rect.width - 36f, 48f),
+                    "All agents reached their goals. The run is paused.\n" +
+                    $"[{replayTrialKey}] Run again   [{reviewToggleKey}] Review   [Esc] Close menu");
+            }
+            else
+            {
+                GUI.Label(new Rect(rect.x + 18f, rect.y + 16f, rect.width - 36f, 24f),
+                    $"TRIAL READY TO REVIEW ({reasonText})");
+                GUI.Label(new Rect(rect.x + 18f, rect.y + 44f, rect.width - 36f, 48f),
+                    "An agent reached its goal. The run keeps going for the others.\n" +
+                    $"[{replayTrialKey}] Run again   [{reviewToggleKey}] Review   [Esc] Keep watching");
+            }
 
             float by = rect.y + 108f;
             if (GUI.Button(new Rect(rect.x + 18f, by, 140f, 34f), $"Run Again [{replayTrialKey}]"))
@@ -1183,7 +1210,8 @@ namespace SessionReview
                 EnterRewindMode(trialArchive.TrialCount - 1);
             }
 
-            if (GUI.Button(new Rect(rect.x + 318f, by, 140f, 34f), "Keep Watching [Esc]"))
+            string dismissLabel = sessionFullyComplete ? "Close Menu [Esc]" : "Keep Watching [Esc]";
+            if (GUI.Button(new Rect(rect.x + 318f, by, 140f, 34f), dismissLabel))
                 HidePostTrialPrompt();
         }
 

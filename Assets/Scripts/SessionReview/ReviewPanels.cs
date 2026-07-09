@@ -54,6 +54,11 @@ namespace SessionReview
             // the IMGUI layout structure between the Layout and Repaint passes.
             internal bool drawChromeThisFrame = true;
             internal bool drawContentThisFrame = true;
+
+            // Frame the chrome was last actually drawn. A panel whose owner stopped
+            // submitting it (e.g. hidden by a mode switch) must not keep blocking
+            // scene input through its stale rect (see AnyPanelContains).
+            internal int lastDrawnFrame = -1;
         }
 
         // Base font sizes for the chrome itself (scaled by FontScale, gently capped).
@@ -178,6 +183,7 @@ namespace SessionReview
             if (!s.drawChromeThisFrame)
                 return false;
 
+            s.lastDrawnFrame = Time.frameCount;
             HandleEvents(s);
             ClampToScreen(s);
 
@@ -222,19 +228,30 @@ namespace SessionReview
             GUI.Box(grip, "//", gripStyle);
         }
 
+        // Footprint of the toggle bar for the frame it was last drawn, so input
+        // handlers can treat it like a panel (see AnyPanelContains).
+        private static Rect toggleBarRect;
+        private static int toggleBarFrame = -1;
+
         /// <summary>
         /// True when the given GUI-space point is over any visible (non-hidden) panel's
-        /// footprint (the full rect, or just the title bar when collapsed). Lets input
-        /// handlers such as the top-down scene zoom ignore scroll/clicks over a panel so
-        /// scrolling a panel doesn't also zoom the scene behind it.
+        /// footprint (the full rect, or just the title bar when collapsed), or over the
+        /// panel toggle bar. Lets input handlers such as the top-down scene zoom or the
+        /// draw-mode stroke input ignore scroll/clicks/taps over a panel so operating a
+        /// panel doesn't also zoom the scene or paint a stroke behind it.
         /// </summary>
         public static bool AnyPanelContains(Vector2 guiPoint)
         {
+            if (Time.frameCount - toggleBarFrame <= 1 && toggleBarRect.Contains(guiPoint))
+                return true;
+
             for (int i = 0; i < registry.Count; i++)
             {
                 State s = registry[i];
                 if (s == null || s.owner == null || s.hidden)
                     continue;
+                if (Time.frameCount - s.lastDrawnFrame > 1)
+                    continue; // owner stopped drawing it; the stale rect must not block input
 
                 float h = s.collapsed ? s.titleH : s.rect.height;
                 Rect occupied = new Rect(s.rect.x, s.rect.y, s.rect.width, h);
@@ -329,7 +346,9 @@ namespace SessionReview
             float x = Mathf.Max(4f, (Screen.width - totalW) * 0.5f);
             float y = 4f;
 
-            GUI.Box(new Rect(x, y, totalW, bh + pad * 2f), GUIContent.none, boxStyle);
+            toggleBarRect = new Rect(x, y, totalW, bh + pad * 2f);
+            toggleBarFrame = Time.frameCount;
+            GUI.Box(toggleBarRect, GUIContent.none, boxStyle);
 
             float bx = x + pad;
             for (int i = 0; i < registry.Count; i++)

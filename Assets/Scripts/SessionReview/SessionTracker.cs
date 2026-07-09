@@ -51,7 +51,7 @@ namespace SessionReview
         public event OnTrialEnded TrialEnded;
 
         /// <summary>Raised once every primary agent (robot + PWD) has reached its goal,
-        /// so the review UI can stop the session and open the replay.</summary>
+        /// so the review UI can stop the session and surface the post-trial menu.</summary>
         public event Action SessionFullyComplete;
 
         private SEAN.SEAN sean;
@@ -279,7 +279,7 @@ namespace SessionReview
 
         // Archive the trial for review the first time any primary agent finishes (or the
         // controlled task times out), keeping the session running; then, once EVERY primary
-        // agent has arrived, stop the session and hand off to review.
+        // agent has arrived, stop the session and raise SessionFullyComplete.
         private void EvaluateTrialProgress()
         {
             if (!tracking) return;
@@ -296,7 +296,7 @@ namespace SessionReview
             {
                 tracking = false;
                 SessionReview.SessionReviewLog.Log(
-                    "[SessionReview] All primary agents reached their goals -- stopping session and opening review.");
+                    "[SessionReview] All primary agents reached their goals -- stopping session and showing the post-trial menu.");
                 SessionFullyComplete?.Invoke();
             }
         }

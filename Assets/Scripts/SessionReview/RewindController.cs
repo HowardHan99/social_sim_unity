@@ -148,7 +148,7 @@ namespace SessionReview
                 ghostComparison = gameObject.AddComponent<GhostRobotComparison>();
         }
 
-        /// <summary>Toggle the Ghost-Robot proxemics comparison (drawn / planned / past-trial).</summary>
+        /// <summary>Toggle the Ghost-Robot proxemics comparison (drawn / planned / driven). Off by default.</summary>
         public void ToggleGhostComparison()
         {
             if (ghostComparison != null)
@@ -193,8 +193,13 @@ namespace SessionReview
             savedMainCamera = Camera.main;
             if (savedMainCamera != null)
             {
-                savedCameraPos = savedMainCamera.transform.position;
-                savedCameraRot = savedMainCamera.transform.rotation;
+                // Save the LOCAL pose, not the world pose: the main camera is usually
+                // mounted on the robot (ThirdPersonCamera under base_link), and review
+                // playback moves the robot. Restoring a world pose under a parent that
+                // has since moved would bake a wrong local offset into the camera mount,
+                // leaving the gameplay view permanently crooked after the review.
+                savedCameraPos = savedMainCamera.transform.localPosition;
+                savedCameraRot = savedMainCamera.transform.localRotation;
                 // Disable the main camera so it doesn't render simultaneously with
                 // rewindCamera — two cameras rendering to the same target in the same
                 // frame causes brightness flickering and depth-sort artefacts.
@@ -220,9 +225,10 @@ namespace SessionReview
         }
 
         /// <summary>
-        /// Assembles the three ghost sources for the proxemics comparison: the drawn path
-        /// (TrajectoryManager), the most complete recorded ROS nav plan for this trial, and
-        /// the previous trial's window so the past-trial ghost can be sampled by normalized time.
+        /// Assembles the ghost sources for the proxemics comparison: the drawn path
+        /// (TrajectoryManager) and the most complete recorded ROS nav plan for this trial.
+        /// The driven path needs no ghost — the real robot replays it. The recording +
+        /// trial window let the ghosts pace themselves by the robot's odometer.
         /// </summary>
         private void ConfigureGhostComparison()
         {
@@ -256,28 +262,8 @@ namespace SessionReview
                 }
             }
 
-            // Previous trial in this session (same in-memory recorder timelines).
-            bool hasPrev = false;
-            float prevRecStart = 0f;
-            float prevRecDur = 0f;
-            var archive = FindObjectOfType<TrialDataArchive>();
-            if (archive != null)
-            {
-                int idx = archive.Trials.IndexOf(currentTrial);
-                if (idx > 0)
-                {
-                    var prev = archive.GetTrial(idx - 1);
-                    if (prev != null && prev.Duration > 0f)
-                    {
-                        hasPrev = true;
-                        prevRecStart = prev.startTime - timeOffset;
-                        prevRecDur = prev.Duration;
-                    }
-                }
-            }
-
-            ghostComparison.Begin(this, liveRecorder, drawTrajectoryManager, robotId,
-                plannedRoute, hasPrev, prevRecStart, prevRecDur);
+            ghostComparison.Begin(this, drawTrajectoryManager, robotId, plannedRoute,
+                currentRecording, RecStartTime, RecEndTime);
         }
 
         public void ExitRewind()
@@ -294,8 +280,8 @@ namespace SessionReview
 
             if (savedMainCamera != null)
             {
-                savedMainCamera.transform.position = savedCameraPos;
-                savedMainCamera.transform.rotation = savedCameraRot;
+                savedMainCamera.transform.localPosition = savedCameraPos;
+                savedMainCamera.transform.localRotation = savedCameraRot;
                 savedMainCamera.enabled = true;
             }
 
@@ -1608,6 +1594,17 @@ namespace SessionReview
         // card instead of stretching edge-to-edge (with huge dead gaps) on wide screens.
         private const float ProgressBarMaxWidth = 1600f;
 
+        // Footprint of the progress bar for the frame it was last drawn, so draw-mode
+        // stroke input can ignore taps on the scrubber (scrubbing must not paint).
+        private Rect progressBarRect;
+        private int progressBarFrame = -1;
+
+        /// <summary>True when the GUI-space point is over the replay progress bar.</summary>
+        public bool ProgressBarContains(Vector2 guiPoint)
+        {
+            return Time.frameCount - progressBarFrame <= 1 && progressBarRect.Contains(guiPoint);
+        }
+
         private void EnsureProgressBarStyles()
         {
             if (progressStylesBuilt)
@@ -1652,7 +1649,9 @@ namespace SessionReview
             float panelX = (Screen.width - panelW) * 0.5f;
             float panelY = Screen.height - barHeight - 14f;
 
-            GUI.Box(new Rect(panelX, panelY, panelW, barHeight), GUIContent.none, progressBoxStyle);
+            progressBarRect = new Rect(panelX, panelY, panelW, barHeight);
+            progressBarFrame = Time.frameCount;
+            GUI.Box(progressBarRect, GUIContent.none, progressBoxStyle);
 
             float innerX = panelX + 28f;
             float innerW = panelW - 56f;

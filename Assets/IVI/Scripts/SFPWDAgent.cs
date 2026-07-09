@@ -56,6 +56,8 @@ namespace IVI
         [Tooltip("After pausing robotBlockRunDelaySeconds for a blocking robot, bypass it: keep moving (social forces steer around) until the robot clears, instead of stopping again.")]
         public bool runAfterRobotBlockStop = true;
         public float robotBlockRunDelaySeconds = 2f;
+        [Tooltip("Sideways steering force (N) applied while bypassing a blocking robot, so the agent arcs around it instead of stalling against its repulsion.")]
+        public float robotBlockBypassSteerForce = 60f;
 
         [Header("Debug Robot Blocking (Read-Only)")]
         public bool debugRobotBlocked;
@@ -64,6 +66,13 @@ namespace IVI
         public bool debugRobotBlockForceRunning;
         public float debugRobotBlockRunSeconds;
         public float debugRobotBlockRunDistance;
+
+        // One politeness pause per encounter: Clear -> Pausing (2s stop) -> Bypassing
+        // (keep moving around the robot). Bypassing ends only when the robot
+        // disengages by distance, so cone/corridor flicker cannot re-trigger a pause.
+        private enum RobotBlockPhase { Clear, Pausing, Bypassing }
+        private RobotBlockPhase robotBlockPhase = RobotBlockPhase.Clear;
+        private float robotBlockBypassSide = 1f;
 
         private float robotBlockStopStartTime = -1f;
         private float robotBlockRunStartTime = -1f;
@@ -226,36 +235,66 @@ namespace IVI
 
         private bool ShouldStopForRobotBlock()
         {
-            bool blocked = IsRobotBlockingRoute();
-            if (!blocked)
+            if (!stopForRobotWhenBlocked || robotAgent == null)
             {
-                ResetRobotBlockState();
+                if (robotBlockPhase != RobotBlockPhase.Clear)
+                    ResetRobotBlockState();
                 return false;
             }
 
+            // Legacy behavior: hold the stop for as long as the robot blocks.
             if (!runAfterRobotBlockStop)
-                return true;
+                return IsRobotBlockingRoute();
 
-            // Bypassing: keep moving until the robot actually clears the route.
-            // Re-imposing stop/run limits here degenerates into a permanent
-            // stop-shuffle-stop cycle whenever the robot stays put.
-            if (debugRobotBlockForceRunning)
+            Vector3 toRobot = robotAgent.position - transform.position;
+            toRobot.y = 0f;
+            float robotDistance = toRobot.magnitude;
+            debugRobotBlockDistance = robotDistance;
+
+            // Pausing/Bypassing end on distance disengage (or arrival) only.
+            // Re-running the cone/corridor test here would restart the politeness
+            // pause on every flicker of that test.
+            bool disengaged = robotDistance > Mathf.Max(robotBlockStopDistance, robotBlockClearDistance)
+                || CloseEnough();
+
+            switch (robotBlockPhase)
             {
-                UpdateRobotBlockRunDebug();
-                return false;
+                case RobotBlockPhase.Pausing:
+                    if (disengaged)
+                    {
+                        Debug.Log("[PWD] Robot block: robot disengaged during pause, resuming");
+                        ResetRobotBlockState();
+                        return false;
+                    }
+                    debugRobotBlockStoppedSeconds = Time.time - robotBlockStopStartTime;
+                    if (debugRobotBlockStoppedSeconds >= Mathf.Max(0f, robotBlockRunDelaySeconds))
+                    {
+                        StartRobotBlockForceRun();
+                        return false;
+                    }
+                    return true;
+
+                case RobotBlockPhase.Bypassing:
+                    if (disengaged)
+                    {
+                        Debug.Log("[PWD] Robot block: cleared, resuming normal navigation");
+                        ResetRobotBlockState();
+                        return false;
+                    }
+                    UpdateRobotBlockRunDebug();
+                    return false;
+
+                default: // Clear
+                    if (IsRobotBlockingRoute())
+                    {
+                        robotBlockPhase = RobotBlockPhase.Pausing;
+                        robotBlockStopStartTime = Time.time;
+                        debugRobotBlockStoppedSeconds = 0f;
+                        Debug.Log($"[PWD] Robot block: pausing {Mathf.Max(0f, robotBlockRunDelaySeconds):F1}s (robot at {robotDistance:F2}m)");
+                        return true;
+                    }
+                    return false;
             }
-
-            if (robotBlockStopStartTime < 0f)
-                robotBlockStopStartTime = Time.time;
-
-            debugRobotBlockStoppedSeconds = Time.time - robotBlockStopStartTime;
-            if (debugRobotBlockStoppedSeconds >= Mathf.Max(0f, robotBlockRunDelaySeconds))
-            {
-                StartRobotBlockForceRun();
-                return false;
-            }
-
-            return true;
         }
 
         private bool IsRobotBlockingRoute()
@@ -319,10 +358,50 @@ namespace IVI
 
         private void StartRobotBlockForceRun()
         {
+            robotBlockPhase = RobotBlockPhase.Bypassing;
             debugRobotBlockForceRunning = true;
             robotBlockRunStartTime = Time.time;
             robotBlockRunStartPosition = transform.position;
+            robotBlockBypassSide = ChooseBypassSide();
+            Debug.Log($"[PWD] Robot block: bypassing on the {(robotBlockBypassSide > 0f ? "right" : "left")}");
             UpdateRobotBlockRunDebug();
+        }
+
+        private float ChooseBypassSide()
+        {
+            Vector3 goalVec = nearestGoalPoint - transform.position;
+            goalVec.y = 0f;
+            if (robotAgent == null || goalVec.sqrMagnitude <= 1e-4f)
+                return 1f;
+
+            // Pass on the side away from the robot's lateral offset from the route.
+            Vector3 right = Vector3.Cross(Vector3.up, goalVec.normalized);
+            Vector3 toRobot = robotAgent.position - transform.position;
+            toRobot.y = 0f;
+            return Vector3.Dot(toRobot, right) > 0f ? -1f : 1f;
+        }
+
+        private Vector3 BypassSteerForce()
+        {
+            if (robotAgent == null || robotBlockBypassSteerForce <= 0f)
+                return Vector3.zero;
+
+            Vector3 toRobot = robotAgent.position - transform.position;
+            toRobot.y = 0f;
+            if (toRobot.magnitude > Mathf.Max(robotBlockStopDistance, robotBlockClearDistance))
+                return Vector3.zero;
+
+            Vector3 goalVec = nearestGoalPoint - transform.position;
+            goalVec.y = 0f;
+            if (goalVec.sqrMagnitude <= 1e-4f)
+                return Vector3.zero;
+
+            Vector3 goalDir = goalVec.normalized;
+            // Only steer while the robot is still ahead on the route.
+            if (Vector3.Dot(toRobot, goalDir) <= 0f)
+                return Vector3.zero;
+
+            return robotBlockBypassSide * robotBlockBypassSteerForce * Vector3.Cross(Vector3.up, goalDir);
         }
 
         private void UpdateRobotBlockRunDebug()
@@ -342,6 +421,7 @@ namespace IVI
 
         private void ResetRobotBlockState()
         {
+            robotBlockPhase = RobotBlockPhase.Clear;
             debugRobotBlocked = false;
             debugRobotBlockForceRunning = false;
             debugRobotBlockDistance = 0f;
@@ -429,6 +509,12 @@ namespace IVI
             //}
 
             #endregion
+
+            // Added after the lateral dampening so the full steering force survives.
+            if (robotBlockPhase == RobotBlockPhase.Bypassing)
+            {
+                totalForce.force += BypassSteerForce();
+            }
 
             if (forceCapMultiple > 0)
             {

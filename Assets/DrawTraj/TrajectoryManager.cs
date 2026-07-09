@@ -430,10 +430,24 @@ public class TrajectoryManager : MonoBehaviour
     }
 
     /// <summary>
+    /// The saved follow-trajectory polyline (world points). Used by the review
+    /// Ghost-Robot comparison to place and drag a ghost along the drawn path.
+    /// Read-only: does not move the real robot or require Follow mode to be on.
+    /// </summary>
+    public bool TryGetFollowPathPoints(out Vector3[] points)
+    {
+        points = null;
+        if (!HasFollowTrajectory)
+            return false;
+
+        points = _followTrajectoryPoints.ToArray();
+        return true;
+    }
+
+    /// <summary>
     /// Evaluates a pose along the drawn follow-trajectory at a normalized progress
-    /// (0 = start, 1 = end). Used by the review Ghost-Robot comparison to place a
-    /// ghost on the drawn path in lockstep with the replay clock. Read-only: does not
-    /// move the real robot or require Follow mode to be on.
+    /// (0 = start, 1 = end). Read-only: does not move the real robot or require
+    /// Follow mode to be on.
     /// </summary>
     public bool TryEvaluateFollowPoseAtNormalized(float normalized, out Vector3 position, out Quaternion rotation)
     {
@@ -782,7 +796,19 @@ public class TrajectoryManager : MonoBehaviour
 
     private bool IsBlockedByUI(Vector2 screenPos)
     {
-        return _ui != null && _ui.BlocksInputAt(screenPos);
+        if (_ui != null && _ui.BlocksInputAt(screenPos))
+            return true;
+
+        // Review overlay panels (Legend, Metrics, ...) and the replay scrubber stay
+        // usable while drawing so the stroke can be compared against the trial
+        // trajectories at a chosen replay point. Touches/clicks on them must operate
+        // the control only — never also paint a stroke or pan.
+        Vector2 guiPoint = new Vector2(screenPos.x, Screen.height - screenPos.y);
+        if (SessionReview.ReviewPanels.AnyPanelContains(guiPoint))
+            return true;
+
+        var rc = GetReviewController();
+        return rc != null && rc.ProgressBarContains(guiPoint);
     }
 
     /// <summary>
