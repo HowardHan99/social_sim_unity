@@ -6,9 +6,10 @@ namespace SessionReview
     {
         [Header("Display Settings")]
         [SerializeField] private float panelWidth = 420f;
-        [SerializeField] private float panelX = 10f;
+        [SerializeField] private float panelRightMargin = 16f;
         [SerializeField] private float panelY = 80f;
         [SerializeField] private float defaultPanelHeight = 540f;
+        [SerializeField] private bool showTrajectoryDebug = false;
 
         private bool visible;
         private TrialRecord currentTrial;
@@ -46,7 +47,9 @@ namespace SessionReview
             if (SessionReviewManager.Instance != null && SessionReviewManager.Instance.IsWorldBuildingModeActive)
                 return;
 
-            Rect defaultRect = new Rect(panelX, panelY, panelWidth,
+            // Docked on the right by default so it never covers the draw-mode panel on the left.
+            Rect defaultRect = new Rect(
+                Mathf.Max(10f, Screen.width - panelWidth - panelRightMargin), panelY, panelWidth,
                 Mathf.Min(defaultPanelHeight, Screen.height - panelY - 20f));
 
             if (ReviewPanels.Begin(panel, this, "Metrics", defaultRect, out Rect content))
@@ -146,7 +149,13 @@ namespace SessionReview
                 GUILayout.Space(sectionGap);
             }
 
-            DrawTrajectoryFollowSection(sectionStyle, bodyStyle);
+            GUIStyle toggleStyle = new GUIStyle(GUI.skin.toggle)
+            {
+                fontSize = Mathf.RoundToInt(16f * scale)
+            };
+            showTrajectoryDebug = GUILayout.Toggle(showTrajectoryDebug, " Trajectory debug", toggleStyle);
+            if (showTrajectoryDebug)
+                DrawTrajectoryFollowSection(sectionStyle, bodyStyle);
         }
 
         // Formerly a standalone floating HUD in TrajectoryUI ("Play=.. FollowMode=.. follow SKIP..").

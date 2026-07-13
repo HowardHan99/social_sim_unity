@@ -36,6 +36,17 @@ public class TrajectoryUI : MonoBehaviour
     private Rect _debugBoxRectGui;
     private bool _debugBoxActive;
 
+    // Bottom-left DRAW gate button. Strokes only land while it is held down with a
+    // finger (touch) or toggled on with a click (desktop); TrajectoryManager reads
+    // DrawInputArmed every frame, so releasing it makes pen/finger/mouse navigate only.
+    private const float DrawButtonW = 240f;
+    private const float DrawButtonH = 96f;
+    private bool drawToggleLatched;
+    private Rect _drawButtonRectGui;
+    private bool _drawButtonActive;
+
+    public bool DrawInputArmed => drawToggleLatched || IsTouchHoldingDrawButton();
+
     private void Start()
     {
         if (manager == null)
@@ -49,6 +60,7 @@ public class TrajectoryUI : MonoBehaviour
     {
         _drawPanelActive = false;
         _debugBoxActive = false;
+        _drawButtonActive = false;
 
         if (manager == null || !IsReviewActive())
             return;
@@ -60,6 +72,9 @@ public class TrajectoryUI : MonoBehaviour
             DrawDrawModePanel();
             return;
         }
+
+        // Each draw session starts disarmed so the view can be framed first.
+        drawToggleLatched = false;
 
         // Default control panel: draggable / resizable / closable window chrome.
         // The old floating "Play=.. FollowMode=.." diagnostic HUD now lives inside
@@ -130,7 +145,7 @@ public class TrajectoryUI : MonoBehaviour
         const float top = 110f;
 
         const float headerH = 26f;
-        const float hintH = 46f;
+        const float hintH = 64f;
         const int rows = 8;      // undo, clear, zoom row, pencil, detect/debug row, traj/ghosts row, finish, cancel
         float contentH = headerH + 6f + hintH + 8f + bh * rows + sp * (rows - 1);
 
@@ -146,7 +161,9 @@ public class TrajectoryUI : MonoBehaviour
         string line1 = manager.ApplePencilOnly
             ? (manager.StylusDetected ? "Apple Pencil draws" : "Pencil-only - waiting for pencil")
             : "Finger or pencil draws";
-        GUI.Label(new Rect(x, cy, bw, hintH), line1 + "\n1 finger = pan  -  2 fingers = pinch-zoom", hintStyle);
+        GUI.Label(new Rect(x, cy, bw, hintH),
+            line1 + "\nHold DRAW (bottom-left) while drawing\n1 finger = pan  -  2 fingers = pinch-zoom",
+            hintStyle);
         cy += hintH + 8f;
 
         GUI.enabled = manager.CanUndo;
@@ -210,7 +227,66 @@ public class TrajectoryUI : MonoBehaviour
         if (GUI.Button(new Rect(x, cy, bw, bh), "Cancel (discard)", cancelStyle))
             manager.CancelDrawMode();
 
+        DrawGateButton();
         DrawTouchDebugOverlay();
+    }
+
+    /// <summary>
+    /// The bottom-left DRAW gate. On touch it arms only while a finger holds it down
+    /// (draw with the pencil/other hand, release to stop); with a mouse a click
+    /// toggles it, since one mouse cannot hold a button and draw at the same time.
+    /// </summary>
+    private void DrawGateButton()
+    {
+        Rect rect = GetDrawButtonRect();
+        _drawButtonRectGui = rect;
+        _drawButtonActive = true;
+
+        bool armed = DrawInputArmed;
+        string label = armed
+            ? "DRAWING\n(release / click to stop)"
+            : "HOLD TO DRAW\n(click = toggle)";
+
+        if (GUI.Button(rect, label, armed ? finishStyle : buttonStyle) && Input.touchCount == 0)
+            drawToggleLatched = !drawToggleLatched;
+    }
+
+    private Rect GetDrawButtonRect()
+    {
+        // Dock above the replay progress bar: the bar's scrubber is an IMGUI slider
+        // that consumes clicks/touches first, so a button overlapping it can never
+        // be pressed (it would scrub the timeline instead of arming drawing).
+        float y = Screen.height - DrawButtonH - 24f;
+        var rewind = GetReviewController();
+        if (rewind != null && rewind.TryGetProgressBarRect(out Rect bar) && y + DrawButtonH > bar.y)
+            y = bar.y - DrawButtonH - 12f;
+
+        Rect rect = new Rect(24f, y, DrawButtonW, DrawButtonH);
+
+        // On short screens the lifted button can reach the control panel; slide it
+        // right so it never sits under the Finish/Cancel buttons.
+        if (_drawPanelActive && rect.Overlaps(_drawPanelRectGui))
+            rect.x = _drawPanelRectGui.xMax + 12f;
+
+        return rect;
+    }
+
+    private bool IsTouchHoldingDrawButton()
+    {
+        if (manager == null || !manager.IsDrawMode)
+            return false;
+
+        Rect rect = GetDrawButtonRect();
+        for (int i = 0; i < Input.touchCount; i++)
+        {
+            Touch t = Input.GetTouch(i);
+            if (t.phase == TouchPhase.Ended || t.phase == TouchPhase.Canceled)
+                continue;
+            Vector2 guiPoint = new Vector2(t.position.x, Screen.height - t.position.y);
+            if (rect.Contains(guiPoint))
+                return true;
+        }
+        return false;
     }
 
     /// <summary>
@@ -224,7 +300,13 @@ public class TrajectoryUI : MonoBehaviour
 
         float w = 440f;
         float h = 210f;
-        Rect box = new Rect(Screen.width - w - 16f, 110f, w, h);
+        // Bottom-right (above the replay progress bar so the scrubber cannot steal
+        // the thr +/- button clicks); the review Metrics panel docks at the top-right.
+        float boxY = Screen.height - h - 24f;
+        var rewind = GetReviewController();
+        if (rewind != null && rewind.TryGetProgressBarRect(out Rect bar) && boxY + h > bar.y)
+            boxY = bar.y - h - 12f;
+        Rect box = new Rect(Screen.width - w - 16f, boxY, w, h);
         _debugBoxRectGui = box;
         _debugBoxActive = true;
         GUI.Box(box, GUIContent.none, panelStyle);
@@ -259,6 +341,8 @@ public class TrajectoryUI : MonoBehaviour
         if (_drawPanelActive && _drawPanelRectGui.Contains(guiPoint))
             return true;
         if (_debugBoxActive && _debugBoxRectGui.Contains(guiPoint))
+            return true;
+        if (_drawButtonActive && _drawButtonRectGui.Contains(guiPoint))
             return true;
 
         return false;
@@ -387,6 +471,15 @@ public class TrajectoryUI : MonoBehaviour
         var reviewManager = SessionReview.SessionReviewManager.Instance;
         return reviewManager != null
             ? reviewManager.GetComponent<SessionReview.GhostRobotComparison>()
+            : null;
+    }
+
+    /// <summary>The review rewind controller (owns the replay progress bar), if reviewing.</summary>
+    private static SessionReview.RewindController GetReviewController()
+    {
+        var reviewManager = SessionReview.SessionReviewManager.Instance;
+        return reviewManager != null
+            ? reviewManager.GetComponent<SessionReview.RewindController>()
             : null;
     }
 }

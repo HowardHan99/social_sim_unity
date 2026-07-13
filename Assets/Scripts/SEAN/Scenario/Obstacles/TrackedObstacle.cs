@@ -60,6 +60,12 @@ namespace SEAN.Scenario.Obstacles
         public Vector3 GetSize()
         {
             Collider c = GetComponent<Collider>();
+            // No root collider (e.g. a flat decal prefab): fall back to combined bounds so one
+            // such obstacle cannot NRE and abort the whole ObstaclePublisher message.
+            if (c == null)
+            {
+                return TryGetFallbackBounds(out Bounds bounds) ? bounds.size : Vector3.one * 0.1f;
+            }
             // Ensure we use the absolute scale to prevent negative sizes in ROS, which can cause issues.
             Vector3 absScale = new Vector3(Mathf.Abs(transform.lossyScale.x), Mathf.Abs(transform.lossyScale.y), Mathf.Abs(transform.lossyScale.z));
 
@@ -94,7 +100,11 @@ namespace SEAN.Scenario.Obstacles
         public Vector3 GetCenter()
         {
             Collider c = GetComponent<Collider>();
-            
+            if (c == null)
+            {
+                return TryGetFallbackBounds(out Bounds bounds) ? bounds.center : transform.position;
+            }
+
             if (c is BoxCollider)
             {
                 BoxCollider bc = (BoxCollider)c;
@@ -113,6 +123,35 @@ namespace SEAN.Scenario.Obstacles
             
             // Fallback to collider bounds center
             return c.bounds.center;
+        }
+
+        /// <summary>
+        /// Combined world-space bounds from child colliders (preferred) or renderers, for
+        /// obstacles whose root has no collider of its own.
+        /// </summary>
+        private bool TryGetFallbackBounds(out Bounds bounds)
+        {
+            bounds = default;
+            bool hasBounds = false;
+
+            foreach (Collider childCollider in GetComponentsInChildren<Collider>())
+            {
+                if (childCollider == null || !childCollider.enabled)
+                    continue;
+                if (!hasBounds) { bounds = childCollider.bounds; hasBounds = true; }
+                else bounds.Encapsulate(childCollider.bounds);
+            }
+            if (hasBounds)
+                return true;
+
+            foreach (Renderer renderer in GetComponentsInChildren<Renderer>())
+            {
+                if (renderer == null || !renderer.enabled)
+                    continue;
+                if (!hasBounds) { bounds = renderer.bounds; hasBounds = true; }
+                else bounds.Encapsulate(renderer.bounds);
+            }
+            return hasBounds;
         }
 
         private void OnDrawGizmos()

@@ -223,16 +223,15 @@ namespace SEAN.Input
             if (string.IsNullOrWhiteSpace(axisName))
                 return 0f;
 
-            return GetAxisSafely(ResolveJoystickAxisName(axisName));
+            string resolved = ResolveJoystickAxisName(axisName);
+            return GetAxisSafely(resolved) * JoystickProfiles.AxisSign(resolved);
         }
 
+        // Legacy aliases and per-device remapping (Logitech stick vs. gamepad) both live in
+        // JoystickProfiles so every manual controller reads the same physical axes.
         private string ResolveJoystickAxisName(string axisName)
         {
-            if (axisName == "RHorizontal")
-                return "LogitechTwist";
-            if (axisName == "RVertical")
-                return "LogitechThrottle";
-            return axisName;
+            return JoystickProfiles.ResolveAxis(axisName);
         }
 
         private float GetAxisSafely(string axisName)

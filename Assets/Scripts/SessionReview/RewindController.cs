@@ -38,8 +38,8 @@ namespace SessionReview
         [Header("Free Camera")]
         [SerializeField] private float freeCamMoveSpeed = 8f;
         [SerializeField] private float freeCamFastMultiplier = 2.5f;
-        [SerializeField] private float freeCamLookSensitivity = 2.5f;
-        [SerializeField] private float freeCamZoomSpeed = 10f;
+        [SerializeField] private float freeCamLookSensitivity = 1f;
+        [SerializeField] private float freeCamZoomSpeed = 3f;
 
         private LiveTrajectoryRecorder liveRecorder;
 
@@ -239,6 +239,19 @@ namespace SessionReview
             string robotId = (sean != null && sean.robot != null && sean.robot.base_link != null)
                 ? SessionTracker.GetObjectId(sean.robot.base_link)
                 : null;
+
+            // Replays loaded from disk: the current scene robot's id won't be a key in the
+            // recorded timelines (ids embed per-run instance ids), so fall back to the id
+            // the trial recorded for its Robot role.
+            if (currentTrial != null &&
+                (robotId == null ||
+                 currentRecording == null || currentRecording.timelineDict == null ||
+                 !currentRecording.timelineDict.ContainsKey(robotId)))
+            {
+                var robotEntry = currentTrial.agentRoles.Find(r => r.role == AgentRole.Robot);
+                if (robotEntry != null)
+                    robotId = robotEntry.objectId;
+            }
 
             // Reference planned route: the longest recorded plan snapshot in this trial's
             // window (the most complete route to the goal).
@@ -868,7 +881,87 @@ namespace SessionReview
                 return go.transform;
             }
 
+            // Cross-session fallback for replays loaded from disk: TrackedObject ids end in
+            // the per-run instance id (path_XXXXXXXX), so ids recorded in a previous Unity
+            // session never match the current scene exactly. Re-bind the primary agents
+            // through their trial role, and other agents through the id with the instance
+            // suffix stripped.
+            Transform remapped = ResolveTransformAcrossSessions(objectId);
+            if (remapped != null)
+            {
+                transformCache[objectId] = remapped;
+                return remapped;
+            }
+
             return null;
+        }
+
+        private Transform ResolveTransformAcrossSessions(string objectId)
+        {
+            var sean = SEAN.SEAN.instance;
+
+            if (currentTrial != null)
+            {
+                var roleEntry = currentTrial.agentRoles.Find(r => r.objectId == objectId);
+                if (roleEntry != null)
+                {
+                    if (roleEntry.role == AgentRole.Robot &&
+                        sean != null && sean.robot != null && sean.robot.base_link != null)
+                        return sean.robot.base_link.transform;
+
+                    if (roleEntry.role == AgentRole.PWDPlayer)
+                    {
+                        var mwc = FindObjectOfType<IVI.ManualWheelchairController>();
+                        if (mwc != null)
+                            return SessionTracker.ResolveTrackingTransform(mwc.gameObject);
+                    }
+                }
+            }
+
+            string stripped = StripInstanceSuffix(objectId);
+
+            if (sean != null && sean.pedestrianBehavior != null && sean.pedestrianBehavior.agents != null)
+            {
+                foreach (var agent in sean.pedestrianBehavior.agents)
+                {
+                    if (agent == null || transformCache.ContainsValue(agent.transform))
+                        continue;
+                    if (StripInstanceSuffix(SessionTracker.GetObjectId(agent.gameObject)) == stripped)
+                        return agent.transform;
+                }
+            }
+
+            foreach (var nav in FindObjectsOfType<IVI.INavigable>())
+            {
+                if (nav == null || transformCache.ContainsValue(nav.transform))
+                    continue;
+                if (StripInstanceSuffix(SessionTracker.GetObjectId(nav.gameObject)) == stripped)
+                    return nav.transform;
+            }
+
+            return null;
+        }
+
+        // TrackedObject ids are "<hierarchy path>_XXXXXXXX" where the suffix is the 8-hex-digit
+        // instance id of the run that recorded them. Strip it so ids can be compared across runs.
+        private static string StripInstanceSuffix(string id)
+        {
+            if (string.IsNullOrEmpty(id))
+                return id;
+
+            int underscore = id.LastIndexOf('_');
+            if (underscore <= 0 || id.Length - underscore - 1 != 8)
+                return id;
+
+            for (int i = underscore + 1; i < id.Length; i++)
+            {
+                char c = id[i];
+                bool isHex = (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f');
+                if (!isHex)
+                    return id;
+            }
+
+            return id.Substring(0, underscore);
         }
 
         public Transform ResolveTransformForObjectId(string objectId)
@@ -1273,7 +1366,7 @@ namespace SessionReview
             {
                 Vector3 mousePosition = GetMousePosition();
                 Vector3 mouseDelta = mousePosition - lastFreeCamMousePosition;
-                float panScale = 0.02f;
+                float panScale = 0.01f;
                 Vector3 panOffset =
                     (-rewindCamera.transform.right * mouseDelta.x + -rewindCamera.transform.up * mouseDelta.y) * panScale;
                 rewindCamera.transform.position += panOffset;
@@ -1603,6 +1696,18 @@ namespace SessionReview
         public bool ProgressBarContains(Vector2 guiPoint)
         {
             return Time.frameCount - progressBarFrame <= 1 && progressBarRect.Contains(guiPoint);
+        }
+
+        /// <summary>
+        /// GUI-space rect of the replay progress bar, valid only for the frame it was
+        /// last drawn. Other overlays (e.g. the draw-mode DRAW gate) use it to dock
+        /// above the bar instead of on top of it, where the scrubber would steal
+        /// their clicks/touches.
+        /// </summary>
+        public bool TryGetProgressBarRect(out Rect rect)
+        {
+            rect = progressBarRect;
+            return Time.frameCount - progressBarFrame <= 1;
         }
 
         private void EnsureProgressBarStyles()

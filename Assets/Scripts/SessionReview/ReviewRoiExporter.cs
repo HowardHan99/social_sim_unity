@@ -759,6 +759,10 @@ namespace SessionReview
             if (SessionReviewManager.Instance != null)
                 AddRenderers(hidden, SessionReviewManager.Instance.GetComponentsInChildren<Renderer>(true));
 
+            // The floating "ROBOT GOAL" text is goal UI, not scene geometry.
+            if (RobotGoalObjectBinding.Instance != null)
+                AddRenderers(hidden, RobotGoalObjectBinding.Instance.LabelRenderers);
+
             return hidden;
         }
 

@@ -45,6 +45,17 @@ namespace SessionReview
         private List<VLMCaptureEvent> vlmCaptures = new List<VLMCaptureEvent>();
         private List<SignalAnnotation> signalAnnotations = new List<SignalAnnotation>();
 
+        // Replay override: serves a session loaded from disk through the same getters the
+        // review pipeline already reads (GetStateAtTime, GetPlanSnapshots, ...), so
+        // RewindController replays it without needing live in-memory data. Live recording
+        // keeps its own lists untouched while the override is active.
+        private StateRecording replayOverrideRecording;
+        private List<PlanPathSnapshot> replayOverridePlans;
+        private List<VLMCaptureEvent> replayOverrideVlmCaptures;
+        private List<SignalAnnotation> replayOverrideAnnotations;
+
+        public bool HasReplayOverride => replayOverrideRecording != null;
+
         public float RecordingStartTime => recordingStartTime;
         public int TrackedCount => trackedTransforms.Count;
         public bool IsRecording => isRecording;
@@ -170,6 +181,25 @@ namespace SessionReview
                    SessionOnboardingSettings.RobotStartupControl == StartupControlMode.Manual;
         }
 
+        public void SetReplayOverride(StateRecording recording, List<PlanPathSnapshot> plans,
+            List<VLMCaptureEvent> vlm, List<SignalAnnotation> annotations)
+        {
+            replayOverrideRecording = recording;
+            if (replayOverrideRecording != null && replayOverrideRecording.timelineDict == null)
+                replayOverrideRecording.BuildCache();
+            replayOverridePlans = plans ?? new List<PlanPathSnapshot>();
+            replayOverrideVlmCaptures = vlm ?? new List<VLMCaptureEvent>();
+            replayOverrideAnnotations = annotations ?? new List<SignalAnnotation>();
+        }
+
+        public void ClearReplayOverride()
+        {
+            replayOverrideRecording = null;
+            replayOverridePlans = null;
+            replayOverrideVlmCaptures = null;
+            replayOverrideAnnotations = null;
+        }
+
         public StateRecording BuildSnapshot()
         {
             var recording = new StateRecording
@@ -186,8 +216,9 @@ namespace SessionReview
         /// </summary>
         public List<PlanPathSnapshot> GetPlanSnapshots(float recStart, float recEnd)
         {
+            var source = replayOverridePlans ?? planSnapshots;
             var result = new List<PlanPathSnapshot>();
-            foreach (var snap in planSnapshots)
+            foreach (var snap in source)
             {
                 if (snap.timestamp >= recStart && snap.timestamp <= recEnd)
                     result.Add(snap);
@@ -200,8 +231,9 @@ namespace SessionReview
         /// </summary>
         public Vector3[] GetPlanAtTime(float time)
         {
+            var source = replayOverridePlans ?? planSnapshots;
             Vector3[] last = null;
-            foreach (var snap in planSnapshots)
+            foreach (var snap in source)
             {
                 if (snap.timestamp > time) break;
                 last = snap.positions;
@@ -285,8 +317,9 @@ namespace SessionReview
 
         public List<VLMCaptureEvent> GetVLMCaptures(float recStart, float recEnd)
         {
+            var source = replayOverrideVlmCaptures ?? vlmCaptures;
             var result = new List<VLMCaptureEvent>();
-            foreach (var evt in vlmCaptures)
+            foreach (var evt in source)
             {
                 if (evt.timestamp >= recStart && evt.timestamp <= recEnd)
                     result.Add(evt);
@@ -296,8 +329,9 @@ namespace SessionReview
 
         public List<SignalAnnotation> GetSignalAnnotations(float recStart, float recEnd)
         {
+            var source = replayOverrideAnnotations ?? signalAnnotations;
             var result = new List<SignalAnnotation>();
-            foreach (var annotation in signalAnnotations)
+            foreach (var annotation in source)
             {
                 if (annotation.timestamp >= recStart && annotation.timestamp <= recEnd)
                     result.Add(annotation);
@@ -308,9 +342,12 @@ namespace SessionReview
         public Dictionary<string, ObjectState> GetStateAtTime(float time)
         {
             var result = new Dictionary<string, ObjectState>();
-            foreach (var timeline in timelines.Values)
+            IEnumerable<ObjectStateTimeline> source = replayOverrideRecording != null
+                ? (IEnumerable<ObjectStateTimeline>)replayOverrideRecording.timelines
+                : timelines.Values;
+            foreach (var timeline in source)
             {
-                if (timeline.states.Count == 0) continue;
+                if (timeline == null || timeline.states == null || timeline.states.Count == 0) continue;
                 ObjectState state = Interpolate(timeline, time);
                 if (state != null)
                     result[timeline.objectId] = state;

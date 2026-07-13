@@ -64,6 +64,9 @@ namespace SessionReview
     public class TrialRecord
     {
         public string trialName;
+        // Scene the trial ran in; lets a loaded replay warn when the active scene differs.
+        // Empty for trials saved before this field existed.
+        public string sceneName;
         public ushort trialNumber;
         public float startTime;
         public float endTime;
@@ -121,6 +124,7 @@ namespace SessionReview
             var record = new TrialRecord
             {
                 trialName = info.trialName,
+                sceneName = UnityEngine.SceneManagement.SceneManager.GetActiveScene().name,
                 trialNumber = info.trialNumber,
                 startTime = info.startTime,
                 endTime = info.endTime,

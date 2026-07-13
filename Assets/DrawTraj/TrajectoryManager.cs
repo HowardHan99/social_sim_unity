@@ -113,7 +113,7 @@ public class TrajectoryManager : MonoBehaviour
 
     [Tooltip("Show the live per-touch debug overlay (type / radius / pressure) while drawing, " +
              "to calibrate pencil-vs-finger detection on your device.")]
-    public bool showTouchDebug = true;
+    public bool touchDebugOverlay = false;
 
     [Tooltip("Closest zoom-in (smallest orthographic size) allowed while drawing.")]
     [Min(1f)] public float minZoomOrthoSize = 4f;
@@ -157,8 +157,8 @@ public class TrajectoryManager : MonoBehaviour
 
     public bool ShowTouchDebug
     {
-        get => showTouchDebug;
-        set => showTouchDebug = value;
+        get => touchDebugOverlay;
+        set => touchDebugOverlay = value;
     }
 
     public float FingerRadiusThreshold => fingerRadiusThreshold;
@@ -206,6 +206,8 @@ public class TrajectoryManager : MonoBehaviour
     private float _lastNavPinchDist;
     private bool _mousePanning;          // desktop middle-mouse pan (standalone scene)
     private Vector2 _lastMousePanPos;
+    private bool _lmbPanning;            // disarmed left-mouse drag pans instead of drawing
+    private Vector2 _lastLmbPanPos;
 
     // ── Unity Lifecycle ──────────────────────────────────────────────────────
 
@@ -254,6 +256,7 @@ public class TrajectoryManager : MonoBehaviour
         _strokeDown = false;
         _navActive = false;
         _mousePanning = false;
+        _lmbPanning = false;
 
         SetVisibility(true);
         _sessionCollection = new TrajectoryCollection();
@@ -657,6 +660,13 @@ public class TrajectoryManager : MonoBehaviour
             drawPos = Input.mousePosition;
         }
 
+        // ── DRAW gate ──────────────────────────────────────────────────────────
+        // Strokes only land while the bottom-left DRAW button is held (touch) or
+        // toggled on (mouse click), so panning around never scribbles by accident.
+        bool drawArmed = _ui == null || _ui.DrawInputArmed;
+        if (!drawArmed)
+            drawDown = false;
+
         // ── Stroke begin / continue / end (rising & falling edges) ────────────
         if (drawDown)
         {
@@ -674,15 +684,40 @@ public class TrajectoryManager : MonoBehaviour
         }
 
         // ── Finger pan / pinch-zoom (never while the pencil is drawing) ───────
+        // While disarmed a single finger always pans, whatever the pencil mode.
         bool canNavigate = !stylusDown &&
-                           (fingerCount >= 2 || (applePencilOnly && fingerCount == 1));
+                           (fingerCount >= 2 || ((applePencilOnly || !drawArmed) && fingerCount == 1));
         if (canNavigate)
             HandleTouchNavigation(fingerCount, finger0, finger1);
         else
             _navActive = false;
 
-        // ── Desktop pan / zoom (standalone scene; review supplies its own) ────
-        if (!IsReviewActive() && Input.touchCount == 0)
+        // ── Disarmed left-mouse drag pans the draw camera (desktop) ───────────
+        if (!drawArmed && Input.touchCount == 0)
+        {
+            if (Input.GetMouseButtonDown(0) && !IsBlockedByUI(Input.mousePosition))
+            {
+                _lmbPanning = true;
+                _lastLmbPanPos = Input.mousePosition;
+            }
+            if (!Input.GetMouseButton(0))
+                _lmbPanning = false;
+            if (_lmbPanning)
+            {
+                Vector2 cur = Input.mousePosition;
+                PanDrawCamera(cur - _lastLmbPanPos);
+                _lastLmbPanPos = cur;
+            }
+        }
+        else
+        {
+            _lmbPanning = false;
+        }
+
+        // ── Desktop pan / zoom of the draw camera (wheel + middle mouse) ──────
+        // SessionReviewManager skips its own top-down mouse input while draw mode
+        // is active, so this is the only handler and never double-zooms.
+        if (Input.touchCount == 0)
             HandleMouseNavigation();
     }
 
@@ -733,7 +768,11 @@ public class TrajectoryManager : MonoBehaviour
     {
         float scroll = Input.mouseScrollDelta.y;
         if (Mathf.Abs(scroll) > 0.01f && !IsBlockedByUI(Input.mousePosition))
-            ZoomDrawCamera(Input.mousePosition, scroll > 0f ? (1f - zoomStepFraction) : (1f + zoomStepFraction));
+        {
+            // Scale by the actual scroll amount so smooth-scrolling mice, which spread one
+            // notch over several frames, do not compound a full step every frame.
+            ZoomDrawCamera(Input.mousePosition, Mathf.Pow(1f - zoomStepFraction, scroll));
+        }
 
         if (Input.GetMouseButtonDown(2) && !IsBlockedByUI(Input.mousePosition))
         {
@@ -844,7 +883,7 @@ public class TrajectoryManager : MonoBehaviour
 
     private void BuildTouchDebug()
     {
-        if (!showTouchDebug)
+        if (!touchDebugOverlay)
         {
             TouchDebugReadout = "";
             return;

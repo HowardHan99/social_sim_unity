@@ -19,6 +19,10 @@ namespace SessionReview
         [SerializeField] private KeyCode ghostTrailKey = KeyCode.G;
         [SerializeField] private KeyCode toggleInfoKey = KeyCode.I;
         [SerializeField] private KeyCode toggleGhostRobotsKey = KeyCode.F6;
+        [Tooltip("While reviewing: immediately export the ROI using the current export settings (no panel needed).")]
+        [SerializeField] private KeyCode quickRoiExportKey = KeyCode.F7;
+        [Tooltip("Open/close the browser that lists trials saved by previous sessions (SessionLogs) for replay.")]
+        [SerializeField] private KeyCode loadReplayKey = KeyCode.F12;
 
         [Header("Perspective Keys")]
         [SerializeField] private KeyCode robotFPKey = KeyCode.F1;
@@ -84,6 +88,12 @@ namespace SessionReview
         private ReviewExportSettings reviewExportSettings = new ReviewExportSettings();
         private Bounds reviewExportEnvelope;
         private string lastReviewExportPath;
+        private float lastReviewExportToastTime = -999f;
+        private bool isReviewingLoadedTrial;
+        private string loadedTrialLabel;
+        private bool showLoadTrialPanel;
+        private Vector2 loadTrialScroll;
+        private List<SavedTrialInfo> savedTrialList;
         private bool isTopDownPanning;
         private Vector2 lastTopDownMousePosition;
         private static Texture2D lineTexture;
@@ -93,14 +103,27 @@ namespace SessionReview
         private bool worldBuildingAddCharactersMinimized = true;
         private bool worldBuildingGenerateObjectsMinimized = true;
         private bool worldBuildingOverlayMinimized;
-        private const float WorldBuildingSidePanelMargin = 24f;
-        private const float WorldBuildingSidePanelGap = 10f;
-        private const float WorldBuildingSidePanelHeaderHeight = 44f;
-        private const float WorldBuildingAddObjectsExpandedHeaderHeight = 68f;
-        private const float WorldBuildingGenerateObjectsBodyHeight = 108f;
-        private const float WorldBuildingSidePanelEmptyBodyHeight = 56f;
-        private const float WorldBuildingOverlayHeaderHeight = 44f;
-        private const float WorldBuildingOverlayWidth = 360f;
+        private const float WorldBuildingSidePanelMarginBase = 24f;
+        private const float WorldBuildingSidePanelGapBase = 10f;
+        private const float WorldBuildingSidePanelHeaderHeightBase = 44f;
+        private const float WorldBuildingGenerateObjectsBodyHeightBase = 100f;
+        private const float WorldBuildingSidePanelEmptyBodyHeightBase = 56f;
+        private const float WorldBuildingOverlayHeaderHeightBase = 44f;
+        private const float WorldBuildingOverlayWidthBase = 380f;
+        private const string WorldBuildingAddObjectsSubtitle =
+            "Only prefabs with a matching image in Resources/WorldBuildingUI are listed (others in WorldBuildingSpawns are ignored).";
+
+        // World-building UI scales up with resolution (1x at 1600x900) so text stays readable on large displays.
+        private static float WorldBuildingUiScale =>
+            Mathf.Clamp(Mathf.Min(Screen.width / 1600f, Screen.height / 900f), 1f, 1.75f);
+
+        private static float WorldBuildingSidePanelMargin => WorldBuildingSidePanelMarginBase * WorldBuildingUiScale;
+        private static float WorldBuildingSidePanelGap => WorldBuildingSidePanelGapBase * WorldBuildingUiScale;
+        private static float WorldBuildingSidePanelHeaderHeight => WorldBuildingSidePanelHeaderHeightBase * WorldBuildingUiScale;
+        private static float WorldBuildingGenerateObjectsBodyHeight => WorldBuildingGenerateObjectsBodyHeightBase * WorldBuildingUiScale;
+        private static float WorldBuildingSidePanelEmptyBodyHeight => WorldBuildingSidePanelEmptyBodyHeightBase * WorldBuildingUiScale;
+        private static float WorldBuildingOverlayHeaderHeight => WorldBuildingOverlayHeaderHeightBase * WorldBuildingUiScale;
+        private static float WorldBuildingOverlayWidth => WorldBuildingOverlayWidthBase * WorldBuildingUiScale;
         private bool showReviewCompletionPrompt;
         private bool inWorldBuildingMode;
         private Camera worldBuildingCamera;
@@ -122,9 +145,21 @@ namespace SessionReview
         private string aiGenerationPrompt = "";
         private static float worldBuildingOverlayHeight = 228f;
         private const int WorldBuildingSpawnPaletteCols = 2;
-        private const float WorldBuildingSidePanelWidth = 360f;
-        private const float WorldBuildingSpawnPaletteCardHeight = 96f;
-        private const float WorldBuildingSpawnPaletteCardGap = 10f;
+        private const float WorldBuildingSidePanelWidthBase = 380f;
+        private const float WorldBuildingSpawnPaletteCardHeightBase = 112f;
+        private const float WorldBuildingSpawnPaletteCardGapBase = 10f;
+        private static float WorldBuildingSidePanelWidth => WorldBuildingSidePanelWidthBase * WorldBuildingUiScale;
+        private static float WorldBuildingSpawnPaletteCardHeight => WorldBuildingSpawnPaletteCardHeightBase * WorldBuildingUiScale;
+        private static float WorldBuildingSpawnPaletteCardGap => WorldBuildingSpawnPaletteCardGapBase * WorldBuildingUiScale;
+
+        private GUIStyle worldBuildingTitleStyle;
+        private GUIStyle worldBuildingBodyStyle;
+        private GUIStyle worldBuildingSubtitleStyle;
+        private GUIStyle worldBuildingButtonStyle;
+        private GUIStyle worldBuildingTextFieldStyle;
+        private int worldBuildingStylesFontSize = -1;
+        // Measured during OnGUI from the wrapped subtitle text; -1 until the first draw.
+        private float worldBuildingAddObjectsHeaderHeight = -1f;
 
         public bool UsePostTrialPrompt => usePostTrialPrompt;
         public bool IsReviewModeActive => inRewindMode;
@@ -319,6 +354,21 @@ namespace SessionReview
             if (Input.GetKeyDown(onboardingToggleKey) && (SessionOnboardingSettings.HasCompletedOnboarding || !showOnboarding))
                 SetOnboardingVisible(!showOnboarding);
 
+            // Saved-replay browser. Deliberately available during onboarding too: after a
+            // fresh Unity start the onboarding screen is the first thing shown, and loading
+            // an old trajectory should not require starting a live trial first.
+            if (Input.GetKeyDown(loadReplayKey) && !inWorldBuildingMode)
+            {
+                ToggleLoadTrialPanel();
+                return;
+            }
+
+            if (showLoadTrialPanel && Input.GetKeyDown(KeyCode.Escape))
+            {
+                showLoadTrialPanel = false;
+                return;
+            }
+
             if (showOnboarding)
                 return;
 
@@ -455,10 +505,13 @@ namespace SessionReview
 
         private void HandleRewindInput()
         {
-            HandleTopDownMouseInput();
-
             var drawTrajManager = FindObjectOfType<TrajectoryManager>();
             bool isDrawTrajectoryModeActive = drawTrajManager != null && drawTrajManager.IsDrawMode;
+
+            // While draw-trajectory mode owns the pointer, TrajectoryManager pans/zooms
+            // its own draw camera; zooming the hidden rewind camera here would fight it.
+            if (!isDrawTrajectoryModeActive)
+                HandleTopDownMouseInput();
 
             if (isDrawTrajectoryModeActive)
             {
@@ -480,6 +533,9 @@ namespace SessionReview
             {
                 showReviewExportPanel = !showReviewExportPanel;
             }
+
+            if (Input.GetKeyDown(quickRoiExportKey))
+                ExportCurrentRoiNow();
 
             if (Input.GetKeyDown(KeyCode.Escape))
             {
@@ -568,14 +624,16 @@ namespace SessionReview
                 rewindController.ToggleGhostComparison();
 
             // Trial navigation takes priority over speed when the same keys are bound to both.
-            // Speed only fires when no trial switch occurred this frame.
+            // Speed only fires when no trial switch occurred this frame. A loaded-from-disk
+            // replay is not part of the live archive, so trial switching is disabled there
+            // (the keys fall through to speed control).
             bool trialSwitched = false;
-            if (Input.GetKeyDown(prevTrialKey) && trialArchive.TrialCount > 1)
+            if (!isReviewingLoadedTrial && Input.GetKeyDown(prevTrialKey) && trialArchive.TrialCount > 1)
             {
                 trialSwitched = true;
                 EnterRewindMode(Mathf.Max(0, reviewTrialIndex - 1));
             }
-            if (!trialSwitched && Input.GetKeyDown(nextTrialKey) && trialArchive.TrialCount > 1)
+            if (!trialSwitched && !isReviewingLoadedTrial && Input.GetKeyDown(nextTrialKey) && trialArchive.TrialCount > 1)
             {
                 trialSwitched = true;
                 EnterRewindMode(Mathf.Min(trialArchive.TrialCount - 1, reviewTrialIndex + 1));
@@ -609,7 +667,9 @@ namespace SessionReview
             float scroll = Input.mouseScrollDelta.y;
             if (!mouseOverReviewUi && Mathf.Abs(scroll) > 0.01f)
             {
-                float zoomMultiplier = scroll > 0f ? 0.85f : 1.15f;
+                // Scale by the actual scroll amount so smooth-scrolling mice, which spread one
+                // notch over several frames, do not compound a full step every frame.
+                float zoomMultiplier = Mathf.Pow(0.85f, scroll);
                 rewindController.ZoomTopDownAtScreenPoint(Input.mousePosition, zoomMultiplier);
             }
 
@@ -642,6 +702,9 @@ namespace SessionReview
         {
             Vector2 mouse = Input.mousePosition;
             float guiY = Screen.height - mouse.y;
+
+            if (showLoadTrialPanel && LoadTrialPanelRect.Contains(new Vector2(mouse.x, guiY)))
+                return true;
 
             // Draggable review panels (Metrics, etc.) manage their own scroll, so scrolling
             // over one must not also zoom the top-down scene behind it.
@@ -679,15 +742,11 @@ namespace SessionReview
             var trial = trialArchive.GetTrial(trialIndex);
             if (trial == null) return;
 
-            if (inRewindMode)
-                rewindController.ExitRewind();
-
-            ExitWorldBuildingMode(true);
-
-            reviewTrialIndex = trialIndex;
-            inRewindMode = true;
-            showReviewCompletionPrompt = false;
-            currentSpeedIndex = 2;
+            // Live review replays from the in-memory recorder; drop any loaded-from-disk
+            // override a previous saved-trial replay may have left active.
+            trajectoryRecorder.ClearReplayOverride();
+            isReviewingLoadedTrial = false;
+            loadedTrialLabel = null;
 
             var recording = trajectoryRecorder.BuildSnapshot();
             float timeOffset = trajectoryRecorder.RecordingStartTime;
@@ -698,8 +757,74 @@ namespace SessionReview
             var vlmCaptures = trajectoryRecorder.GetVLMCaptures(recStart, recEnd);
             var signalAnnotations = trajectoryRecorder.GetSignalAnnotations(recStart, recEnd);
 
-            // Freeze the simulation
-            savedTimeScale = Time.timeScale;
+            BeginReviewSession(trial, recording, timeOffset, planSnapshots, vlmCaptures, signalAnnotations, trialIndex);
+        }
+
+        /// <summary>
+        /// Replay a trial saved to disk by a previous session (SessionLogs/trial_*). The
+        /// loaded data is served through LiveTrajectoryRecorder's replay override so the
+        /// whole review pipeline (playback, trails, ROI export) works without live data.
+        /// </summary>
+        public void EnterRewindModeFromDisk(SavedTrialInfo info)
+        {
+            if (info == null)
+                return;
+
+            SavedTrialSession session;
+            try
+            {
+                session = SavedTrialLoader.Load(info.folderPath);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[SessionReview] Failed to load saved trial from {info.folderPath}: {ex}");
+                return;
+            }
+            if (session == null)
+                return;
+
+            showLoadTrialPanel = false;
+            HidePostTrialPrompt();
+            if (showOnboarding)
+                SetOnboardingVisible(false);
+            // Dismissing the ready prompt must also lift its time freeze, or the review
+            // below would capture 0 as the timescale to restore on exit.
+            if (trialStartPromptPausedTime)
+            {
+                Time.timeScale = savedTimeScale;
+                trialStartPromptPausedTime = false;
+            }
+            showTrialStartPrompt = false;
+
+            trajectoryRecorder.SetReplayOverride(session.recording, session.planSnapshots,
+                session.vlmCaptures, session.signalAnnotations);
+            isReviewingLoadedTrial = true;
+            loadedTrialLabel = $"{session.trial.trialName} ({info.folderName})";
+
+            BeginReviewSession(session.trial, session.recording, session.timeOffset,
+                session.planSnapshots, session.vlmCaptures, session.signalAnnotations, -1);
+        }
+
+        private void BeginReviewSession(TrialRecord trial, Rerun.StateRecording recording, float timeOffset,
+            List<PlanPathSnapshot> planSnapshots, List<VLMCaptureEvent> vlmCaptures,
+            List<SignalAnnotation> signalAnnotations, int trialIndex)
+        {
+            bool wasInReview = inRewindMode;
+            if (wasInReview)
+                rewindController.ExitRewind();
+
+            ExitWorldBuildingMode(true);
+
+            reviewTrialIndex = trialIndex;
+            inRewindMode = true;
+            showReviewCompletionPrompt = false;
+            currentSpeedIndex = 2;
+
+            // Freeze the simulation. Only capture the pre-review time scale when entering
+            // fresh: switching trials mid-review would otherwise capture the frozen 0 and
+            // leave the simulation stuck after the review ends.
+            if (!wasInReview)
+                savedTimeScale = Time.timeScale;
             Time.timeScale = 0f;
 
             // Suppress the live ROS plan line (GlobalPlanVisualizer) for the whole review.
@@ -743,6 +868,9 @@ namespace SessionReview
             currentReviewTrial = null;
             currentReviewRecording = null;
             currentReviewTimeOffset = 0f;
+            trajectoryRecorder.ClearReplayOverride();
+            isReviewingLoadedTrial = false;
+            loadedTrialLabel = null;
         }
 
         public void StartNextTrialFromPrompt()
@@ -964,11 +1092,14 @@ namespace SessionReview
                 var drawTrajManager = FindObjectOfType<TrajectoryManager>();
                 bool isDrawTrajectoryModeActive = drawTrajManager != null && drawTrajManager.IsDrawMode;
                 string controlsLine = isDrawTrajectoryModeActive
-                    ? $"{perspective} | Draw Traj: Pencil draws  1-finger pan  2-finger zoom  (on-screen buttons)"
+                    ? $"{perspective} | Draw Traj: hold DRAW to draw  1-finger/LMB pan  2-finger/wheel zoom"
                     : $"{perspective} | F1-F5:View  Wheel:Zoom  MMB:Pan  Tab/Esc:Exit";
+                string trialLabel = isReviewingLoadedTrial
+                    ? $"Loaded: {loadedTrialLabel}"
+                    : $"Trial {reviewTrialIndex + 1}/{trialArchive.TrialCount}";
                 GUI.Box(new Rect(Screen.width - 340, 10, 330, 50), "");
                 GUI.Label(new Rect(Screen.width - 335, 15, 320, 20),
-                    $"REWIND [{playing}] Trial {reviewTrialIndex + 1}/{trialArchive.TrialCount}");
+                    $"REWIND [{playing}] {trialLabel}");
                 GUI.Label(new Rect(Screen.width - 335, 35, 320, 20),
                     controlsLine);
                 DrawEndReviewButton();
@@ -983,6 +1114,11 @@ namespace SessionReview
 
             if (inWorldBuildingMode)
                 DrawWorldBuildingOverlay();
+
+            DrawRoiExportToast();
+
+            if (showLoadTrialPanel)
+                DrawLoadTrialPanel();
         }
 
         private void DrawEndInteractionButton()
@@ -1092,27 +1228,142 @@ namespace SessionReview
                 rewindController?.FocusTopDownOnBounds(roi);
             }
 
-            if (GUI.Button(new Rect(x, rect.yMax - 54f, 150f, 34f), "Export Current ROI"))
+            if (GUI.Button(new Rect(x, rect.yMax - 54f, 150f, 34f), $"Export ROI [{quickRoiExportKey}]"))
             {
-                try
-                {
-                    lastReviewExportPath = ReviewRoiExporter.ExportTrialRoi(
-                        currentReviewTrial,
-                        currentReviewRecording,
-                        currentReviewTimeOffset,
-                        reviewExportSettings);
-                }
-                catch (System.Exception ex)
-                {
-                    lastReviewExportPath = "Export failed";
-                    Debug.LogError($"[SessionReview] Review ROI export failed: {ex}");
-                }
+                ExportCurrentRoiNow();
             }
 
             if (!string.IsNullOrEmpty(lastReviewExportPath))
             {
                 GUI.Label(new Rect(x, rect.yMax - 126f, innerWidth, 28f), $"Last export: {lastReviewExportPath}");
             }
+        }
+
+        /// <summary>
+        /// Export the current trial's ROI immediately with the current export settings.
+        /// Bound to quickRoiExportKey so no panel interaction is needed; also used by the
+        /// export panel's button.
+        /// </summary>
+        private void ExportCurrentRoiNow()
+        {
+            if (!inRewindMode || currentReviewTrial == null || currentReviewRecording == null)
+                return;
+
+            try
+            {
+                lastReviewExportPath = ReviewRoiExporter.ExportTrialRoi(
+                    currentReviewTrial,
+                    currentReviewRecording,
+                    currentReviewTimeOffset,
+                    reviewExportSettings);
+            }
+            catch (System.Exception ex)
+            {
+                lastReviewExportPath = "Export failed";
+                Debug.LogError($"[SessionReview] Review ROI export failed: {ex}");
+            }
+            lastReviewExportToastTime = Time.unscaledTime;
+        }
+
+        // Transient confirmation so the quick-export key gives feedback even when the
+        // export panel is closed. Unscaled time: the review freezes Time.timeScale.
+        private void DrawRoiExportToast()
+        {
+            if (string.IsNullOrEmpty(lastReviewExportPath))
+                return;
+            if (Time.unscaledTime - lastReviewExportToastTime > 5f)
+                return;
+
+            string text = lastReviewExportPath == "Export failed"
+                ? "ROI export FAILED (see console)"
+                : $"ROI saved: {lastReviewExportPath}";
+            float width = Mathf.Min(Screen.width - 40f, Mathf.Max(360f, text.Length * 7.5f));
+            GUI.Box(new Rect((Screen.width - width) * 0.5f, 64f, width, 26f), text);
+        }
+
+        private Rect LoadTrialPanelRect
+        {
+            get
+            {
+                float width = Mathf.Min(680f, Screen.width - 60f);
+                float height = Mathf.Min(440f, Screen.height - 60f);
+                return new Rect((Screen.width - width) * 0.5f, (Screen.height - height) * 0.5f, width, height);
+            }
+        }
+
+        private void ToggleLoadTrialPanel()
+        {
+            showLoadTrialPanel = !showLoadTrialPanel;
+            if (showLoadTrialPanel)
+                savedTrialList = SavedTrialLoader.ListSavedTrials();
+        }
+
+        private void DrawLoadTrialPanel()
+        {
+            Rect rect = LoadTrialPanelRect;
+
+            // Dim the background so the list reads clearly over any mode behind it.
+            Color previousColor = GUI.color;
+            GUI.color = new Color(0f, 0f, 0f, 0.45f);
+            GUI.DrawTexture(new Rect(0f, 0f, Screen.width, Screen.height), Texture2D.whiteTexture);
+            GUI.color = previousColor;
+
+            GUI.Box(rect, "");
+
+            float x = rect.x + 16f;
+            float y = rect.y + 12f;
+            float innerWidth = rect.width - 32f;
+
+            GUI.Label(new Rect(x, y, innerWidth, 24f),
+                $"LOAD SAVED TRIAL REPLAY   [{loadReplayKey}] toggle   [Esc] close");
+            y += 26f;
+            GUI.Label(new Rect(x, y, innerWidth, 20f), $"Folder: {TrialDataArchive.LogFolder}");
+            y += 26f;
+
+            string activeScene = SceneManager.GetActiveScene().name;
+            float footerHeight = 56f;
+
+            if (savedTrialList == null || savedTrialList.Count == 0)
+            {
+                GUI.Label(new Rect(x, y, innerWidth, 40f),
+                    "No saved trials found. Trials are saved automatically when a trial ends.");
+            }
+            else
+            {
+                float rowHeight = 32f;
+                float listHeight = rect.yMax - footerHeight - y;
+                Rect viewRect = new Rect(0f, 0f, innerWidth - 20f, savedTrialList.Count * (rowHeight + 4f));
+                loadTrialScroll = GUI.BeginScrollView(new Rect(x, y, innerWidth, listHeight), loadTrialScroll, viewRect);
+
+                float rowY = 0f;
+                foreach (var info in savedTrialList)
+                {
+                    string scene = string.IsNullOrEmpty(info.sceneName) ? "scene unknown" : info.sceneName;
+                    string sceneWarning = !string.IsNullOrEmpty(info.sceneName) && info.sceneName != activeScene
+                        ? "  (!) other scene"
+                        : "";
+                    string label = $"#{info.trialNumber:D3}  {info.savedAt:yyyy-MM-dd HH:mm}  {scene}  " +
+                                   $"{info.durationSeconds:F0}s{sceneWarning}";
+                    GUI.Label(new Rect(0f, rowY + 4f, viewRect.width - 84f, rowHeight), label);
+                    if (GUI.Button(new Rect(viewRect.width - 76f, rowY, 76f, 28f), "Load"))
+                    {
+                        EnterRewindModeFromDisk(info);
+                        GUI.EndScrollView();
+                        return;
+                    }
+                    rowY += rowHeight + 4f;
+                }
+
+                GUI.EndScrollView();
+            }
+
+            GUI.Label(new Rect(x, rect.yMax - footerHeight + 6f, innerWidth - 190f, footerHeight - 12f),
+                $"Active scene: {activeScene}. A replay from another scene will draw its paths over the wrong environment.");
+
+            if (GUI.Button(new Rect(rect.xMax - 186f, rect.yMax - 46f, 80f, 30f), "Refresh"))
+                savedTrialList = SavedTrialLoader.ListSavedTrials();
+            if (GUI.Button(new Rect(rect.xMax - 98f, rect.yMax - 46f, 80f, 30f), "Close"))
+                showLoadTrialPanel = false;
         }
 
         private void DrawReviewRoiOverlay()
@@ -1206,12 +1457,12 @@ namespace SessionReview
             }
             else if (trials > 0)
             {
-                text = $"TRIAL ENDED | {trials} trial(s) ready | [Tab] Review";
+                text = $"TRIAL ENDED | {trials} trial(s) ready | [Tab] Review | [{loadReplayKey}] Load";
                 bgColor = new Color(0.3f, 0.15f, 0f, 0.85f);
             }
             else
             {
-                text = $"Tracking {tracked} agents | Waiting for trial to end...";
+                text = $"Tracking {tracked} agents | Waiting for trial to end... | [{loadReplayKey}] Load Replay";
                 bgColor = new Color(0.1f, 0.1f, 0.1f, 0.7f);
             }
 
@@ -1300,8 +1551,52 @@ namespace SessionReview
             }
         }
 
+        private void EnsureWorldBuildingStyles()
+        {
+            float s = WorldBuildingUiScale;
+            int bodyFontSize = Mathf.RoundToInt(15f * s);
+            if (worldBuildingStylesFontSize == bodyFontSize && worldBuildingTitleStyle != null)
+                return;
+
+            worldBuildingStylesFontSize = bodyFontSize;
+
+            worldBuildingTitleStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = Mathf.RoundToInt(18f * s),
+                fontStyle = FontStyle.Bold,
+                normal = { textColor = Color.white }
+            };
+
+            worldBuildingBodyStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = bodyFontSize,
+                wordWrap = true,
+                richText = false
+            };
+
+            worldBuildingSubtitleStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = Mathf.RoundToInt(13f * s),
+                wordWrap = true,
+                normal = { textColor = new Color(0.78f, 0.82f, 0.86f) }
+            };
+
+            worldBuildingButtonStyle = new GUIStyle(GUI.skin.button)
+            {
+                fontSize = bodyFontSize
+            };
+
+            worldBuildingTextFieldStyle = new GUIStyle(GUI.skin.textField)
+            {
+                fontSize = bodyFontSize
+            };
+        }
+
         private void DrawWorldBuildingOverlay()
         {
+            EnsureWorldBuildingStyles();
+            float s = WorldBuildingUiScale;
+
             if (worldBuildingOverlayMinimized)
                 worldBuildingOverlayHeight = WorldBuildingOverlayHeaderHeight;
 
@@ -1311,23 +1606,15 @@ namespace SessionReview
 
             if (!worldBuildingOverlayMinimized)
             {
-                GUIStyle bodyStyle = new GUIStyle(GUI.skin.label)
-                {
-                    wordWrap = true,
-                    richText = false
-                };
-
-                float contentX = rect.x + 16f;
-                float contentWidth = rect.width - 32f;
-                float y = rect.y + 14f;
-
-                y += 28f;
+                float contentX = rect.x + 16f * s;
+                float contentWidth = rect.width - 32f * s;
+                float y = rect.y + WorldBuildingOverlayHeaderHeight;
 
                 string introText =
                     "Session review is now using the runtime editor. It opens in top-down map view so objects are easier to place, and you can switch into free camera while editing.";
-                float introHeight = bodyStyle.CalcHeight(new GUIContent(introText), contentWidth);
-                GUI.Label(new Rect(contentX, y, contentWidth, introHeight), introText, bodyStyle);
-                y += introHeight + 10f;
+                float introHeight = worldBuildingBodyStyle.CalcHeight(new GUIContent(introText), contentWidth);
+                GUI.Label(new Rect(contentX, y, contentWidth, introHeight), introText, worldBuildingBodyStyle);
+                y += introHeight + 10f * s;
 
                 string cameraMode = worldBuildingCameraController != null && worldBuildingCameraController.IsTopDownView()
                     ? "Top-down"
@@ -1336,29 +1623,30 @@ namespace SessionReview
                     ? $"Selected: {runtimeEditorManager.CurrentSelectedObject.name}"
                     : "Selected: none";
 
-                GUI.Label(new Rect(contentX, y, contentWidth, 22f), $"Camera: {cameraMode}");
-                y += 22f;
-                GUI.Label(new Rect(contentX, y, contentWidth, 22f), selectionText);
-                y += 26f;
+                float infoRowHeight = 24f * s;
+                GUI.Label(new Rect(contentX, y, contentWidth, infoRowHeight), $"Camera: {cameraMode}", worldBuildingBodyStyle);
+                y += infoRowHeight;
+                GUI.Label(new Rect(contentX, y, contentWidth, infoRowHeight), selectionText, worldBuildingBodyStyle);
+                y += infoRowHeight + 6f * s;
 
-                float buttonHeight = 30f;
-                float buttonGap = 10f;
+                float buttonHeight = 34f * s;
+                float buttonGap = 10f * s;
                 const int buttonCols = 2;
                 float buttonWidth = (contentWidth - buttonGap * (buttonCols - 1)) / buttonCols;
 
-                if (GUI.Button(new Rect(contentX, y, buttonWidth, buttonHeight), "Back To Menu"))
+                if (GUI.Button(new Rect(contentX, y, buttonWidth, buttonHeight), "Back To Menu", worldBuildingButtonStyle))
                 {
                     ExitWorldBuildingMode(true);
                     showPostTrialPrompt = true;
                     PauseForPostTrialPrompt();
                 }
 
-                if (GUI.Button(new Rect(contentX + (buttonWidth + buttonGap), y, buttonWidth, buttonHeight), "Choose Scenario"))
+                if (GUI.Button(new Rect(contentX + (buttonWidth + buttonGap), y, buttonWidth, buttonHeight), "Choose Scenario", worldBuildingButtonStyle))
                     OpenOnboardingFromPostTrial();
 
                 y += buttonHeight + buttonGap;
 
-                if (GUI.Button(new Rect(contentX, y, buttonWidth, buttonHeight), "Run Again"))
+                if (GUI.Button(new Rect(contentX, y, buttonWidth, buttonHeight), "Run Again", worldBuildingButtonStyle))
                     StartNextTrialFromPrompt();
 
                 int undoCount = runtimeEditorManager != null ? runtimeEditorManager.UndoCount : 0;
@@ -1366,23 +1654,23 @@ namespace SessionReview
                 bool hasSelection = runtimeEditorManager?.CurrentSelectedObject != null;
 
                 GUI.enabled = undoCount > 0;
-                if (GUI.Button(new Rect(contentX + (buttonWidth + buttonGap), y, buttonWidth, buttonHeight), $"Undo  [{undoCount}]  Ctrl+Z"))
+                if (GUI.Button(new Rect(contentX + (buttonWidth + buttonGap), y, buttonWidth, buttonHeight), $"Undo  [{undoCount}]  Ctrl+Z", worldBuildingButtonStyle))
                     runtimeEditorManager?.UndoLastAction();
 
                 GUI.enabled = true;
                 y += buttonHeight + buttonGap;
 
                 GUI.enabled = redoCount > 0;
-                if (GUI.Button(new Rect(contentX, y, buttonWidth, buttonHeight), $"Redo  [{redoCount}]  Ctrl+Y"))
+                if (GUI.Button(new Rect(contentX, y, buttonWidth, buttonHeight), $"Redo  [{redoCount}]  Ctrl+Y", worldBuildingButtonStyle))
                     runtimeEditorManager?.RedoLastAction();
 
                 GUI.enabled = hasSelection;
-                if (GUI.Button(new Rect(contentX + (buttonWidth + buttonGap), y, buttonWidth, buttonHeight), "Delete  [Del]"))
+                if (GUI.Button(new Rect(contentX + (buttonWidth + buttonGap), y, buttonWidth, buttonHeight), "Delete  [Del]", worldBuildingButtonStyle))
                     runtimeEditorManager?.DeleteSelectedObject();
 
                 GUI.enabled = true;
 
-                worldBuildingOverlayHeight = (y + buttonHeight + 12f) - rect.y;
+                worldBuildingOverlayHeight = (y + buttonHeight + 12f * s) - rect.y;
             }
 
             DrawWorldBuildingSidePanels();
@@ -1390,21 +1678,28 @@ namespace SessionReview
 
         private void DrawWorldBuildingOverlayHeader(Rect rect)
         {
-            const float toggleWidth = 28f;
-            const float toggleHeight = 22f;
+            float s = WorldBuildingUiScale;
+            float toggleWidth = 30f * s;
+            float toggleHeight = 24f * s;
             Rect toggleRect = new Rect(
-                rect.xMax - toggleWidth - 10f,
-                rect.y + 8f,
+                rect.xMax - toggleWidth - 10f * s,
+                rect.y + 8f * s,
                 toggleWidth,
                 toggleHeight);
 
-            GUI.Label(new Rect(rect.x + 16f, rect.y + 10f, rect.width - toggleWidth - 32f, 22f), "World Building");
+            GUI.Label(
+                new Rect(rect.x + 16f * s, rect.y + 10f * s, rect.width - toggleWidth - 32f * s, 26f * s),
+                "World Building",
+                worldBuildingTitleStyle);
 
-            RuntimeEditorManager.DrawMinimizeToggleButton(toggleRect, ref worldBuildingOverlayMinimized);
+            RuntimeEditorManager.DrawMinimizeToggleButton(toggleRect, ref worldBuildingOverlayMinimized, worldBuildingStylesFontSize);
         }
 
         private void DrawWorldBuildingSidePanels()
         {
+            EnsureWorldBuildingStyles();
+            worldBuildingAddObjectsHeaderHeight = ComputeWorldBuildingAddObjectsHeaderHeight(GetWorldBuildingSidePanelWidth());
+
             GetWorldBuildingSidePanelRects(
                 out Rect generateRect,
                 out Rect charactersRect,
@@ -1424,16 +1719,16 @@ namespace SessionReview
             DrawWorldBuildingSidePanelHeader(
                 panelRect,
                 "Add Objects",
-                "Only prefabs with a matching image in Resources/WorldBuildingUI are listed (others in WorldBuildingSpawns are ignored).",
+                WorldBuildingAddObjectsSubtitle,
                 ref worldBuildingAddObjectsMinimized,
-                WorldBuildingAddObjectsExpandedHeaderHeight);
+                GetWorldBuildingAddObjectsHeaderHeight());
 
             if (worldBuildingAddObjectsMinimized)
                 return;
 
             DrawWorldBuildingSpawnCardGrid(
                 panelRect,
-                WorldBuildingAddObjectsExpandedHeaderHeight,
+                GetWorldBuildingAddObjectsHeaderHeight(),
                 rows,
                 ref worldBuildingAddObjectsScroll);
         }
@@ -1453,13 +1748,15 @@ namespace SessionReview
 
             if (rows == null || rows.Count == 0)
             {
+                float s = WorldBuildingUiScale;
                 GUI.Label(
                     new Rect(
-                        panelRect.x + 14f,
-                        panelRect.y + WorldBuildingSidePanelHeaderHeight + 12f,
-                        panelRect.width - 28f,
-                        36f),
-                    "No character prefabs with thumbnails yet.");
+                        panelRect.x + 14f * s,
+                        panelRect.y + WorldBuildingSidePanelHeaderHeight + 8f * s,
+                        panelRect.width - 28f * s,
+                        40f * s),
+                    "No character prefabs with thumbnails yet.",
+                    worldBuildingBodyStyle);
                 return;
             }
 
@@ -1493,26 +1790,49 @@ namespace SessionReview
             ref bool minimized,
             float expandedHeaderHeight)
         {
-            const float toggleWidth = 28f;
-            const float toggleHeight = 22f;
+            float s = WorldBuildingUiScale;
+            float toggleWidth = 30f * s;
+            float toggleHeight = 24f * s;
             Rect toggleRect = new Rect(
-                panelRect.xMax - toggleWidth - 10f,
-                panelRect.y + 8f,
+                panelRect.xMax - toggleWidth - 10f * s,
+                panelRect.y + 8f * s,
                 toggleWidth,
                 toggleHeight);
 
             GUI.Label(
-                new Rect(panelRect.x + 14f, panelRect.y + 10f, panelRect.width - toggleWidth - 32f, 22f),
-                title);
+                new Rect(panelRect.x + 14f * s, panelRect.y + 10f * s, panelRect.width - toggleWidth - 32f * s, 26f * s),
+                title,
+                worldBuildingTitleStyle);
 
             if (!minimized && !string.IsNullOrEmpty(subtitle))
             {
                 GUI.Label(
-                    new Rect(panelRect.x + 14f, panelRect.y + 30f, panelRect.width - 28f, expandedHeaderHeight - 34f),
-                    subtitle);
+                    new Rect(panelRect.x + 14f * s, panelRect.y + 36f * s, panelRect.width - 28f * s, expandedHeaderHeight - 44f * s),
+                    subtitle,
+                    worldBuildingSubtitleStyle);
             }
 
-            RuntimeEditorManager.DrawMinimizeToggleButton(toggleRect, ref minimized);
+            RuntimeEditorManager.DrawMinimizeToggleButton(toggleRect, ref minimized, worldBuildingStylesFontSize);
+        }
+
+        // Header height for the Add Objects panel depends on how the subtitle wraps at the current
+        // panel width and font scale, so it is measured rather than fixed.
+        private float ComputeWorldBuildingAddObjectsHeaderHeight(float panelWidth)
+        {
+            float s = WorldBuildingUiScale;
+            float subtitleHeight = worldBuildingSubtitleStyle.CalcHeight(
+                new GUIContent(WorldBuildingAddObjectsSubtitle),
+                panelWidth - 28f * s);
+            return 36f * s + subtitleHeight + 8f * s;
+        }
+
+        private float GetWorldBuildingAddObjectsHeaderHeight()
+        {
+            if (worldBuildingAddObjectsHeaderHeight > 0f)
+                return worldBuildingAddObjectsHeaderHeight;
+
+            // Fallback before the first OnGUI pass has measured the subtitle.
+            return WorldBuildingSidePanelHeaderHeight + 40f * WorldBuildingUiScale;
         }
 
         private void DrawWorldBuildingSpawnCardGrid(
@@ -1525,17 +1845,18 @@ namespace SessionReview
             if (totalCards == 0)
                 return;
 
+            float s = WorldBuildingUiScale;
             int rowCount = (totalCards + WorldBuildingSpawnPaletteCols - 1) / WorldBuildingSpawnPaletteCols;
-            float scrollAreaMin = 120f;
-            float scrollAreaMax = Mathf.Min(280f, Screen.height * 0.38f);
+            float scrollAreaMin = 120f * s;
+            float scrollAreaMax = Mathf.Min(280f * s, Screen.height * 0.38f);
             float scrollInnerHeight = rowCount * (WorldBuildingSpawnPaletteCardHeight + WorldBuildingSpawnPaletteCardGap)
                                       + WorldBuildingSpawnPaletteCardGap;
             float scrollViewportH = Mathf.Clamp(scrollInnerHeight, scrollAreaMin, scrollAreaMax);
-            scrollViewportH = Mathf.Min(scrollViewportH, Mathf.Max(0f, panelRect.height - headerHeight - 16f));
+            scrollViewportH = Mathf.Min(scrollViewportH, Mathf.Max(0f, panelRect.height - headerHeight - 16f * s));
             if (scrollViewportH <= 0f)
                 return;
 
-            float innerPad = 12f;
+            float innerPad = 12f * s;
             float scrollBarReserve = 18f;
             Rect viewRect = new Rect(
                 panelRect.x + innerPad,
@@ -1567,17 +1888,18 @@ namespace SessionReview
 
         private void DrawWorldBuildingGenerateObjectsBody(Rect panelRect)
         {
-            const float pad = 14f;
+            float s = WorldBuildingUiScale;
+            float pad = 14f * s;
             float innerW = panelRect.width - pad * 2f;
-            float y = panelRect.y + WorldBuildingSidePanelHeaderHeight + 10f;
+            float y = panelRect.y + WorldBuildingSidePanelHeaderHeight + 6f * s;
 
-            GUI.Label(new Rect(panelRect.x + pad, y, innerW, 18f), "Describe an object (placeholder):");
-            y += 20f;
+            GUI.Label(new Rect(panelRect.x + pad, y, innerW, 22f * s), "Describe an object (placeholder):", worldBuildingBodyStyle);
+            y += 26f * s;
 
-            aiGenerationPrompt = GUI.TextField(new Rect(panelRect.x + pad, y, innerW, 22f), aiGenerationPrompt ?? string.Empty);
-            y += 28f;
+            aiGenerationPrompt = GUI.TextField(new Rect(panelRect.x + pad, y, innerW, 26f * s), aiGenerationPrompt ?? string.Empty, worldBuildingTextFieldStyle);
+            y += 34f * s;
 
-            if (GUI.Button(new Rect(panelRect.x + pad, y, innerW, 28f), "Add Cardboard Box"))
+            if (GUI.Button(new Rect(panelRect.x + pad, y, innerW, 32f * s), "Add Cardboard Box", worldBuildingButtonStyle))
             {
                 Debug.Log($"[WorldBuilding/AI] Placeholder clicked. Prompt='{aiGenerationPrompt}'");
                 GeneratePlaceholderObject();
@@ -1596,13 +1918,14 @@ namespace SessionReview
             if (totalCards == 0)
                 return expandedHeaderHeight + WorldBuildingSidePanelEmptyBodyHeight;
 
+            float s = WorldBuildingUiScale;
             int rowCount = (totalCards + WorldBuildingSpawnPaletteCols - 1) / WorldBuildingSpawnPaletteCols;
-            float scrollAreaMin = 120f;
-            float scrollAreaMax = Mathf.Min(280f, Screen.height * 0.38f);
+            float scrollAreaMin = 120f * s;
+            float scrollAreaMax = Mathf.Min(280f * s, Screen.height * 0.38f);
             float scrollInnerHeight = rowCount * (WorldBuildingSpawnPaletteCardHeight + WorldBuildingSpawnPaletteCardGap)
                                       + WorldBuildingSpawnPaletteCardGap;
             float scrollViewportH = Mathf.Clamp(scrollInnerHeight, scrollAreaMin, scrollAreaMax);
-            return expandedHeaderHeight + scrollViewportH + 16f;
+            return expandedHeaderHeight + scrollViewportH + 16f * s;
         }
 
         private float GetWorldBuildingGenerateObjectsPanelHeight()
@@ -1610,17 +1933,19 @@ namespace SessionReview
             if (worldBuildingGenerateObjectsMinimized)
                 return WorldBuildingSidePanelHeaderHeight;
 
-            return WorldBuildingSidePanelHeaderHeight + WorldBuildingGenerateObjectsBodyHeight + 12f;
+            return WorldBuildingSidePanelHeaderHeight + WorldBuildingGenerateObjectsBodyHeight + 12f * WorldBuildingUiScale;
         }
 
         private static float GetWorldBuildingSidePanelWidth()
         {
-            return Mathf.Min(WorldBuildingSidePanelWidth, Screen.width - 32f);
+            // Never let the palette take more than ~45% of a narrow window.
+            return Mathf.Min(WorldBuildingSidePanelWidth, Screen.width * 0.45f);
         }
 
         private static Rect GetWorldBuildingOverlayRect()
         {
-            return new Rect(24f, 24f, WorldBuildingOverlayWidth, worldBuildingOverlayHeight);
+            float margin = 24f * WorldBuildingUiScale;
+            return new Rect(margin, margin, WorldBuildingOverlayWidth, worldBuildingOverlayHeight);
         }
 
         // Placeholder until real AI generation is wired up: spawns a cardboard box exactly like
@@ -1694,7 +2019,7 @@ namespace SessionReview
             float objectsHeight = GetWorldBuildingSpawnCardPanelHeight(
                 objectRows,
                 worldBuildingAddObjectsMinimized,
-                WorldBuildingAddObjectsExpandedHeaderHeight);
+                GetWorldBuildingAddObjectsHeaderHeight());
 
             float maxStackHeight = Mathf.Max(
                 WorldBuildingSidePanelHeaderHeight,
@@ -1704,7 +2029,7 @@ namespace SessionReview
             ReducePanelHeightForOverflow(
                 ref objectsHeight,
                 worldBuildingAddObjectsMinimized,
-                WorldBuildingAddObjectsExpandedHeaderHeight,
+                GetWorldBuildingAddObjectsHeaderHeight(),
                 ref overflow);
             ReducePanelHeightForOverflow(
                 ref charactersHeight,
@@ -1741,12 +2066,19 @@ namespace SessionReview
 
         private void DrawSpawnPreviewCard(Rect rect, string label, string spawnId, Texture2D thumbnail)
         {
+            float s = WorldBuildingUiScale;
             GUI.Box(rect, "");
 
-            Rect previewRect = new Rect(rect.x + 12f, rect.y + 10f, rect.width - 24f, 44f);
+            float pad = 10f * s;
+            float buttonHeight = 30f * s;
+            Rect previewRect = new Rect(
+                rect.x + pad,
+                rect.y + pad,
+                rect.width - pad * 2f,
+                rect.height - buttonHeight - pad * 3f);
             DrawWorldBuildingSpawnThumbnail(previewRect, thumbnail);
 
-            if (GUI.Button(new Rect(rect.x + 10f, rect.y + 60f, rect.width - 20f, 28f), $"Add {label}"))
+            if (GUI.Button(new Rect(rect.x + pad, rect.yMax - buttonHeight - pad, rect.width - pad * 2f, buttonHeight), $"Add {label}", worldBuildingButtonStyle))
                 runtimeEditorManager?.SpawnObject(spawnId);
         }
 
@@ -2003,10 +2335,99 @@ namespace SessionReview
             worldBuildingAddCharactersMinimized = true;
             worldBuildingGenerateObjectsMinimized = true;
             inWorldBuildingMode = true;
+
+            CaptureWorldBuildingTaskMarkerBaseline();
+        }
+
+        // Poses captured when world building opens, so exit can detect a user-moved robot
+        // goal/robot and write the change back into the CustomStartGoal scene markers.
+        private bool hasWorldBuildingTaskMarkerBaseline;
+        private Vector3 worldBuildingRobotGoalBaselinePosition;
+        private Quaternion worldBuildingRobotGoalBaselineRotation;
+        private Vector3 worldBuildingRobotBaseLinkBaselinePosition;
+        private Quaternion worldBuildingRobotBaseLinkBaselineRotation;
+
+        private void CaptureWorldBuildingTaskMarkerBaseline()
+        {
+            hasWorldBuildingTaskMarkerBaseline = false;
+
+            var sean = SEAN.SEAN.instance;
+            if (sean == null)
+                return;
+
+            SEAN.Tasks.Base task;
+            try { task = sean.robotTask; }
+            catch (Exception) { return; }
+            if (task == null || task.robotGoal == null)
+                return;
+
+            worldBuildingRobotGoalBaselinePosition = task.robotGoal.transform.position;
+            worldBuildingRobotGoalBaselineRotation = task.robotGoal.transform.rotation;
+
+            if (sean.robot != null && sean.robot.base_link != null)
+            {
+                worldBuildingRobotBaseLinkBaselinePosition = sean.robot.base_link.transform.position;
+                worldBuildingRobotBaseLinkBaselineRotation = sean.robot.base_link.transform.rotation;
+            }
+
+            hasWorldBuildingTaskMarkerBaseline = true;
+        }
+
+        /// <summary>
+        /// Robot start/goal edits made in world building must OUTLIVE the next task refresh:
+        /// CustomStartGoal.NewTask re-copies robotStart/robotGoal from its scene Location markers
+        /// on every (re)start and goal republish, which would silently revert a dragged goal flag
+        /// and leave ROS navigating to the old destination. Writing the user's edits back into
+        /// those markers makes the trial warmup republish the NEW goal to /move_base_simple/goal.
+        /// </summary>
+        private void SyncMovedRobotMarkersIntoTask()
+        {
+            if (!hasWorldBuildingTaskMarkerBaseline)
+                return;
+            hasWorldBuildingTaskMarkerBaseline = false;
+
+            var sean = SEAN.SEAN.instance;
+            if (sean == null)
+                return;
+
+            SEAN.Tasks.Base task;
+            try { task = sean.robotTask; }
+            catch (Exception) { return; }
+
+            var custom = task as SEAN.Tasks.CustomStartGoal;
+            if (custom == null)
+                return;
+
+            if (task.robotGoal != null && custom.RobotGoalLocation != null)
+            {
+                Transform goal = task.robotGoal.transform;
+                if (HasWorldBuildingPoseChanged(worldBuildingRobotGoalBaselinePosition, worldBuildingRobotGoalBaselineRotation, goal))
+                {
+                    custom.RobotGoalLocation.transform.SetPositionAndRotation(goal.position, goal.rotation);
+                    Debug.Log($"[SessionReview] World building moved the robot goal to {goal.position}; RobotGoalLocation updated so ROS receives the new destination.");
+                }
+            }
+
+            if (sean.robot != null && sean.robot.base_link != null && custom.RobotStartLocation != null)
+            {
+                Transform baseLink = sean.robot.base_link.transform;
+                if (HasWorldBuildingPoseChanged(worldBuildingRobotBaseLinkBaselinePosition, worldBuildingRobotBaseLinkBaselineRotation, baseLink))
+                {
+                    custom.RobotStartLocation.transform.SetPositionAndRotation(baseLink.position, baseLink.rotation);
+                    Debug.Log($"[SessionReview] World building moved the robot to {baseLink.position}; RobotStartLocation updated to match.");
+                }
+            }
+        }
+
+        private static bool HasWorldBuildingPoseChanged(Vector3 basePosition, Quaternion baseRotation, Transform current)
+        {
+            return (current.position - basePosition).sqrMagnitude > 1e-4f ||
+                   Quaternion.Angle(baseRotation, current.rotation) > 0.5f;
         }
 
         private void ExitWorldBuildingMode(bool restoreGameplayCameras = false)
         {
+            SyncMovedRobotMarkersIntoTask();
             inWorldBuildingMode = false;
 
             if (runtimeEditorManager != null)
@@ -2062,10 +2483,15 @@ namespace SessionReview
             KeyCode bindKey = runtimeEditorManager != null
                 ? runtimeEditorManager.bindMoveableKey
                 : KeyCode.LeftShift;
+            KeyCode goalKey = runtimeEditorManager != null
+                ? runtimeEditorManager.setGoalKey
+                : KeyCode.G;
             return
                 "Left click select/drag gizmo | " +
                 $"{bindKey}+click add moveable | {bindKey}+drag box-select many | " +
-                "T translate | R rotate | Right mouse free cam | Middle mouse pan | Wheel zoom | " +
+                "T translate | R rotate | " +
+                $"{goalKey} make selected object the robot goal (again to restore cube) | " +
+                "Right mouse free cam | Middle mouse pan | Wheel zoom | " +
                 "F4 top-down reset | Esc deselect | \"Back To Menu\" to exit";
         }
 

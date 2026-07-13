@@ -67,11 +67,11 @@ namespace UnityTemplateProjects
         private bool m_HasLastMousePosition;
 
         [Header("Movement Settings")]
-        [Tooltip("Pan speed when dragging with middle mouse button.")]
-        public float panSpeed = 0.5f;
-        
-        [Tooltip("Zoom speed when scrolling mouse wheel.")]
-        public float zoomSpeed = 2.0f;
+        [Tooltip("Middle-mouse pan as a multiple of exact cursor tracking (1 = the ground point stays under the cursor).")]
+        public float panMultiplier = 1.0f;
+
+        [Tooltip("Mouse-wheel zoom step as a fraction of the current view size per wheel notch.")]
+        [Range(0.01f, 0.5f)] public float zoomStepFraction = 0.12f;
 
         [Tooltip("Movement speed for keyboard navigation in free camera mode.")]
         public float moveSpeed = 8.0f;
@@ -294,32 +294,31 @@ namespace UnityTemplateProjects
                 m_TargetCameraState.Translate(translation * moveSpeed * boostMultiplier * Time.unscaledDeltaTime);
             }
             
-            // Panning with middle mouse button
+            // Panning with middle mouse button, scaled so the grabbed ground point tracks the cursor
             if (IsMiddleMouseButtonPressed())
             {
-                Vector2 mouseDelta = GetInputLookRotation();
-                
-                // Convert mouse delta to world space panning
-                Vector3 panTranslation = Vector3.zero;
-                panTranslation -= transform.right * mouseDelta.x * panSpeed;
-                panTranslation += transform.up * mouseDelta.y * panSpeed;
-                
+                Vector2 mouseDelta = GetMouseDeltaPixels();
+                float worldPerPixel = GetWorldUnitsPerPixel();
+                Vector3 panTranslation =
+                    (-transform.right * mouseDelta.x - transform.up * mouseDelta.y) * (worldPerPixel * panMultiplier);
+
                 m_TargetCameraState.x += panTranslation.x;
                 m_TargetCameraState.y += panTranslation.y;
                 m_TargetCameraState.z += panTranslation.z;
             }
 
-            // Zoom with mouse scroll wheel
+            // Zoom with mouse scroll wheel, as a fraction of the current view per notch
             float scrollDelta = GetScrollDelta();
             if (Mathf.Abs(scrollDelta) > 0.01f)
             {
+                float zoomFactor = Mathf.Pow(1f - zoomStepFraction, scrollDelta);
                 if (mainCamera != null && mainCamera.orthographic)
                 {
-                    mainCamera.orthographicSize = Mathf.Max(minTopDownSize, mainCamera.orthographicSize - scrollDelta * zoomSpeed);
+                    mainCamera.orthographicSize = Mathf.Max(minTopDownSize, mainCamera.orthographicSize * zoomFactor);
                 }
                 else
                 {
-                    Vector3 zoomTranslation = transform.forward * scrollDelta * zoomSpeed;
+                    Vector3 zoomTranslation = transform.forward * (GetViewDistance() * (1f - zoomFactor));
                     m_TargetCameraState.x += zoomTranslation.x;
                     m_TargetCameraState.y += zoomTranslation.y;
                     m_TargetCameraState.z += zoomTranslation.z;
@@ -415,6 +414,35 @@ namespace UnityTemplateProjects
 
             groundPoint = ray.GetPoint(enter);
             return true;
+        }
+
+        Vector2 GetMouseDeltaPixels()
+        {
+#if ENABLE_INPUT_SYSTEM
+            return Mouse.current != null ? Mouse.current.delta.ReadValue() : Vector2.zero;
+#else
+            return GetInputLookRotation();
+#endif
+        }
+
+        // Distance from the camera to what it is looking at, used to scale pan/zoom steps.
+        float GetViewDistance()
+        {
+            return TryGetGroundFocusPoint(out Vector3 groundPoint)
+                ? Vector3.Distance(transform.position, groundPoint)
+                : Mathf.Max(transform.position.y, 5f);
+        }
+
+        float GetWorldUnitsPerPixel()
+        {
+            if (mainCamera == null)
+                return 0.02f;
+
+            float viewHeightWorld = mainCamera.orthographic
+                ? mainCamera.orthographicSize * 2f
+                : 2f * GetViewDistance() * Mathf.Tan(mainCamera.fieldOfView * 0.5f * Mathf.Deg2Rad);
+
+            return viewHeightWorld / Mathf.Max(mainCamera.pixelHeight, 1);
         }
 
         float GetBoostFactor()

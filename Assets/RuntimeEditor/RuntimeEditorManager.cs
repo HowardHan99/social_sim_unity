@@ -81,6 +81,9 @@ public class RuntimeEditorManager : MonoBehaviour
     [Tooltip("Hold this key and click a non-moveable object to make it moveable. A plain click never binds, so it can't spawn stray collider objects.")]
     public KeyCode bindMoveableKey = KeyCode.LeftShift;
 
+    [Tooltip("With an object selected, press this key to make it the robot goal (a 'ROBOT GOAL' label appears above it and the flag-cube marker hides). Press again on the same object to restore the default flag-cube goal.")]
+    public KeyCode setGoalKey = KeyCode.G;
+
     [Tooltip("Show an on-screen debug HUD describing what each click hits, resolves to, and the action taken.")]
     public bool showClickDebug = true;
 
@@ -343,6 +346,40 @@ public class RuntimeEditorManager : MonoBehaviour
 
             if (Input.GetKeyDown(KeyCode.Delete) && currentSelectedObject != null)
                 DeleteSelectedObject();
+
+            if (Input.GetKeyDown(setGoalKey) && currentSelectedObject != null)
+                ToggleRobotGoalBinding(currentSelectedObject);
+        }
+    }
+
+    /// <summary>
+    /// Makes the selected object the robot goal (floating "ROBOT GOAL" label, cube marker hidden),
+    /// or restores the default flag-cube goal when the object already is the goal. The cube marker
+    /// is thus just one kind of goal; any moveable scene prop can serve instead.
+    /// </summary>
+    void ToggleRobotGoalBinding(GameObject obj)
+    {
+        if (IsTaskMarkerObject(obj))
+        {
+            _clickDebug = $"'{obj.name}' is a start/goal marker itself — it can't be bound as the robot goal.";
+            return;
+        }
+
+        if (obj.GetComponentInParent<SEAN.Scenario.Robot>() != null)
+        {
+            _clickDebug = "The robot can't be its own goal.";
+            return;
+        }
+
+        if (RobotGoalObjectBinding.BoundObject == obj)
+        {
+            RobotGoalObjectBinding.Unbind();
+            _clickDebug = $"'{obj.name}' is no longer the robot goal; default flag-cube marker restored.";
+        }
+        else
+        {
+            RobotGoalObjectBinding.Bind(obj);
+            _clickDebug = $"'{obj.name}' is now the ROBOT GOAL (press [{setGoalKey}] again to restore the cube).";
         }
     }
 
@@ -490,10 +527,72 @@ public class RuntimeEditorManager : MonoBehaviour
             }
         }
 
+        RegisterTaskStartGoalMarkers();
+
         if (editableObjects.Count == 0)
         {
             // Debug.LogWarning("No editable objects found! Assign objects manually or set a tag.");
         }
+    }
+
+    // Task start/goal marker roots registered by RegisterTaskStartGoalMarkers. Clicking any child
+    // (e.g. TargetFlagCube) resolves to these roots, and they are excluded from obstacle binding.
+    private readonly HashSet<GameObject> taskMarkerObjects = new HashSet<GameObject>();
+
+    /// <summary>
+    /// Registers the active task's start/goal marker ROOTS ("Start"/"Target" under StartAndGoal) as
+    /// editable, so a click on a child flag mesh selects and drags the whole marker — moving the
+    /// marker root is what actually feeds the published ROS goal, a dragged child flag does not.
+    /// </summary>
+    void RegisterTaskStartGoalMarkers()
+    {
+        SEAN.Tasks.Base task = null;
+        try
+        {
+            var sean = SEAN.SEAN.instance;
+            if (sean != null)
+                task = sean.robotTask;
+        }
+        catch (System.Exception)
+        {
+            // Scene without a (valid) SEAN rig — markers simply aren't available.
+            return;
+        }
+
+        if (task == null)
+            return;
+
+        RegisterTaskMarker(task.robotStart);
+        RegisterTaskMarker(task.robotGoal);
+        RegisterTaskMarker(task.playerStart);
+        RegisterTaskMarker(task.playerGoal);
+    }
+
+    void RegisterTaskMarker(GameObject marker)
+    {
+        if (marker == null)
+            return;
+
+        taskMarkerObjects.Add(marker);
+        if (!editableObjects.Contains(marker))
+        {
+            editableObjects.Add(marker);
+            EnsureObjectLayerIsSelectable(marker);
+        }
+    }
+
+    /// <summary>True when the object is a task start/goal marker root or lives under one.</summary>
+    bool IsTaskMarkerObject(GameObject obj)
+    {
+        if (obj == null || taskMarkerObjects.Count == 0)
+            return false;
+
+        for (Transform t = obj.transform; t != null; t = t.parent)
+        {
+            if (taskMarkerObjects.Contains(t.gameObject))
+                return true;
+        }
+        return false;
     }
 
     void HandleObjectSelection()
@@ -903,6 +1002,9 @@ public class RuntimeEditorManager : MonoBehaviour
             helpText += "\nSelected: " + currentSelectedObject.name + "\n";
             helpText += "[T] Translate Mode\n";
             helpText += "[R] Rotate Mode\n";
+            helpText += RobotGoalObjectBinding.BoundObject == currentSelectedObject
+                ? "[" + setGoalKey + "] Clear Robot Goal (restore cube)\n"
+                : "[" + setGoalKey + "] Set as Robot Goal\n";
             helpText += "[ESC] Deselect (press again to exit)";
         }
         else
@@ -1146,10 +1248,13 @@ public class RuntimeEditorManager : MonoBehaviour
         return minimizeToggleButtonStyle;
     }
 
-    public static void DrawMinimizeToggleButton(Rect toggleRect, ref bool minimized)
+    // fontSize 0 keeps the skin's default size.
+    public static void DrawMinimizeToggleButton(Rect toggleRect, ref bool minimized, int fontSize = 0)
     {
+        GUIStyle style = GetMinimizeToggleButtonStyle();
+        style.fontSize = fontSize;
         string toggleLabel = minimized ? "+" : "\u2014";
-        if (GUI.Button(toggleRect, toggleLabel, GetMinimizeToggleButtonStyle()))
+        if (GUI.Button(toggleRect, toggleLabel, style))
         {
             minimized = !minimized;
             if (minimized)
@@ -1360,8 +1465,12 @@ public class RuntimeEditorManager : MonoBehaviour
 
         if (spawnedObject.GetComponent<SEAN.Scenario.Obstacles.TrackedObstacle>() == null)
         {
+            // TrackedObstacle sizes/centers itself from a ROOT collider; prefabs whose collider
+            // lives on a child (e.g. Road_Decal) would otherwise publish nothing useful.
+            EnsureRootSelectionCollider(spawnedObject);
             var obstacle = spawnedObject.AddComponent<SEAN.Scenario.Obstacles.TrackedObstacle>();
             obstacle.type = spawnableObject.prefab.name.ToLower();
+            NotifyObstaclePublishersOfNewObstacle();
         }
 
         Debug.Log($"Spawned object: {spawnedObject.name} at {spawnPosition}");
@@ -1395,7 +1504,7 @@ public class RuntimeEditorManager : MonoBehaviour
         DisableSpawnedWorldUi(obj);
         DisableChildColliders(obj);
         FreezeSpawnedPhysics(obj);
-        DisableSpawnedAgentControllers(obj);
+        StripSpawnedAgentControllers(obj);
     }
 
     void AlignSpawnedObjectToSpawnPoint(GameObject obj, Vector3 spawnPoint)
@@ -1419,7 +1528,12 @@ public class RuntimeEditorManager : MonoBehaviour
         if (TryGetLocalRendererBounds(root, out Bounds bounds))
         {
             box.center = bounds.center;
-            box.size = bounds.size;
+            // Flat visuals (decals/quads) produce a degenerate zero-extent axis; clamp so the
+            // collider stays raycastable and TrackedObstacle publishes a sane size.
+            box.size = new Vector3(
+                Mathf.Max(bounds.size.x, 0.02f),
+                Mathf.Max(bounds.size.y, 0.02f),
+                Mathf.Max(bounds.size.z, 0.02f));
         }
         else
         {
@@ -1499,27 +1613,47 @@ public class RuntimeEditorManager : MonoBehaviour
         }
     }
 
-    void DisableSpawnedAgentControllers(GameObject obj)
+    void StripSpawnedAgentControllers(GameObject obj)
     {
         if (obj == null)
             return;
 
+        // DESTROY (not disable) every driving script: session-review startup control re-enables
+        // ManualWheelchairControllers it finds anywhere in the scene, so a merely-disabled
+        // controller on a spawned character prop comes back to life on the next trial start —
+        // reading the same input keys as the real player (manual) or running social-force
+        // navigation (auto). A destroyed component can't be found and re-enabled.
         foreach (IVI.ManualWheelchairController controller in obj.GetComponentsInChildren<IVI.ManualWheelchairController>(true))
         {
             if (controller != null)
-                controller.enabled = false;
+                Destroy(controller);
         }
 
-        foreach (IVI.SFPWDAgent agent in obj.GetComponentsInChildren<IVI.SFPWDAgent>(true))
+        // Covers SFAgent, SFPWDAgent and any other social-force agent subtype.
+        foreach (SEAN.Scenario.Agents.Base agent in obj.GetComponentsInChildren<SEAN.Scenario.Agents.Base>(true))
         {
             if (agent != null)
-                agent.enabled = false;
+                Destroy(agent);
+        }
+
+        // A spawned prop must not be published to ROS as a live pedestrian; it is published
+        // as a TrackedObstacle by SpawnObject instead.
+        foreach (SEAN.Scenario.Trajectory.TrackedAgent trackedAgent in obj.GetComponentsInChildren<SEAN.Scenario.Trajectory.TrackedAgent>(true))
+        {
+            if (trackedAgent != null)
+                Destroy(trackedAgent);
+        }
+
+        foreach (UnityEngine.AI.NavMeshAgent navAgent in obj.GetComponentsInChildren<UnityEngine.AI.NavMeshAgent>(true))
+        {
+            if (navAgent != null)
+                Destroy(navAgent);
         }
 
         foreach (CharacterController characterController in obj.GetComponentsInChildren<CharacterController>(true))
         {
             if (characterController != null)
-                characterController.enabled = false;
+                Destroy(characterController);
         }
     }
 
@@ -1629,19 +1763,23 @@ public class RuntimeEditorManager : MonoBehaviour
     }
 
     /// <summary>
-    /// Adds an object to the editable list at runtime so it becomes moveable — the lightweight "register
-    /// logic" only (same list the mailbox lands in), with NO component bundling: it does not attach
-    /// MoveableProp, TrackedObstacle or any collider. Moveability is then handled by the RuntimeEditor
-    /// gizmo that <see cref="SelectObject"/> adds on selection. Returns the object that is now moveable.
+    /// Adds an object to the editable list at runtime so it becomes moveable (same list the mailbox
+    /// lands in). Plain props that physically collide also get a TrackedObstacle so ROS sees them at
+    /// their new position on the next run; agents, robots and task start/goal markers never do.
+    /// Moveability is then handled by the RuntimeEditor gizmo that <see cref="SelectObject"/> adds on
+    /// selection. Returns the object that is now moveable.
     /// </summary>
     public GameObject MakeObjectMoveable(GameObject obj)
     {
         if (obj == null)
             return null;
 
-        // Resolve up to the logical entity root (prop / robot) so we register and move the whole object,
-        // not a child mesh.
-        GameObject target = ResolvePropRoot(obj);
+        // Prefer an already-registered ancestor (task marker, previously bound prop) so we never bind
+        // a child mesh of something that is already moveable; else resolve up to the logical entity
+        // root (prop / robot) so we register and move the whole object, not a child mesh.
+        GameObject target = ResolveEditableObject(obj);
+        if (target == null)
+            target = ResolvePropRoot(obj);
 
         if (target == null)
         {
@@ -1657,8 +1795,69 @@ public class RuntimeEditorManager : MonoBehaviour
         }
 
         RegisterEditableObject(target);
+        EnsureWorldBuildingObstacleTracking(target);
         Debug.Log($"[RuntimeEditor] '{target.name}' added to the editable list (now moveable).");
         return target;
+    }
+
+    /// <summary>
+    /// Attaches a TrackedObstacle to a world-building prop so the ObstaclePublisher reports it to
+    /// ROS. Only plain, physically colliding props qualify: robots, pedestrians/agents and task
+    /// start/goal markers are skipped, as are collider-less visuals (decals) and anything already
+    /// tracked. Adds a root box collider (from renderer bounds) when the collider sits on a child,
+    /// because TrackedObstacle reads size/center from the ROOT collider.
+    /// </summary>
+    void EnsureWorldBuildingObstacleTracking(GameObject target)
+    {
+        if (target == null || target.isStatic)
+            return;
+        if (IsTaskMarkerObject(target))
+            return;
+        if (target.GetComponentInParent<SEAN.Scenario.Obstacles.TrackedObstacle>() != null ||
+            target.GetComponentInChildren<SEAN.Scenario.Obstacles.TrackedObstacle>(true) != null)
+            return;
+        if (IsAgentLikeObject(target))
+            return;
+        // No collider anywhere -> pure visual (decal/effect); not a physical obstacle for ROS.
+        if (target.GetComponentInChildren<Collider>(true) == null)
+            return;
+
+        EnsureRootSelectionCollider(target);
+        var obstacle = target.AddComponent<SEAN.Scenario.Obstacles.TrackedObstacle>();
+        obstacle.type = target.name.Replace("(Clone)", string.Empty).Trim().ToLower();
+        NotifyObstaclePublishersOfNewObstacle();
+        Debug.Log($"[RuntimeEditor] '{target.name}' is now tracked as a ROS obstacle (type '{obstacle.type}').");
+    }
+
+    /// <summary>
+    /// Pushes a newly created TrackedObstacle into every ObstaclePublisher's cached list. Scene
+    /// publishers can have refreshBeforePublish disabled (the sidewalkCrossroad one does, for
+    /// perf), in which case the obstacle list is snapshotted once at Start and anything spawned
+    /// later in world building would never be published to ROS.
+    /// </summary>
+    static void NotifyObstaclePublishersOfNewObstacle()
+    {
+        foreach (var publisher in FindObjectsOfType<SEAN.Scenario.Obstacles.ObstaclePublisher>())
+        {
+            if (publisher != null)
+                publisher.RefreshObstacles();
+        }
+    }
+
+    /// <summary>True for robots, social-force agents and tracked pedestrians (self, parents or children).</summary>
+    static bool IsAgentLikeObject(GameObject obj)
+    {
+        if (obj == null)
+            return false;
+
+        return obj.GetComponentInParent<SEAN.Scenario.Robot>() != null
+            || obj.GetComponentInChildren<SEAN.Scenario.Robot>(true) != null
+            || obj.GetComponentInParent<SEAN.Scenario.Agents.Base>() != null
+            || obj.GetComponentInChildren<SEAN.Scenario.Agents.Base>(true) != null
+            || obj.GetComponentInParent<SEAN.Scenario.Trajectory.TrackedAgent>() != null
+            || obj.GetComponentInChildren<SEAN.Scenario.Trajectory.TrackedAgent>(true) != null
+            || obj.GetComponentInParent<IVI.ManualWheelchairController>() != null
+            || obj.GetComponentInChildren<IVI.ManualWheelchairController>(true) != null;
     }
 
     /// <summary>

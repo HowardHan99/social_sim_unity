@@ -59,6 +59,18 @@ namespace SEAN.Control
         public int sPressesToEnableReverse = 2;
         public float sPressWindowSec = 0.6f;
 
+        [Header("Gamepad Inertia Drive")]
+        [Tooltip("When the Gamepad profile is active the left stick commands acceleration instead of target velocity: push to accelerate, release to coast, pull back to brake. Keyboard and the Logitech stick keep the original direct-velocity behavior.")]
+        public bool gamepadAccelerationDrive = true;
+        [Tooltip("Linear velocity added per second at full stick deflection (m/s^2).")]
+        public float gamepadLinearAcceleration = 1.2f;
+        [Tooltip("Passive coasting decay while the stick is centered (m/s^2). Lower = more inertia.")]
+        public float gamepadCoastDeceleration = 0.35f;
+        [Tooltip("Angular velocity added per second at full steering deflection (same units as manualAngularSpeed, per second).")]
+        public float gamepadAngularAcceleration = 40f;
+        [Tooltip("Passive turn decay while the stick is centered.")]
+        public float gamepadAngularCoastDeceleration = 30f;
+
         [Header("Debug Manual Brake (Read-Only)")]
         public int DebugSBrakePressCount;
 
@@ -309,6 +321,8 @@ namespace SEAN.Control
         {
             float manualDesiredLin = prevLinVelocity;
             float manualDesiredAng = 0f;
+            bool keyboardLinearOverride = false;
+            bool keyboardAngularOverride = false;
 
             float joystickLinearInput = 0f;
             float joystickAngularInput = 0f;
@@ -374,11 +388,13 @@ namespace SEAN.Control
             if (wHeld)
             {
                 manualDesiredLin = manualLinearSpeed;
+                keyboardLinearOverride = true;
                 DebugSBrakePressCount = 0;
                 lastSBrakePressRealtime = -1f;
             }
             else if (sHeld)
             {
+                keyboardLinearOverride = true;
                 bool movingForward = prevLinVelocity > brakeStopThreshold;
                 bool nearStop = Mathf.Abs(prevLinVelocity) <= brakeStopThreshold;
                 bool reverseArmed = DebugSBrakePressCount >= Mathf.Max(1, sPressesToEnableReverse);
@@ -400,21 +416,42 @@ namespace SEAN.Control
             if (ManualKeyHeld(KeyCode.A, KeyCode.LeftArrow))
             {
                 manualDesiredAng = manualAngularSpeed;
+                keyboardAngularOverride = true;
             }
             else if (ManualKeyHeld(KeyCode.D, KeyCode.RightArrow))
             {
                 manualDesiredAng = -manualAngularSpeed;
+                keyboardAngularOverride = true;
             }
 
             if (UnityEngine.Input.GetKey(KeyCode.H))
             {
                 manualDesiredLin = 0f;
                 manualDesiredAng = 0f;
+                keyboardLinearOverride = true;
+                keyboardAngularOverride = true;
                 DebugSBrakePressCount = 0;
                 lastSBrakePressRealtime = -1f;
             }
 
-            if (bypassUnityVelocityPostProcessing && !preserveManualVelocitySmoothing)
+            bool inertiaDrive = gamepadAccelerationDrive && ManualUsesJoystick &&
+                Input.JoystickProfiles.EffectiveProfile == Input.JoystickProfileType.XInputGamepad;
+            bool directSlew = bypassUnityVelocityPostProcessing && !preserveManualVelocitySmoothing;
+            float damping = preserveManualVelocitySmoothing
+                ? manualVelocityDamping
+                : velocityDamping;
+            float interpolationFactor = 1.0f - Mathf.Clamp(damping, 0.0f, 0.999f);
+
+            if (inertiaDrive && !keyboardLinearOverride)
+            {
+                // Gamepad stick = acceleration; a released stick coasts instead of braking.
+                targetLinVelocity = Mathf.Abs(joystickLinearInput) > 0.001f
+                    ? Mathf.Clamp(
+                        prevLinVelocity + joystickLinearInput * gamepadLinearAcceleration * Time.deltaTime,
+                        -manualLinearSpeed, manualLinearSpeed)
+                    : Mathf.MoveTowards(prevLinVelocity, 0f, gamepadCoastDeceleration * Time.deltaTime);
+            }
+            else if (directSlew)
             {
                 float linearStep = Mathf.Abs(manualDesiredLin) > Mathf.Abs(prevLinVelocity)
                     ? manualAcceleration
@@ -423,6 +460,22 @@ namespace SEAN.Control
                     prevLinVelocity,
                     manualDesiredLin,
                     Mathf.Max(0f, linearStep) * Time.deltaTime);
+            }
+            else
+            {
+                targetLinVelocity = Mathf.Lerp(prevLinVelocity, manualDesiredLin, interpolationFactor);
+            }
+
+            if (inertiaDrive && !keyboardAngularOverride)
+            {
+                targetAngVelocity = Mathf.Abs(joystickAngularInput) > 0.001f
+                    ? Mathf.Clamp(
+                        prevAngVelocity + joystickAngularInput * gamepadAngularAcceleration * Time.deltaTime,
+                        -manualAngularSpeed, manualAngularSpeed)
+                    : Mathf.MoveTowards(prevAngVelocity, 0f, gamepadAngularCoastDeceleration * Time.deltaTime);
+            }
+            else if (directSlew)
+            {
                 targetAngVelocity = Mathf.MoveTowards(
                     prevAngVelocity,
                     manualDesiredAng,
@@ -430,11 +483,6 @@ namespace SEAN.Control
             }
             else
             {
-                float damping = preserveManualVelocitySmoothing
-                    ? manualVelocityDamping
-                    : velocityDamping;
-                float interpolationFactor = 1.0f - Mathf.Clamp(damping, 0.0f, 0.999f);
-                targetLinVelocity = Mathf.Lerp(prevLinVelocity, manualDesiredLin, interpolationFactor);
                 targetAngVelocity = Mathf.Lerp(prevAngVelocity, manualDesiredAng, interpolationFactor);
             }
 
@@ -749,7 +797,8 @@ namespace SEAN.Control
             if (!JoystickPresent || string.IsNullOrWhiteSpace(axisName))
                 return 0f;
 
-            float value = GetAxisSafely(ResolveJoystickAxisName(axisName));
+            string resolved = ResolveJoystickAxisName(axisName);
+            float value = GetAxisSafely(resolved) * Input.JoystickProfiles.AxisSign(resolved);
             if (invert)
                 value = -value;
             return value;
@@ -801,17 +850,15 @@ namespace SEAN.Control
         {
             DebugAxisHorizontal = GetAxisSafely("Horizontal");
             DebugAxisVertical = GetAxisSafely("Vertical");
-            DebugAxisRHorizontal = GetAxisSafely("LogitechTwist");
-            DebugAxisRVertical = GetAxisSafely("LogitechThrottle");
+            DebugAxisRHorizontal = GetAxisSafely(ResolveJoystickAxisName("RHorizontal"));
+            DebugAxisRVertical = GetAxisSafely(ResolveJoystickAxisName("RVertical"));
         }
 
+        // Legacy aliases and per-device remapping (Logitech stick vs. gamepad) both live in
+        // JoystickProfiles so every manual controller reads the same physical axes.
         private string ResolveJoystickAxisName(string axisName)
         {
-            if (axisName == "RHorizontal")
-                return "LogitechTwist";
-            if (axisName == "RVertical")
-                return "LogitechThrottle";
-            return axisName;
+            return Input.JoystickProfiles.ResolveAxis(axisName);
         }
 
         // Manual driving reads WASD normally, or the arrow keys when this robot is not
