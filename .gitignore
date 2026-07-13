@@ -84,7 +84,10 @@ Documentation/obj
 
 # recordings
 Recordings/*
-/Assets/Ultimate Replay 2.0
+# NOTE: Do NOT ignore "Assets/Ultimate Replay 2.0". The Rerun submodule
+# depends on the UltimateReplay namespace; the plugin must stay tracked &
+# enabled in Assets/ on every branch or Assembly-CSharp fails to compile
+# (CS0246). See dev2 as the canonical copy (includes .meta/GUIDs).
 /Assets/scene_test
 /Assets/Plugins
 /Assets/RerunData
