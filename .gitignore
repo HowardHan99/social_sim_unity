@@ -89,5 +89,8 @@ Recordings/*
 # enabled in Assets/ on every branch or Assembly-CSharp fails to compile
 # (CS0246). See dev2 as the canonical copy (includes .meta/GUIDs).
 /Assets/scene_test
-/Assets/Plugins
+# NOTE: Do NOT ignore "Assets/Plugins". SimpleFileBrowser lives there and the
+# Rerun submodule does `using SimpleFileBrowser;` (RerunManager.cs) — ignoring
+# it drops the asmdef from the compile path and Assembly-CSharp fails (CS0246).
+# Canonical copy is on dev2 (asmdef guid c685d05731421f64287ad6d13be5af0e).
 /Assets/RerunData
