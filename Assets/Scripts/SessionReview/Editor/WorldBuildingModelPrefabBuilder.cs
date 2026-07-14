@@ -8,24 +8,43 @@ using UnityEngine;
 namespace SessionReview.Editor
 {
     /// <summary>
-    /// Builds World Building spawn prefabs from BikeModel.glb / ScooterModel.fbx plus palette thumbnails.
-    /// Menu: SessionReview → Build Bike & Scooter Spawn Prefabs
+    /// Builds Bike and Scooter World Building spawn prefabs from source meshes in Art/WorldBuildingSpawnSources.
+    /// Menu: SessionReview → Build World Building Spawn Prefabs
     /// </summary>
     public static class WorldBuildingModelPrefabBuilder
     {
         const string SpawnsDir = "Assets/Resources/WorldBuildingSpawns";
         const string ModelSourcesDir = "Assets/Art/WorldBuildingSpawnSources";
 
-        [MenuItem("SessionReview/Build Bike & Scooter Spawn Prefabs")]
+        internal static readonly (string prefabName, string modelFileName)[] SpawnDefinitions =
+        {
+            ("Bike", "BikeModel.glb"),
+            ("Scooter", "ScooterModel.fbx"),
+        };
+
+        [MenuItem("SessionReview/Build World Building Spawn Prefabs")]
         public static void BuildAllFromMenu()
         {
             BuildAll();
         }
 
-        public static void BuildAll()
+        [MenuItem("SessionReview/Build Bike & Scooter Spawn Prefabs")]
+        public static void BuildBikeScooterFromMenu()
         {
             BuildOne("Bike", "BikeModel.glb");
             BuildOne("Scooter", "ScooterModel.fbx");
+            AssetDatabase.SaveAssets();
+            AssetDatabase.Refresh();
+        }
+
+        public static void BuildAll()
+        {
+            for (int i = 0; i < SpawnDefinitions.Length; i++)
+            {
+                (string prefabName, string modelFileName) = SpawnDefinitions[i];
+                BuildOne(prefabName, modelFileName);
+            }
+
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
             Debug.Log("[WorldBuildingModelPrefabBuilder] Bike and Scooter spawn prefabs updated.");
@@ -177,16 +196,24 @@ namespace SessionReview.Editor
             if (EditorApplication.isPlayingOrWillChangePlaymode)
                 return;
 
-            string bike = SpawnsDir + "/Bike.prefab";
-            string scooter = SpawnsDir + "/Scooter.prefab";
-            if (File.Exists(bike) && File.Exists(scooter))
+            bool anyMissingComponents = false;
+            for (int i = 0; i < WorldBuildingModelPrefabBuilder.SpawnDefinitions.Length; i++)
             {
-                if (PrefabHasRequiredComponents(bike) && PrefabHasRequiredComponents(scooter))
-                    return;
+                string prefabPath = SpawnsDir + "/" + WorldBuildingModelPrefabBuilder.SpawnDefinitions[i].prefabName + ".prefab";
+                if (!File.Exists(prefabPath))
+                {
+                    anyMissingComponents = true;
+                    break;
+                }
+
+                if (!PrefabHasRequiredComponents(prefabPath))
+                {
+                    anyMissingComponents = true;
+                    break;
+                }
             }
 
-            if (!File.Exists(SpawnsDir + "/BikeModel.glb") && !File.Exists(ModelSourcesDir + "/BikeModel.glb")
-                && !File.Exists(SpawnsDir + "/ScooterModel.fbx") && !File.Exists(ModelSourcesDir + "/ScooterModel.fbx"))
+            if (!anyMissingComponents)
                 return;
 
             WorldBuildingModelPrefabBuilder.BuildAll();

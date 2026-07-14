@@ -90,7 +90,7 @@ namespace SessionReview
         private static Texture2D lineTexture;
         private Vector2 worldBuildingAddObjectsScroll;
         private Vector2 worldBuildingAddCharactersScroll;
-        private bool worldBuildingAddObjectsMinimized = true;
+        private bool worldBuildingAddObjectsMinimized = false;
         private bool worldBuildingAddCharactersMinimized = true;
         private bool worldBuildingGenerateObjectsMinimized = true;
         private bool worldBuildingOverlayMinimized;
@@ -101,6 +101,7 @@ namespace SessionReview
         private const float WorldBuildingGenerateObjectsBodyHeight = 108f;
         private const float WorldBuildingGenerateObjectsLoadingLabelHeight = 22f;
         private const float WorldBuildingSidePanelEmptyBodyHeight = 56f;
+        private const float WorldBuildingSpawnCardPanelMinScrollHeight = 120f;
         private const float WorldBuildingOverlayHeaderHeight = 44f;
         private const float WorldBuildingOverlayWidth = 360f;
         private bool showReviewCompletionPrompt;
@@ -1418,36 +1419,51 @@ namespace SessionReview
 
         private void DrawWorldBuildingSidePanels()
         {
+            EnsureWorldBuildingSpawnLibraryCurrent();
+
             GetWorldBuildingSidePanelRects(
                 out Rect generateRect,
                 out Rect charactersRect,
                 out Rect objectsRect);
 
-            if (runtimeEditorManager != null)
-                EnsureWorldBuildingSpawnPrefabsConfigured();
-            else
-                WorldBuildingSpawnLibrary.RefreshFromResources();
-
             IReadOnlyList<WorldBuildingSpawnUiRow> objectRows = WorldBuildingSpawnLibrary.LastObjectUiRows;
             IReadOnlyList<WorldBuildingSpawnUiRow> characterRows = WorldBuildingSpawnLibrary.LastCharacterUiRows;
 
+            int previousDepth = GUI.depth;
+            GUI.depth = -1000;
             DrawWorldBuildingGenerateObjectsPanel(generateRect);
             DrawWorldBuildingAddCharactersPanel(charactersRect, characterRows);
             DrawWorldBuildingAddObjectsPanel(objectsRect, objectRows);
+            GUI.depth = previousDepth;
         }
 
         private void DrawWorldBuildingAddObjectsPanel(Rect panelRect, IReadOnlyList<WorldBuildingSpawnUiRow> rows)
         {
+            int objectCount = rows?.Count ?? 0;
             GUI.Box(panelRect, "");
             DrawWorldBuildingSidePanelHeader(
                 panelRect,
                 "Add Objects",
-                "Only prefabs with a matching image in Resources/WorldBuildingUI are listed (others in WorldBuildingSpawns are ignored).",
+                objectCount == 0
+                    ? "No spawn prefabs registered yet. Check Resources/WorldBuildingSpawns."
+                    : "Click Add on a card to place that object in the scene.",
                 ref worldBuildingAddObjectsMinimized,
                 WorldBuildingAddObjectsExpandedHeaderHeight);
 
             if (worldBuildingAddObjectsMinimized)
                 return;
+
+            if (rows == null || rows.Count == 0)
+            {
+                GUI.Label(
+                    new Rect(
+                        panelRect.x + 14f,
+                        panelRect.y + WorldBuildingAddObjectsExpandedHeaderHeight + 12f,
+                        panelRect.width - 28f,
+                        64f),
+                    "No object prefabs registered.\nExpected assets under Resources/WorldBuildingSpawns with optional thumbnails in Resources/WorldBuildingUI.");
+                return;
+            }
 
             DrawWorldBuildingSpawnCardGrid(
                 panelRect,
@@ -1544,12 +1560,15 @@ namespace SessionReview
                 return;
 
             int rowCount = (totalCards + WorldBuildingSpawnPaletteCols - 1) / WorldBuildingSpawnPaletteCols;
-            float scrollAreaMin = 120f;
+            float scrollAreaMin = WorldBuildingSpawnCardPanelMinScrollHeight;
             float scrollAreaMax = Mathf.Min(280f, Screen.height * 0.38f);
             float scrollInnerHeight = rowCount * (WorldBuildingSpawnPaletteCardHeight + WorldBuildingSpawnPaletteCardGap)
                                       + WorldBuildingSpawnPaletteCardGap;
+            float availableHeight = panelRect.height - headerHeight - 16f;
             float scrollViewportH = Mathf.Clamp(scrollInnerHeight, scrollAreaMin, scrollAreaMax);
-            scrollViewportH = Mathf.Min(scrollViewportH, Mathf.Max(0f, panelRect.height - headerHeight - 16f));
+            scrollViewportH = Mathf.Min(scrollViewportH, Mathf.Max(0f, availableHeight));
+            if (scrollViewportH < scrollAreaMin && availableHeight >= scrollAreaMin)
+                scrollViewportH = scrollAreaMin;
             if (scrollViewportH <= 0f)
                 return;
 
@@ -1724,12 +1743,24 @@ namespace SessionReview
                 return expandedHeaderHeight + WorldBuildingSidePanelEmptyBodyHeight;
 
             int rowCount = (totalCards + WorldBuildingSpawnPaletteCols - 1) / WorldBuildingSpawnPaletteCols;
-            float scrollAreaMin = 120f;
             float scrollAreaMax = Mathf.Min(280f, Screen.height * 0.38f);
             float scrollInnerHeight = rowCount * (WorldBuildingSpawnPaletteCardHeight + WorldBuildingSpawnPaletteCardGap)
                                       + WorldBuildingSpawnPaletteCardGap;
-            float scrollViewportH = Mathf.Clamp(scrollInnerHeight, scrollAreaMin, scrollAreaMax);
+            float scrollViewportH = Mathf.Clamp(scrollInnerHeight, WorldBuildingSpawnCardPanelMinScrollHeight, scrollAreaMax);
             return expandedHeaderHeight + scrollViewportH + 16f;
+        }
+
+        private static float GetWorldBuildingSpawnCardPanelMinimumExpandedHeight(float expandedHeaderHeight)
+        {
+            return expandedHeaderHeight + WorldBuildingSpawnCardPanelMinScrollHeight + 16f;
+        }
+
+        private void EnsureWorldBuildingSpawnLibraryCurrent()
+        {
+            if (runtimeEditorManager != null)
+                EnsureWorldBuildingSpawnPrefabsConfigured();
+            else
+                WorldBuildingSpawnLibrary.RefreshFromResources();
         }
 
         private float GetWorldBuildingGenerateObjectsPanelHeight()
@@ -1776,6 +1807,8 @@ namespace SessionReview
 
         private bool ContainsWorldBuildingSidePanel(Vector2 guiPoint)
         {
+            EnsureWorldBuildingSpawnLibraryCurrent();
+
             GetWorldBuildingSidePanelRects(
                 out Rect generateRect,
                 out Rect charactersRect,
@@ -1810,16 +1843,21 @@ namespace SessionReview
             ReducePanelHeightForOverflow(
                 ref objectsHeight,
                 worldBuildingAddObjectsMinimized,
-                WorldBuildingAddObjectsExpandedHeaderHeight,
+                GetWorldBuildingSpawnCardPanelMinimumExpandedHeight(WorldBuildingAddObjectsExpandedHeaderHeight),
                 ref overflow);
             ReducePanelHeightForOverflow(
                 ref charactersHeight,
                 worldBuildingAddCharactersMinimized,
+                GetWorldBuildingSpawnCardPanelMinimumExpandedHeight(WorldBuildingSidePanelHeaderHeight),
+                ref overflow);
+            ReducePanelHeightForOverflow(
+                ref generateHeight,
+                worldBuildingGenerateObjectsMinimized,
                 WorldBuildingSidePanelHeaderHeight,
                 ref overflow);
 
+            float x = GetWorldBuildingSidePanelX(panelWidth);
             float yBottom = Screen.height - WorldBuildingSidePanelMargin;
-            float x = Screen.width - panelWidth - WorldBuildingSidePanelMargin;
 
             generateRect = new Rect(x, yBottom - generateHeight, panelWidth, generateHeight);
 
@@ -1828,6 +1866,11 @@ namespace SessionReview
 
             yBottom = charactersRect.y - WorldBuildingSidePanelGap;
             objectsRect = new Rect(x, yBottom - objectsHeight, panelWidth, objectsHeight);
+        }
+
+        private static float GetWorldBuildingSidePanelX(float panelWidth)
+        {
+            return Screen.width - panelWidth - WorldBuildingSidePanelMargin;
         }
 
         private static void ReducePanelHeightForOverflow(
@@ -2110,7 +2153,7 @@ namespace SessionReview
 
             showPostTrialPrompt = false;
             showReviewCompletionPrompt = false;
-            worldBuildingAddObjectsMinimized = true;
+            worldBuildingAddObjectsMinimized = false;
             worldBuildingAddCharactersMinimized = true;
             worldBuildingGenerateObjectsMinimized = true;
             inWorldBuildingMode = true;

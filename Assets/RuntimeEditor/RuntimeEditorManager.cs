@@ -126,7 +126,7 @@ public class RuntimeEditorManager : MonoBehaviour
         if (!isEditorActive)
             return false;
 
-        if (showClickDebug && GetClickDebugPanelRect().Contains(guiPoint))
+        if (showClickDebug && !suppressSpawnCanvas && GetClickDebugPanelRect().Contains(guiPoint))
             return true;
 
         if (highlightMoveableObjects && ContainsWorldBuildingHelpUi(guiPoint))
@@ -879,8 +879,9 @@ public class RuntimeEditorManager : MonoBehaviour
         // Moveable legend + optional controls, combined in a ? help popup.
         DrawWorldBuildingHelpButtonAndPopup();
 
-        // Debug HUD describing the last click; shown in both modes when enabled.
-        DrawClickDebug();
+        // SessionReviewManager owns the right-side spawn palette while world building.
+        if (!suppressSpawnCanvas)
+            DrawClickDebug();
 
         // Marquee rectangle while box-selecting.
         DrawSelectionBox();

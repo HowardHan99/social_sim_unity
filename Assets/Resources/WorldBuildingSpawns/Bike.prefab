@@ -1,86 +1,11 @@
 %YAML 1.1
 %TAG !u! tag:unity3d.com,2011:
---- !u!1 &1872154161306867509
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 2725867297849016754}
-  - component: {fileID: 7000000000000000001}
-  - component: {fileID: 7000000000000000002}
-  - component: {fileID: 7000000000000000003}
-  m_Layer: 3
-  m_Name: Bike
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!4 &2725867297849016754
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1872154161306867509}
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_Children:
-  - {fileID: 6299927832361699587}
-  m_Father: {fileID: 0}
-  m_RootOrder: 0
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!65 &7000000000000000001
-BoxCollider:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1872154161306867509}
-  m_Material: {fileID: 0}
-  m_IsTrigger: 0
-  m_Enabled: 1
-  serializedVersion: 2
-  m_Size: {x: 1.6, y: 1.1, z: 0.5}
-  m_Center: {x: 0, y: 0.55, z: 0}
---- !u!114 &7000000000000000002
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1872154161306867509}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: a3adba1e68257bc43acdde01c23614ae, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  id: 0
-  type: bike
-  showDebug: 0
---- !u!114 &7000000000000000003
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1872154161306867509}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1c19610482eb06543aa9acbc1aa7d22e, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  objectId: 
---- !u!1001 &2880955137056025048
+--- !u!1001 &726643539031969621
 PrefabInstance:
   m_ObjectHideFlags: 0
   serializedVersion: 2
   m_Modification:
-    m_TransformParent: {fileID: 2725867297849016754}
+    m_TransformParent: {fileID: 0}
     m_Modifications:
     - target: {fileID: -1110450038530924325, guid: 8af495c061bbbd14f879bcb31703b240,
         type: 3}
@@ -140,14 +65,66 @@ PrefabInstance:
     - target: {fileID: 5019860210607232034, guid: 8af495c061bbbd14f879bcb31703b240,
         type: 3}
       propertyPath: m_Name
-      value: BikeModel
+      value: Bike
+      objectReference: {fileID: 0}
+    - target: {fileID: 5019860210607232034, guid: 8af495c061bbbd14f879bcb31703b240,
+        type: 3}
+      propertyPath: m_Layer
+      value: 3
       objectReference: {fileID: 0}
     m_RemovedComponents: []
   m_SourcePrefab: {fileID: 9199261849990390558, guid: 8af495c061bbbd14f879bcb31703b240,
     type: 3}
---- !u!4 &6299927832361699587 stripped
-Transform:
-  m_CorrespondingSourceObject: {fileID: -1110450038530924325, guid: 8af495c061bbbd14f879bcb31703b240,
+--- !u!1 &5746503175109204855 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 5019860210607232034, guid: 8af495c061bbbd14f879bcb31703b240,
     type: 3}
-  m_PrefabInstance: {fileID: 2880955137056025048}
+  m_PrefabInstance: {fileID: 726643539031969621}
   m_PrefabAsset: {fileID: 0}
+--- !u!65 &7000000000000000001
+BoxCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5746503175109204855}
+  m_Material: {fileID: 0}
+  m_IsTrigger: 0
+  m_Enabled: 1
+  serializedVersion: 2
+  m_Size: {x: 1.7102504, y: 1, z: 0.6752122}
+  m_Center: {x: 0.0010084808, y: 0.5, z: -0.0008201599}
+--- !u!114 &7000000000000000002
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5746503175109204855}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a3adba1e68257bc43acdde01c23614ae, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  id: 0
+  type: bike
+  showDebug: 0
+--- !u!114 &7000000000000000003
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5746503175109204855}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1c19610482eb06543aa9acbc1aa7d22e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  objectId: 
+  replayObject: {fileID: 0}
+  trackTransform: 1
+  trackRigidbody: 1
+  trackAnimator: 1
+  customProperties: []
+  debugMode: 1
