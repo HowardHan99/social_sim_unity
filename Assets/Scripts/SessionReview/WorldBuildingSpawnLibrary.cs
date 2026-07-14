@@ -63,31 +63,69 @@ namespace SessionReview
                 if (prefab == null)
                     continue;
 
+                if (!IsPaletteSpawnPrefab(prefab))
+                    continue;
+
                 Texture2D thumbnail = ResolveThumbnail(prefab.name, textures);
                 if (thumbnail == null)
                     continue;
 
-                string id = _lastSpawnables.Count.ToString(CultureInfo.InvariantCulture);
-                _lastSpawnables.Add(new SpawnableObject
-                {
-                    id = id,
-                    prefab = prefab,
-                    spawnButton = null
-                });
-
-                var uiRow = new WorldBuildingSpawnUiRow
-                {
-                    SpawnId = id,
-                    DisplayName = HumanizePrefabName(prefab.name),
-                    Thumbnail = thumbnail
-                };
-                _lastUiRows.Add(uiRow);
-
-                if (IsCharacterSpawnPrefab(prefab.name))
-                    _lastCharacterUiRows.Add(uiRow);
-                else
-                    _lastObjectUiRows.Add(uiRow);
+                RegisterPaletteEntry(prefab, prefab.name, thumbnail);
             }
+
+            // Ensure key palette prefabs register even if LoadAll skipped them.
+            RegisterPalettePrefabIfMissing("Bike", textures);
+            RegisterPalettePrefabIfMissing("Scooter", textures);
+        }
+
+        static void RegisterPalettePrefabIfMissing(string prefabName, Texture2D[] textures)
+        {
+            for (int i = 0; i < _lastSpawnables.Count; i++)
+            {
+                SpawnableObject existing = _lastSpawnables[i];
+                if (existing?.prefab != null &&
+                    string.Equals(existing.prefab.name, prefabName, StringComparison.OrdinalIgnoreCase))
+                    return;
+            }
+
+            GameObject prefab = Resources.Load<GameObject>("WorldBuildingSpawns/" + prefabName);
+            if (prefab == null)
+                return;
+
+            if (!IsPaletteSpawnPrefab(prefab))
+                return;
+
+            Texture2D thumbnail = ResolveThumbnail(prefabName, textures);
+            if (thumbnail == null)
+                thumbnail = Resources.Load<Texture2D>("WorldBuildingUI/" + prefabName);
+            if (thumbnail == null)
+                return;
+
+            RegisterPaletteEntry(prefab, prefabName, thumbnail);
+        }
+
+        static void RegisterPaletteEntry(GameObject prefab, string prefabName, Texture2D thumbnail)
+        {
+            string id = _lastSpawnables.Count.ToString(CultureInfo.InvariantCulture);
+            _lastSpawnables.Add(new SpawnableObject
+            {
+                id = id,
+                prefab = prefab,
+                spawnButton = null
+            });
+
+            var uiRow = new WorldBuildingSpawnUiRow
+            {
+                SpawnId = id,
+                DisplayName = HumanizePrefabName(prefabName),
+                Thumbnail = thumbnail
+            };
+            _lastUiRows.Add(uiRow);
+
+            if (IsCharacterSpawnPrefab(prefabName))
+                _lastCharacterUiRows.Add(uiRow);
+            else
+                _lastObjectUiRows.Add(uiRow);
         }
 
         public static bool IsCharacterSpawnPrefab(string prefabName)
@@ -115,6 +153,25 @@ namespace SessionReview
             s = Regex.Replace(s, @"\s+\(\d+\)\s*$", string.Empty);
             s = Regex.Replace(s, @"\s+0+(\d+)\s*$", " $1");
             return s.Trim();
+        }
+
+        /// <summary>
+        /// Resources.LoadAll also returns imported fbx/glb roots (e.g. BikeModel, ScooterModel).
+        /// Those are source meshes, not World Building palette prefabs.
+        /// </summary>
+        public static bool IsPaletteSpawnPrefab(GameObject candidate)
+        {
+            if (candidate == null)
+                return false;
+
+            string name = candidate.name;
+            if (string.IsNullOrEmpty(name))
+                return false;
+
+            if (name.EndsWith("Model", StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            return true;
         }
 
         static Texture2D ResolveThumbnail(string prefabName, Texture2D[] textures)

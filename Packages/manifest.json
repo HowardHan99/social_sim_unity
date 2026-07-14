@@ -5,6 +5,7 @@
     "com.unity.ide.visualstudio": "2.0.18",
     "com.unity.ide.vscode": "1.2.5",
     "com.unity.nuget.newtonsoft-json": "3.2.0",
+    "com.siccity.gltfutility": "https://github.com/siccity/gltfutility.git",
     "com.unity.postprocessing": "3.1.1",
     "com.unity.recorder": "2.5.7",
     "com.unity.renderstreaming": "3.1.0-exp.7",
