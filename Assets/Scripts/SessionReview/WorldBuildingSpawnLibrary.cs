@@ -61,10 +61,15 @@ namespace SessionReview
             _lastObjectUiRows = new List<WorldBuildingSpawnUiRow>();
             _lastCharacterUiRows = new List<WorldBuildingSpawnUiRow>();
 
+            RegisterExplicitPalettePrefabs(textures);
+
             for (int i = 0; i < prefabs.Length; i++)
             {
                 GameObject prefab = prefabs[i];
                 if (prefab == null)
+                    continue;
+
+                if (IsPaletteEntryRegistered(prefab.name))
                     continue;
 
                 if (!IsPaletteSpawnPrefab(prefab))
@@ -74,7 +79,6 @@ namespace SessionReview
                 RegisterPaletteEntry(prefab, prefab.name, thumbnail);
             }
 
-            RegisterExplicitPalettePrefabs(textures);
             LogRefreshSummary(prefabs.Length, textures.Length);
 
             if (_lastObjectUiRows.Count == 0 && _lastCharacterUiRows.Count == 0)
@@ -175,7 +179,10 @@ namespace SessionReview
             ("Lamppost", null),
             ("Bike", new[] { "WorldBuildingUI/Bike" }),
             ("Scooter", new[] { "WorldBuildingUI/scooter", "WorldBuildingUI/Scooter" }),
-            ("TrashCan", new[] { "WorldBuildingUI/TrashCan" }),
+            ("Trash_Bag", new[] { "WorldBuildingUI/Trash_Bag" }),
+            ("Trash", new[] { "WorldBuildingUI/Trash" }),
+            ("Bush", new[] { "WorldBuildingUI/Bush" }),
+            ("TrashCan", new[] { "WorldBuildingUI/TrashCan", "WorldBuildingUI/Trash_Can" }),
             ("FireHydrant", new[] { "WorldBuildingUI/FireHydrant" }),
             ("ParkingMeter", new[] { "WorldBuildingUI/ParkingMeter" }),
             ("Wheelchair_male", new[] { "WorldBuildingUI/Wheelchair_male" }),
@@ -183,10 +190,28 @@ namespace SessionReview
 
         static readonly string[] ExactDisplayNamePrefabNames =
         {
+            "Trash",
+            "Bush",
             "TrashCan",
             "FireHydrant",
             "ParkingMeter",
         };
+
+        static bool IsPaletteEntryRegistered(string prefabName)
+        {
+            if (string.IsNullOrEmpty(prefabName))
+                return false;
+
+            for (int i = 0; i < _lastSpawnables.Count; i++)
+            {
+                SpawnableObject existing = _lastSpawnables[i];
+                if (existing?.prefab != null &&
+                    string.Equals(existing.prefab.name, prefabName, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+
+            return false;
+        }
 
         static void RegisterExplicitPalettePrefabs(Texture2D[] textures)
         {
@@ -199,13 +224,8 @@ namespace SessionReview
 
         static void RegisterPalettePrefabIfMissing(string prefabName, string[] thumbnailPaths, Texture2D[] textures)
         {
-            for (int i = 0; i < _lastSpawnables.Count; i++)
-            {
-                SpawnableObject existing = _lastSpawnables[i];
-                if (existing?.prefab != null &&
-                    string.Equals(existing.prefab.name, prefabName, StringComparison.OrdinalIgnoreCase))
-                    return;
-            }
+            if (IsPaletteEntryRegistered(prefabName))
+                return;
 
             GameObject prefab = Resources.Load<GameObject>("WorldBuildingSpawns/" + prefabName);
             if (prefab == null)
