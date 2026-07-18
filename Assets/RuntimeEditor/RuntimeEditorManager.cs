@@ -376,10 +376,13 @@ public class RuntimeEditorManager : MonoBehaviour
             RobotGoalObjectBinding.Unbind();
             _clickDebug = $"'{obj.name}' is no longer the robot goal; default flag-cube marker restored.";
         }
+        else if (RobotGoalObjectBinding.Bind(obj))
+        {
+            _clickDebug = $"'{obj.name}' is now the ROBOT GOAL (press [{setGoalKey}] again to restore the cube).";
+        }
         else
         {
-            RobotGoalObjectBinding.Bind(obj);
-            _clickDebug = $"'{obj.name}' is now the ROBOT GOAL (press [{setGoalKey}] again to restore the cube).";
+            _clickDebug = $"'{obj.name}' can't be the robot goal — see the Console for why.";
         }
     }
 
@@ -975,6 +978,10 @@ public class RuntimeEditorManager : MonoBehaviour
     {
         if (!isEditorActive) return;
 
+        // Match the session-review overlays' global user zoom so shared GUI-space
+        // hit-testing (ContainsWorldBuildingHelperUi) stays consistent.
+        SessionReview.ReviewUiScale.Apply();
+
         // Moveable legend + optional controls, combined in a ? help popup.
         DrawWorldBuildingHelpButtonAndPopup();
 
@@ -1023,8 +1030,9 @@ public class RuntimeEditorManager : MonoBehaviour
             return;
 
         Rect r = MakeScreenRect(_boxStartScreen, _boxEndScreen);
-        // Convert mouse-space (bottom-left, y up) to GUI-space (top-left, y down).
-        Rect gui = new Rect(r.xMin, Screen.height - r.yMax, r.width, r.height);
+        // Convert mouse-space (bottom-left, y up, real pixels) to scaled GUI-space (top-left, y down).
+        float ui = SessionReview.ReviewUiScale.Value;
+        Rect gui = new Rect(r.xMin / ui, (Screen.height - r.yMax) / ui, r.width / ui, r.height / ui);
 
         Color prev = GUI.color;
         GUI.color = new Color(moveableHighlightColor.r, moveableHighlightColor.g, moveableHighlightColor.b, 0.15f);
@@ -1081,9 +1089,9 @@ public class RuntimeEditorManager : MonoBehaviour
         const float w = 360f;
         const float x = 12f;
         if (clickDebugMinimized)
-            return new Rect(Screen.width - w - x, 12f, w, WorldBuildingHelperPanelHeaderHeight);
+            return new Rect(SessionReview.ReviewUiScale.Width - w - x, 12f, w, WorldBuildingHelperPanelHeaderHeight);
 
-        return new Rect(Screen.width - w - x, 12f, w, 168f);
+        return new Rect(SessionReview.ReviewUiScale.Width - w - x, 12f, w, 168f);
     }
 
     void DrawWorldBuildingHelpButtonAndPopup()
@@ -1200,7 +1208,7 @@ public class RuntimeEditorManager : MonoBehaviour
     {
         return new Rect(
             WorldBuildingHelpMargin,
-            Screen.height - WorldBuildingHelpButtonSize - WorldBuildingHelpMargin,
+            SessionReview.ReviewUiScale.Height - WorldBuildingHelpButtonSize - WorldBuildingHelpMargin,
             WorldBuildingHelpButtonSize,
             WorldBuildingHelpButtonSize);
     }

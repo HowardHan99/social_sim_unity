@@ -47,10 +47,12 @@ namespace SessionReview
             if (SessionReviewManager.Instance != null && SessionReviewManager.Instance.IsWorldBuildingModeActive)
                 return;
 
+            ReviewUiScale.Apply();
+
             // Docked on the right by default so it never covers the draw-mode panel on the left.
             Rect defaultRect = new Rect(
-                Mathf.Max(10f, Screen.width - panelWidth - panelRightMargin), panelY, panelWidth,
-                Mathf.Min(defaultPanelHeight, Screen.height - panelY - 20f));
+                Mathf.Max(10f, ReviewUiScale.Width - panelWidth - panelRightMargin), panelY, panelWidth,
+                Mathf.Min(defaultPanelHeight, ReviewUiScale.Height - panelY - 20f));
 
             if (ReviewPanels.Begin(panel, this, "Metrics", defaultRect, out Rect content))
             {

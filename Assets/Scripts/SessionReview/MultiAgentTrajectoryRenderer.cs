@@ -952,6 +952,16 @@ namespace SessionReview
             return IsGroupVisible(key);
         }
 
+        /// <summary>
+        /// Drives an externally-owned group's legend row from outside the Legend panel, so a
+        /// switch elsewhere (RosOverlayVisibility's control-trajectory button) and the row itself
+        /// stay in agreement instead of each holding their own idea of visibility.
+        /// </summary>
+        public void SetExternalGroupVisible(string key, bool visible)
+        {
+            SetGroupVisibility(key, visible);
+        }
+
         private void RegisterRendererToGroup(string key, Renderer renderer)
         {
             if (renderer == null || string.IsNullOrEmpty(key))
@@ -1069,6 +1079,8 @@ namespace SessionReview
         {
             if (!isShowing || legendEntries.Count == 0) return;
 
+            ReviewUiScale.Apply();
+
             // Nominal row/controls heights just to size the default window; the actual
             // heights are computed responsively in DrawLegendBody from FontScale.
             float lineH = 40f;
@@ -1076,8 +1088,8 @@ namespace SessionReview
             float boxW = 400f;
             float defaultH = ReviewPanels.TitleH + controlsH + 8f
                 + Mathf.Min(Mathf.Max(legendEntries.Count, 1), 8) * lineH + 12f;
-            float dx = Screen.width - boxW - 20f;
-            float dy = Mathf.Max(10f, Screen.height - defaultH - 140f);
+            float dx = ReviewUiScale.Width - boxW - 20f;
+            float dy = Mathf.Max(10f, ReviewUiScale.Height - defaultH - 140f);
             Rect defaultRect = new Rect(dx, dy, boxW, defaultH);
 
             if (ReviewPanels.Begin(legendPanel, this, "Legend", defaultRect, out Rect content))

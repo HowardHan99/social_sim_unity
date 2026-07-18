@@ -28,9 +28,10 @@ namespace SEAN.Display
         private bool started = false;
         private bool suppressedForReview = false;
         private bool suppressedForManualControl = false;
+        private bool suppressedForUserToggle = false;
 
         /// <summary>The line is hidden while any reason is active.</summary>
-        private bool RenderingSuppressed => suppressedForReview || suppressedForManualControl;
+        private bool RenderingSuppressed => suppressedForReview || suppressedForManualControl || suppressedForUserToggle;
 
         // settings for rendering path
         public Material LightSaberMaterial;
@@ -56,7 +57,7 @@ namespace SEAN.Display
         }
 
         /// <summary>Independent reasons the live ROS plan line may be hidden.</summary>
-        public enum SuppressionReason { SessionReview, ManualControl }
+        public enum SuppressionReason { SessionReview, ManualControl, UserToggle }
 
         /// <summary>
         /// When suppressed, the live ROS plan line is force-hidden and will NOT re-render even if
@@ -66,6 +67,9 @@ namespace SEAN.Display
         ///    (message delivery runs in Update, unaffected by Time.timeScale), so a one-shot
         ///    clear would immediately reappear; review shows its own hideable snapshot copy.
         ///  - ManualControl hides the planned path while a human is driving the robot.
+        ///  - UserToggle is the experimenter's own switch (SessionReview.RosOverlayVisibility):
+        ///    the plan gives away where the robot is headed, so it stays off during a trial and
+        ///    is turned back on for review.
         /// </summary>
         public void SetRenderingSuppressed(SuppressionReason reason, bool suppressed)
         {
@@ -73,6 +77,7 @@ namespace SEAN.Display
             {
                 case SuppressionReason.SessionReview: suppressedForReview = suppressed; break;
                 case SuppressionReason.ManualControl: suppressedForManualControl = suppressed; break;
+                case SuppressionReason.UserToggle: suppressedForUserToggle = suppressed; break;
             }
             ApplySuppressionState();
         }

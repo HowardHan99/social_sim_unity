@@ -378,6 +378,11 @@ namespace SEAN.Tasks
                 return false;
             }
             float distToGoal = Util.Geometry.GroundPlaneDist(controlledAvatar.position, interactiveGoal.transform.position);
+            // A scene object bound as the robot goal has physical size (e.g. a door face flush
+            // with a wall): measure to its footprint edge instead of its center, otherwise the
+            // sub-meter completion radius can be physically unreachable.
+            if (!sean.PlayerControl)
+                distToGoal = RobotGoalObjectBinding.GroundDistanceToGoal(controlledAvatar.position, distToGoal);
             //print(debounceTime + " > " + completionDistance + ", debouceCompletion distToGoal: " + distToGoal);
 
             if (distToGoal > completionDistance)
@@ -502,6 +507,9 @@ namespace SEAN.Tasks
             isAwaitingPostTrialAction = true;
             debounceTime = 0f;
             taskStartTime = 0f;
+            // Deliberately no agent is stopped here: the controlled (manual) avatar stays
+            // drivable under the post-trial prompt, and an AUTO agent that has not reached
+            // its own goal yet keeps navigating — SFPWDAgent stops itself on arrival.
         }
 
         private void UpdateCameras()

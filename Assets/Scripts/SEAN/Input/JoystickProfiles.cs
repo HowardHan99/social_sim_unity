@@ -244,7 +244,7 @@ namespace SEAN.Input
             lastDetectionTime = Time.unscaledTime;
 
             bool sawLogitech = false;
-            bool sawGamepad = false;
+            bool sawAnyDevice = false;
             detectedDeviceName = string.Empty;
 
             string[] names = UnityEngine.Input.GetJoystickNames();
@@ -253,22 +253,25 @@ namespace SEAN.Input
                 if (string.IsNullOrWhiteSpace(rawName))
                     continue;
 
+                sawAnyDevice = true;
                 if (string.IsNullOrEmpty(detectedDeviceName))
                     detectedDeviceName = rawName;
 
+                // The Logitech Extreme 3D flight stick is the only device that uses the
+                // twist-axis (axis 2) steering mapping, and its name always says so.
                 string name = rawName.ToLowerInvariant();
                 if (name.Contains("logitech") || name.Contains("extreme 3d"))
                     sawLogitech = true;
-                if (name.Contains("xbox") || name.Contains("xinput") || name.Contains("gamesir") ||
-                    name.Contains("gamepad") || name.Contains("wireless controller") || name.Contains("controller ("))
-                    sawGamepad = true;
             }
 
-            // Prefer the lab's Logitech stick when both are plugged in; unknown devices keep the
-            // legacy Logitech mapping so pre-existing setups behave exactly as before.
-            detectedProfile = sawLogitech || !sawGamepad
-                ? JoystickProfileType.LogitechExtreme3D
-                : JoystickProfileType.XInputGamepad;
+            // Any connected controller that is NOT that flight stick is treated as an
+            // Xbox-layout gamepad (GameSir, Xbox, 8BitDo, generic HID pads, ...), so steering
+            // reads the left stick (axis 0) instead of the flight stick's twist (axis 2).
+            // GameSir and similar pads report inconsistent names, so we no longer require an
+            // explicit gamepad keyword. Nothing connected keeps the harmless Logitech default.
+            detectedProfile = (sawAnyDevice && !sawLogitech)
+                ? JoystickProfileType.XInputGamepad
+                : JoystickProfileType.LogitechExtreme3D;
         }
     }
 }

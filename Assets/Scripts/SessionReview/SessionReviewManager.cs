@@ -58,6 +58,8 @@ namespace SessionReview
         [Header("Pre-Trial Ready Prompt")]
         [SerializeField] private KeyCode startTrialKey = KeyCode.Return;
         [SerializeField] private KeyCode exportReviewKey = KeyCode.E;
+        [Tooltip("Automatically export the ROI (with the current export settings) when a live review ends, unless one was already exported during that review. Loaded-from-disk replays are skipped.")]
+        [SerializeField] private bool autoExportRoiOnReviewExit = true;
         [SerializeField] private bool requirePlanBeforeTrialStart = true;
         [SerializeField] private bool allowStartWithoutRosBackend = true;
 
@@ -80,7 +82,6 @@ namespace SessionReview
         private bool showTrialStartPrompt;
         private bool trialStartReady;
         private bool bypassRosBackendForTrialStart;
-        private bool postTrialPromptPausedTime;
         private bool trialStartPromptPausedTime;
         private bool trialWarmupPending;
         private int trialWarmupDelayFrames;
@@ -119,9 +120,10 @@ namespace SessionReview
         private const string WorldBuildingAddObjectsSubtitle =
             "Only prefabs with a matching image in Resources/WorldBuildingUI are listed (others in WorldBuildingSpawns are ignored).";
 
-        // World-building UI scales up with resolution (1x at 1600x900) so text stays readable on large displays.
+        // World-building UI scales up with resolution (1x at 1600x900) so text stays readable on large
+        // displays. Based on the virtual (user-zoomed) screen so it stacks cleanly with ReviewUiScale.
         private static float WorldBuildingUiScale =>
-            Mathf.Clamp(Mathf.Min(Screen.width / 1600f, Screen.height / 900f), 1f, 1.75f);
+            Mathf.Clamp(Mathf.Min(ReviewUiScale.Width / 1600f, ReviewUiScale.Height / 900f), 1f, 1.75f);
 
         private static float WorldBuildingSidePanelMargin => WorldBuildingSidePanelMarginBase * WorldBuildingUiScale;
         private static float WorldBuildingSidePanelGap => WorldBuildingSidePanelGapBase * WorldBuildingUiScale;
@@ -185,10 +187,14 @@ namespace SessionReview
 
         public bool BlocksAutomaticTrialStart => showOnboarding || showTrialStartPrompt || trialWarmupPending;
 
-        /// <summary>True while any session UI is blocking gameplay input (onboarding, prompts, review, warmup).</summary>
+        /// <summary>
+        /// True while any session UI is blocking gameplay input (onboarding, prompts, review,
+        /// warmup). The POST-TRIAL menu is deliberately NOT included: the game keeps running
+        /// beneath it and a manually driven agent must stay drivable while it is up.
+        /// </summary>
         public bool IsMovementInputBlocked =>
             showOnboarding || showTrialStartPrompt || trialWarmupPending ||
-            showPostTrialPrompt || inRewindMode || showReviewCompletionPrompt;
+            inRewindMode || showReviewCompletionPrompt;
 
         private static readonly float[] speedSteps = { 0.25f, 0.5f, 1f, 2f, 4f };
         private int currentSpeedIndex = 2;
@@ -201,6 +207,11 @@ namespace SessionReview
         private StartupControlMode selectedRobotStartupControl = StartupControlMode.Manual;
         private StartupControlMode selectedPwdStartupControl = StartupControlMode.Auto;
         private SEAN.Scenario.Agents.PwdGender selectedPwdGender = SEAN.Scenario.Agents.PwdGender.Male;
+        // Prefab name from Resources/PlayerCharacters; empty = built-in wheelchair pair.
+        private string selectedPlayerCharacterId = string.Empty;
+        // Participant/session id edit buffer (persisted via ParticipantSession on apply).
+        private string sessionIdInput = string.Empty;
+        private GUIStyle onboardingTextFieldStyle;
         private int selectedSceneIndex = -1;
         private Vector2 onboardingSceneScroll;
         private Vector2 onboardingContentScroll;
@@ -287,6 +298,10 @@ namespace SessionReview
             trajectoryRecorder = GetComponent<LiveTrajectoryRecorder>();
             if (trajectoryRecorder == null)
                 trajectoryRecorder = gameObject.AddComponent<LiveTrajectoryRecorder>();
+
+            // Owns its own hotkey + button strip; hidden during a trial, shown for review.
+            if (GetComponent<RosOverlayVisibility>() == null)
+                gameObject.AddComponent<RosOverlayVisibility>();
         }
 
         void Start()
@@ -361,9 +376,10 @@ namespace SessionReview
                       $"Run continues; press [{reviewToggleKey}] to review.");
         }
 
-        // Every primary agent (robot + PWD) has reached its goal: pause the run and surface
-        // the post-trial menu instead of dropping straight into review. The user enters
-        // review from the menu ([Tab]/Review) when they choose to.
+        // Every primary agent (robot + PWD) has reached its goal: surface the post-trial
+        // menu instead of dropping straight into review. The game deliberately keeps
+        // running (no time freeze): a manually driven agent stays drivable under the menu,
+        // and auto agents stop themselves at their goals.
         private void OnSessionFullyComplete()
         {
             // The trial was archived when the first agent arrived; extend it to now so the
@@ -385,7 +401,6 @@ namespace SessionReview
             }
 
             showPostTrialPrompt = true;
-            PauseForPostTrialPrompt();
         }
 
         void Update()
@@ -396,7 +411,13 @@ namespace SessionReview
 
         private void HandleInput()
         {
-            if (Input.GetKeyDown(onboardingToggleKey) && (SessionOnboardingSettings.HasCompletedOnboarding || !showOnboarding))
+            // While the onboarding panel is open, keyboard focus means the user is typing
+            // in the Session ID field -- don't let the letter close the panel. Outside the
+            // panel a stale focus (IMGUI sliders latch keyboardControl too) must not eat
+            // the hotkey.
+            bool typingInOnboarding = showOnboarding && GUIUtility.keyboardControl != 0;
+            if (Input.GetKeyDown(onboardingToggleKey) && !typingInOnboarding &&
+                (SessionOnboardingSettings.HasCompletedOnboarding || !showOnboarding))
                 SetOnboardingVisible(!showOnboarding);
 
             // Saved-replay browser. Deliberately available during onboarding too: after a
@@ -532,7 +553,6 @@ namespace SessionReview
             {
                 ExitWorldBuildingMode(true);
                 showPostTrialPrompt = true;
-                PauseForPostTrialPrompt();
                 return;
             }
 
@@ -544,7 +564,6 @@ namespace SessionReview
             {
                 ExitWorldBuildingMode(true);
                 showPostTrialPrompt = true;
-                PauseForPostTrialPrompt();
             }
         }
 
@@ -745,41 +764,43 @@ namespace SessionReview
 
         private bool IsMouseOverReviewUi()
         {
-            Vector2 mouse = Input.mousePosition;
-            float guiY = Screen.height - mouse.y;
+            Vector2 guiPoint = ReviewUiScale.GuiMousePosition();
 
-            if (showLoadTrialPanel && LoadTrialPanelRect.Contains(new Vector2(mouse.x, guiY)))
+            if (showLoadTrialPanel && LoadTrialPanelRect.Contains(guiPoint))
                 return true;
 
             // Draggable review panels (Metrics, etc.) manage their own scroll, so scrolling
             // over one must not also zoom the top-down scene behind it.
-            if (ReviewPanels.AnyPanelContains(new Vector2(mouse.x, guiY)))
+            if (ReviewPanels.AnyPanelContains(guiPoint))
                 return true;
 
-            Rect topRightStatusRect = new Rect(Screen.width - 340f, 10f, 330f, 50f);
-            if (topRightStatusRect.Contains(new Vector2(mouse.x, guiY)))
+            if (UiScaleController.ControlContains(guiPoint))
+                return true;
+
+            Rect topRightStatusRect = new Rect(ReviewUiScale.Width - 340f, 10f, 330f, 50f);
+            if (topRightStatusRect.Contains(guiPoint))
                 return true;
 
             if (rewindController != null && rewindController.CurrentPerspective == PerspectiveMode.TopDown)
             {
-                Rect topDownControlsRect = new Rect(Screen.width - 500f, 66f, 304f, 28f);
-                if (topDownControlsRect.Contains(new Vector2(mouse.x, guiY)))
+                Rect topDownControlsRect = new Rect(ReviewUiScale.Width - 500f, 66f, 304f, 28f);
+                if (topDownControlsRect.Contains(guiPoint))
                     return true;
             }
 
             if (showReviewExportPanel)
             {
-                Rect exportButtonRect = new Rect(Screen.width - 170f, 70f, 140f, 32f);
-                Rect exportPanelRect = new Rect(Screen.width - 380f, 110f, 360f, 340f);
-                if (exportButtonRect.Contains(new Vector2(mouse.x, guiY)) ||
-                    exportPanelRect.Contains(new Vector2(mouse.x, guiY)))
+                Rect exportButtonRect = new Rect(ReviewUiScale.Width - 170f, 70f, 140f, 32f);
+                Rect exportPanelRect = new Rect(ReviewUiScale.Width - 380f, 110f, 360f, 340f);
+                if (exportButtonRect.Contains(guiPoint) ||
+                    exportPanelRect.Contains(guiPoint))
                     return true;
             }
 
-            float barW = Mathf.Min(Screen.width - 40f, 1180f);
-            float barX = (Screen.width - barW) * 0.5f;
-            Rect progressBarRect = new Rect(barX, Screen.height - 116f, barW, 110f);
-            return progressBarRect.Contains(new Vector2(mouse.x, guiY));
+            float barW = Mathf.Min(ReviewUiScale.Width - 40f, 1180f);
+            float barX = (ReviewUiScale.Width - barW) * 0.5f;
+            Rect progressBarRect = new Rect(barX, ReviewUiScale.Height - 116f, barW, 110f);
+            return progressBarRect.Contains(guiPoint);
         }
 
         public void EnterRewindMode(int trialIndex)
@@ -881,6 +902,11 @@ namespace SessionReview
             foreach (var live in FindObjectsOfType<SEAN.Display.PlanVisualizer>())
                 live.SetRenderingSuppressed(true);
 
+            // Review is where the robot's intent is actually wanted, so the switch the trial ran
+            // with flips back on. Must precede EnterRewind: that is where the "ROS Nav Plan"
+            // legend row is registered, and it reads its initial visibility from this switch.
+            RosOverlayVisibility.SetAllVisible(true);
+
             trajectoryRenderer.ShowTrajectories(trial, recording, controlModeLog, planSnapshots, vlmCaptures, signalAnnotations, timeOffset);
             metricsOverlay.ShowTrial(trial);
             rewindController.EnterRewind(trial, recording, controlModeLog, trajectoryRenderer, timeOffset, signalAnnotations);
@@ -896,6 +922,16 @@ namespace SessionReview
 
         public void ExitReviewMode()
         {
+            // Guarantee at least one ROI export per live review: if the reviewer never
+            // exported (key or button), save one on the way out while the review data is
+            // still bound. Loaded-from-disk replays are skipped 鈥?their trial data is
+            // already on disk, and re-exporting on every viewing would just pile up folders.
+            if (autoExportRoiOnReviewExit && inRewindMode && !isReviewingLoadedTrial &&
+                currentReviewTrial != null && string.IsNullOrEmpty(lastReviewExportPath))
+            {
+                ExportCurrentRoiNow();
+            }
+
             inRewindMode = false;
             showReviewCompletionPrompt = false;
             trajectoryRenderer.ClearAll();
@@ -1112,6 +1148,10 @@ namespace SessionReview
 
         void OnGUI()
         {
+            // Global user zoom (see UiScaleController): fonts and layout scale together,
+            // and all layout below uses ReviewUiScale.Width/Height as the screen size.
+            ReviewUiScale.Apply();
+
             if (showOnboarding)
                 DrawOnboardingUI();
 
@@ -1142,10 +1182,10 @@ namespace SessionReview
                 string trialLabel = isReviewingLoadedTrial
                     ? $"Loaded: {loadedTrialLabel}"
                     : $"Trial {reviewTrialIndex + 1}/{trialArchive.TrialCount}";
-                GUI.Box(new Rect(Screen.width - 340, 10, 330, 50), "");
-                GUI.Label(new Rect(Screen.width - 335, 15, 320, 20),
+                GUI.Box(new Rect(ReviewUiScale.Width - 340, 10, 330, 50), "");
+                GUI.Label(new Rect(ReviewUiScale.Width - 335, 15, 320, 20),
                     $"REWIND [{playing}] {trialLabel}");
-                GUI.Label(new Rect(Screen.width - 335, 35, 320, 20),
+                GUI.Label(new Rect(ReviewUiScale.Width - 335, 35, 320, 20),
                     controlsLine);
                 DrawEndReviewButton();
                 DrawTopDownReviewControls();
@@ -1175,13 +1215,13 @@ namespace SessionReview
             // (onboarding, prompts, review, world building) is occupying the screen.
             if (sessionTracker == null || !sessionTracker.IsTracking)
                 return;
-            if (IsMovementInputBlocked || inWorldBuildingMode || showOnboarding)
+            if (IsMovementInputBlocked || showPostTrialPrompt || inWorldBuildingMode || showOnboarding)
                 return;
 
             float width = 220f;
             float height = 40f;
-            float x = (Screen.width - width) * 0.5f;
-            float y = Screen.height - height - 24f;
+            float x = (ReviewUiScale.Width - width) * 0.5f;
+            float y = ReviewUiScale.Height - height - 24f;
 
             if (GUI.Button(new Rect(x, y, width, height), endInteractionButtonLabel))
                 EndInteractionAndProceed();
@@ -1198,8 +1238,8 @@ namespace SessionReview
         {
             float width = 156f;
             float height = 34f;
-            float x = Screen.width - width - 18f;
-            float y = Screen.height - 126f;
+            float x = ReviewUiScale.Width - width - 18f;
+            float y = ReviewUiScale.Height - 126f;
 
             if (GUI.Button(new Rect(x, y, width, height), "End Review / Menu"))
                 EndReviewAndShowNextStepMenu();
@@ -1212,7 +1252,7 @@ namespace SessionReview
 
             Bounds roi = ReviewRoiExporter.ApplySettings(reviewExportEnvelope, reviewExportSettings);
             float top = 66f;
-            float right = Screen.width - 500f;
+            float right = ReviewUiScale.Width - 500f;
             GUI.Label(new Rect(right, top - 22f, 304f, 20f), "Top-down review navigation");
 
             if (GUI.Button(new Rect(right, top, 96f, 28f), "Focus"))
@@ -1228,7 +1268,7 @@ namespace SessionReview
         private void DrawReviewExportPanel()
         {
             float buttonWidth = 140f;
-            Rect buttonRect = new Rect(Screen.width - 170f, 70f, buttonWidth, 32f);
+            Rect buttonRect = new Rect(ReviewUiScale.Width - 170f, 70f, buttonWidth, 32f);
             if (GUI.Button(buttonRect, showReviewExportPanel ? $"Hide Export [{exportReviewKey}]" : $"Export ROI [{exportReviewKey}]"))
                 showReviewExportPanel = !showReviewExportPanel;
 
@@ -1237,7 +1277,7 @@ namespace SessionReview
 
             float width = 360f;
             float height = 340f;
-            Rect rect = new Rect(Screen.width - width - 20f, 110f, width, height);
+            Rect rect = new Rect(ReviewUiScale.Width - width - 20f, 110f, width, height);
             GUI.Box(rect, "");
 
             float x = rect.x + 16f;
@@ -1322,17 +1362,17 @@ namespace SessionReview
             string text = lastReviewExportPath == "Export failed"
                 ? "ROI export FAILED (see console)"
                 : $"ROI saved: {lastReviewExportPath}";
-            float width = Mathf.Min(Screen.width - 40f, Mathf.Max(360f, text.Length * 7.5f));
-            GUI.Box(new Rect((Screen.width - width) * 0.5f, 64f, width, 26f), text);
+            float width = Mathf.Min(ReviewUiScale.Width - 40f, Mathf.Max(360f, text.Length * 7.5f));
+            GUI.Box(new Rect((ReviewUiScale.Width - width) * 0.5f, 64f, width, 26f), text);
         }
 
         private Rect LoadTrialPanelRect
         {
             get
             {
-                float width = Mathf.Min(680f, Screen.width - 60f);
-                float height = Mathf.Min(440f, Screen.height - 60f);
-                return new Rect((Screen.width - width) * 0.5f, (Screen.height - height) * 0.5f, width, height);
+                float width = Mathf.Min(680f, ReviewUiScale.Width - 60f);
+                float height = Mathf.Min(440f, ReviewUiScale.Height - 60f);
+                return new Rect((ReviewUiScale.Width - width) * 0.5f, (ReviewUiScale.Height - height) * 0.5f, width, height);
             }
         }
 
@@ -1350,7 +1390,7 @@ namespace SessionReview
             // Dim the background so the list reads clearly over any mode behind it.
             Color previousColor = GUI.color;
             GUI.color = new Color(0f, 0f, 0f, 0.45f);
-            GUI.DrawTexture(new Rect(0f, 0f, Screen.width, Screen.height), Texture2D.whiteTexture);
+            GUI.DrawTexture(new Rect(0f, 0f, ReviewUiScale.Width, ReviewUiScale.Height), Texture2D.whiteTexture);
             GUI.color = previousColor;
 
             GUI.Box(rect, "");
@@ -1387,7 +1427,8 @@ namespace SessionReview
                     string sceneWarning = !string.IsNullOrEmpty(info.sceneName) && info.sceneName != activeScene
                         ? "  (!) other scene"
                         : "";
-                    string label = $"#{info.trialNumber:D3}  {info.savedAt:yyyy-MM-dd HH:mm}  {scene}  " +
+                    string session = string.IsNullOrEmpty(info.sessionId) ? "" : $"[{info.sessionId}]  ";
+                    string label = $"#{info.trialNumber:D3}  {session}{info.savedAt:yyyy-MM-dd HH:mm}  {scene}  " +
                                    $"{info.durationSeconds:F0}s{sceneWarning}";
                     GUI.Label(new Rect(0f, rowY + 4f, viewRect.width - 84f, rowHeight), label);
                     if (GUI.Button(new Rect(viewRect.width - 76f, rowY, 76f, 28f), "Load"))
@@ -1459,7 +1500,7 @@ namespace SessionReview
                 return false;
             }
 
-            guiPoint = new Vector2(screenPoint.x, Screen.height - screenPoint.y);
+            guiPoint = ReviewUiScale.ScreenToGui(screenPoint);
             return true;
         }
 
@@ -1521,7 +1562,7 @@ namespace SessionReview
 
             float w = Mathf.Max(360, text.Length * 9.5f);
             GUI.backgroundColor = bgColor;
-            GUI.Box(new Rect(Screen.width - w - 15, 10, w, 30), text, style);
+            GUI.Box(new Rect(ReviewUiScale.Width - w - 15, 10, w, 30), text, style);
             GUI.backgroundColor = Color.white;
         }
 
@@ -1531,7 +1572,7 @@ namespace SessionReview
 
             float width = 480f;
             float height = 176f;
-            Rect rect = new Rect((Screen.width - width) * 0.5f, 24f, width, height);
+            Rect rect = new Rect((ReviewUiScale.Width - width) * 0.5f, 24f, width, height);
 
             GUI.Box(rect, "");
             if (sessionFullyComplete)
@@ -1570,7 +1611,7 @@ namespace SessionReview
         {
             float width = 520f;
             float height = 196f;
-            Rect rect = new Rect((Screen.width - width) * 0.5f, 24f, width, height);
+            Rect rect = new Rect((ReviewUiScale.Width - width) * 0.5f, 24f, width, height);
 
             GUI.Box(rect, "");
             GUI.Label(new Rect(rect.x + 18f, rect.y + 16f, rect.width - 36f, 24f), "REVIEW COMPLETE");
@@ -1683,7 +1724,6 @@ namespace SessionReview
                 {
                     ExitWorldBuildingMode(true);
                     showPostTrialPrompt = true;
-                    PauseForPostTrialPrompt();
                 }
 
                 if (GUI.Button(new Rect(contentX + (buttonWidth + buttonGap), y, buttonWidth, buttonHeight), "Choose Scenario", worldBuildingButtonStyle))
@@ -1893,7 +1933,7 @@ namespace SessionReview
             float s = WorldBuildingUiScale;
             int rowCount = (totalCards + WorldBuildingSpawnPaletteCols - 1) / WorldBuildingSpawnPaletteCols;
             float scrollAreaMin = 120f * s;
-            float scrollAreaMax = Mathf.Min(280f * s, Screen.height * 0.38f);
+            float scrollAreaMax = Mathf.Min(280f * s, ReviewUiScale.Height * 0.38f);
             float scrollInnerHeight = rowCount * (WorldBuildingSpawnPaletteCardHeight + WorldBuildingSpawnPaletteCardGap)
                                       + WorldBuildingSpawnPaletteCardGap;
             float scrollViewportH = Mathf.Clamp(scrollInnerHeight, scrollAreaMin, scrollAreaMax);
@@ -1966,7 +2006,7 @@ namespace SessionReview
             float s = WorldBuildingUiScale;
             int rowCount = (totalCards + WorldBuildingSpawnPaletteCols - 1) / WorldBuildingSpawnPaletteCols;
             float scrollAreaMin = 120f * s;
-            float scrollAreaMax = Mathf.Min(280f * s, Screen.height * 0.38f);
+            float scrollAreaMax = Mathf.Min(280f * s, ReviewUiScale.Height * 0.38f);
             float scrollInnerHeight = rowCount * (WorldBuildingSpawnPaletteCardHeight + WorldBuildingSpawnPaletteCardGap)
                                       + WorldBuildingSpawnPaletteCardGap;
             float scrollViewportH = Mathf.Clamp(scrollInnerHeight, scrollAreaMin, scrollAreaMax);
@@ -1984,7 +2024,7 @@ namespace SessionReview
         private static float GetWorldBuildingSidePanelWidth()
         {
             // Never let the palette take more than ~45% of a narrow window.
-            return Mathf.Min(WorldBuildingSidePanelWidth, Screen.width * 0.45f);
+            return Mathf.Min(WorldBuildingSidePanelWidth, ReviewUiScale.Width * 0.45f);
         }
 
         private static Rect GetWorldBuildingOverlayRect()
@@ -2020,11 +2060,12 @@ namespace SessionReview
 
         private bool IsMouseOverWorldBuildingUi()
         {
-            Vector2 mouse = Input.mousePosition;
-            float guiY = Screen.height - mouse.y;
-            Vector2 guiPoint = new Vector2(mouse.x, guiY);
+            Vector2 guiPoint = ReviewUiScale.GuiMousePosition();
 
             if (GetWorldBuildingOverlayRect().Contains(guiPoint))
+                return true;
+
+            if (UiScaleController.ControlContains(guiPoint))
                 return true;
 
             if (runtimeEditorManager != null && runtimeEditorManager.ContainsWorldBuildingHelperUi(guiPoint))
@@ -2068,7 +2109,7 @@ namespace SessionReview
 
             float maxStackHeight = Mathf.Max(
                 WorldBuildingSidePanelHeaderHeight,
-                Screen.height - WorldBuildingSidePanelMargin * 2f);
+                ReviewUiScale.Height - WorldBuildingSidePanelMargin * 2f);
             float stackHeight = generateHeight + charactersHeight + objectsHeight + WorldBuildingSidePanelGap * 2f;
             float overflow = Mathf.Max(0f, stackHeight - maxStackHeight);
             ReducePanelHeightForOverflow(
@@ -2082,8 +2123,8 @@ namespace SessionReview
                 WorldBuildingSidePanelHeaderHeight,
                 ref overflow);
 
-            float yBottom = Screen.height - WorldBuildingSidePanelMargin;
-            float x = Screen.width - panelWidth - WorldBuildingSidePanelMargin;
+            float yBottom = ReviewUiScale.Height - WorldBuildingSidePanelMargin;
+            float x = ReviewUiScale.Width - panelWidth - WorldBuildingSidePanelMargin;
 
             generateRect = new Rect(x, yBottom - generateHeight, panelWidth, generateHeight);
 
@@ -2160,7 +2201,7 @@ namespace SessionReview
 
             float width = 520f;
             float height = allowStartWithoutRosBackend ? 410f : 384f;
-            Rect rect = new Rect((Screen.width - width) * 0.5f, 24f, width, height);
+            Rect rect = new Rect((ReviewUiScale.Width - width) * 0.5f, 24f, width, height);
 
             GUI.Box(rect, "");
 
@@ -2267,25 +2308,12 @@ namespace SessionReview
             }
         }
 
-        private void PauseForPostTrialPrompt()
-        {
-            if (postTrialPromptPausedTime)
-                return;
-
-            savedTimeScale = Time.timeScale;
-            Time.timeScale = 0f;
-            postTrialPromptPausedTime = true;
-        }
-
+        // The post-trial menu never freezes time: a manually driven agent stays drivable
+        // while it is up, auto agents stop themselves at their goals, and the simulation
+        // (pedestrians, recording) keeps running underneath.
         private void HidePostTrialPrompt()
         {
             showPostTrialPrompt = false;
-
-            if (!postTrialPromptPausedTime)
-                return;
-
-            Time.timeScale = savedTimeScale;
-            postTrialPromptPausedTime = false;
         }
 
         private void CaptureReviewCameraForWorldBuilding()
@@ -2318,7 +2346,6 @@ namespace SessionReview
             if (sean == null || sean.environment == null)
             {
                 showPostTrialPrompt = true;
-                PauseForPostTrialPrompt();
                 return;
             }
 
@@ -2326,7 +2353,6 @@ namespace SessionReview
             if (worldBuildingCamera == null)
             {
                 showPostTrialPrompt = true;
-                PauseForPostTrialPrompt();
                 return;
             }
             PrepareTopDownWorldBuildingCamera(worldBuildingCamera);
@@ -2342,7 +2368,6 @@ namespace SessionReview
             if (!EnsureRuntimeEditorReady())
             {
                 showPostTrialPrompt = true;
-                PauseForPostTrialPrompt();
                 return;
             }
 
@@ -2823,6 +2848,10 @@ namespace SessionReview
             if (planVisualizer != null)
                 planVisualizer.ClearCurrentPlan();
 
+            // Every trial starts with the robot's intent hidden, whatever the last review left
+            // on: a participant must not see the planned path or the goal marker while driving.
+            RosOverlayVisibility.SetAllVisible(false);
+
             if (IsTrialPreviewReady())
             {
                 trialStartReady = true;
@@ -3223,6 +3252,9 @@ namespace SessionReview
             selectedRobotStartupControl = SessionOnboardingSettings.RobotStartupControl;
             selectedPwdStartupControl = SessionOnboardingSettings.PwdStartupControl;
             selectedPwdGender = SessionOnboardingSettings.SelectedPwdGender;
+            selectedPlayerCharacterId = SessionOnboardingSettings.SelectedPlayerCharacterId;
+            sessionIdInput = ParticipantSession.Id;
+            PlayerCharacterLibrary.Refresh();
 
             var sceneChange = FindObjectOfType<SceneChange>();
             if (sceneChange != null && sceneChange.SceneCount > 0)
@@ -3266,14 +3298,14 @@ namespace SessionReview
         {
             EnsureOnboardingStyles();
 
-            float panelWidth = Mathf.Min(Screen.width * 0.78f, 1100f);
-            float panelHeight = Mathf.Min(Screen.height * 0.88f, 860f);
-            float panelX = (Screen.width - panelWidth) * 0.5f;
-            float panelY = (Screen.height - panelHeight) * 0.5f;
+            float panelWidth = Mathf.Min(ReviewUiScale.Width * 0.78f, 1100f);
+            float panelHeight = Mathf.Min(ReviewUiScale.Height * 0.88f, 860f);
+            float panelX = (ReviewUiScale.Width - panelWidth) * 0.5f;
+            float panelY = (ReviewUiScale.Height - panelHeight) * 0.5f;
             Rect panelRect = new Rect(panelX, panelY, panelWidth, panelHeight);
 
             GUI.color = new Color(0f, 0f, 0f, 0.6f);
-            GUI.DrawTexture(new Rect(0f, 0f, Screen.width, Screen.height), Texture2D.whiteTexture);
+            GUI.DrawTexture(new Rect(0f, 0f, ReviewUiScale.Width, ReviewUiScale.Height), Texture2D.whiteTexture);
             GUI.color = Color.white;
 
             GUI.Box(panelRect, GUIContent.none, onboardingPanelStyle);
@@ -3286,7 +3318,7 @@ namespace SessionReview
             y += 50f;
 
             GUI.Label(new Rect(x, y, innerWidth, 56f),
-                "Choose who is playing, pick the PWD player gender when human control is enabled, and select the session scene to launch.",
+                "Choose who is playing, pick the PWD player character when human control is enabled, and select the session scene to launch.",
                 onboardingBodyStyle);
             y += 72f;
             var sceneChange = FindObjectOfType<SceneChange>();
@@ -3294,7 +3326,7 @@ namespace SessionReview
             float scrollTop = y;
             float scrollHeight = Mathf.Max(180f, footerTop - scrollTop - 18f);
             Rect scrollRect = new Rect(x, scrollTop, innerWidth, scrollHeight);
-            float contentHeight = GetOnboardingContentHeight(sceneChange);
+            float contentHeight = GetOnboardingContentHeight(innerWidth - 18f, sceneChange);
             Rect viewRect = new Rect(0f, 0f, innerWidth - 18f, contentHeight);
 
             onboardingContentScroll = GUI.BeginScrollView(scrollRect, onboardingContentScroll, viewRect);
@@ -3335,14 +3367,34 @@ namespace SessionReview
             }
         }
 
-        private float GetOnboardingContentHeight(SceneChange sceneChange)
+        private const float CharacterCardWidth = 220f;
+        private const float CharacterCardHeight = 196f;
+        private const float CharacterCardGapX = 16f;
+        private const float CharacterCardGapY = 12f;
+
+        private static int GetCharacterCardsPerRow(float width)
+        {
+            return Mathf.Max(1, Mathf.FloorToInt((width + CharacterCardGapX) / (CharacterCardWidth + CharacterCardGapX)));
+        }
+
+        // Height of the wheelchair + walking-character card grid. Must stay in lockstep
+        // with the grid drawn in DrawOnboardingContent or the scroll view clips.
+        private float GetCharacterGridHeight(float width)
+        {
+            int cardCount = 2 + PlayerCharacterLibrary.Options.Count;
+            int rows = Mathf.CeilToInt(cardCount / (float)GetCharacterCardsPerRow(width));
+            return rows * (CharacterCardHeight + CharacterCardGapY) - CharacterCardGapY;
+        }
+
+        private float GetOnboardingContentHeight(float width, SceneChange sceneChange)
         {
             float height = 0f;
+            height += 42f + 64f;       // Session ID row
             height += 42f + 46f + 20f;
 
             if (selectedPwdStartupControl == StartupControlMode.Manual)
             {
-                height += 42f + 248f + 18f;
+                height += 42f + GetCharacterGridHeight(width) + 18f;
                 height += 42f + 150f + 22f;
             }
 
@@ -3362,6 +3414,25 @@ namespace SessionReview
             float x = 0f;
             float y = 0f;
 
+            GUI.Label(new Rect(x, y, 260f, 30f), "Session ID", onboardingSectionStyle);
+            y += 42f;
+
+            if (onboardingTextFieldStyle == null)
+            {
+                onboardingTextFieldStyle = new GUIStyle(GUI.skin.textField)
+                {
+                    fontSize = 18,
+                    alignment = TextAnchor.MiddleLeft,
+                    padding = new RectOffset(12, 12, 8, 8)
+                };
+            }
+
+            sessionIdInput = GUI.TextField(new Rect(x, y, 340f, 44f), sessionIdInput ?? string.Empty, 64, onboardingTextFieldStyle);
+            GUI.Label(new Rect(x + 356f, y + 6f, width - 356f, 32f),
+                "Kept from the previous session until you change it. Saved into each trial's log.",
+                onboardingHintStyle);
+            y += 64f;
+
             GUI.Label(new Rect(x, y, 260f, 30f), "Who Is Playing?", onboardingSectionStyle);
             y += 42f;
 
@@ -3373,22 +3444,50 @@ namespace SessionReview
 
             if (selectedPwdStartupControl == StartupControlMode.Manual)
             {
-                GUI.Label(new Rect(x, y, width, 30f), "PWD Player Gender", onboardingSectionStyle);
+                GUI.Label(new Rect(x, y, width, 30f), "PWD Player Character", onboardingSectionStyle);
                 y += 42f;
 
-                DrawGenderPreviewCard(new Rect(x, y, 220f, 196f), "Male", maleWheelchairPreview,
-                    selectedPwdGender == SEAN.Scenario.Agents.PwdGender.Male,
-                    () => selectedPwdGender = SEAN.Scenario.Agents.PwdGender.Male);
+                int cardsPerRow = GetCharacterCardsPerRow(width);
+                int cardIndex = 0;
 
-                DrawGenderPreviewCard(new Rect(x + 236f, y, 220f, 196f), "Female", femaleWheelchairPreview,
-                    selectedPwdGender == SEAN.Scenario.Agents.PwdGender.Female,
-                    () => selectedPwdGender = SEAN.Scenario.Agents.PwdGender.Female);
+                Rect NextCardRect()
+                {
+                    int col = cardIndex % cardsPerRow;
+                    int row = cardIndex / cardsPerRow;
+                    cardIndex++;
+                    return new Rect(x + col * (CharacterCardWidth + CharacterCardGapX),
+                                    y + row * (CharacterCardHeight + CharacterCardGapY),
+                                    CharacterCardWidth, CharacterCardHeight);
+                }
 
-                if (DrawChipButton(new Rect(x, y + 208f, 160f, 40f), "Male", selectedPwdGender == SEAN.Scenario.Agents.PwdGender.Male))
-                    selectedPwdGender = SEAN.Scenario.Agents.PwdGender.Male;
-                if (DrawChipButton(new Rect(x + 176f, y + 208f, 160f, 40f), "Female", selectedPwdGender == SEAN.Scenario.Agents.PwdGender.Female))
-                    selectedPwdGender = SEAN.Scenario.Agents.PwdGender.Female;
-                y += 266f;
+                bool wheelchairSelected = string.IsNullOrEmpty(selectedPlayerCharacterId);
+
+                DrawGenderPreviewCard(NextCardRect(), "Wheelchair (Male)", maleWheelchairPreview,
+                    wheelchairSelected && selectedPwdGender == SEAN.Scenario.Agents.PwdGender.Male,
+                    () =>
+                    {
+                        selectedPlayerCharacterId = string.Empty;
+                        selectedPwdGender = SEAN.Scenario.Agents.PwdGender.Male;
+                    });
+
+                DrawGenderPreviewCard(NextCardRect(), "Wheelchair (Female)", femaleWheelchairPreview,
+                    wheelchairSelected && selectedPwdGender == SEAN.Scenario.Agents.PwdGender.Female,
+                    () =>
+                    {
+                        selectedPlayerCharacterId = string.Empty;
+                        selectedPwdGender = SEAN.Scenario.Agents.PwdGender.Female;
+                    });
+
+                foreach (var option in PlayerCharacterLibrary.Options)
+                {
+                    if (option == null) continue;
+                    string optionId = option.Id;
+                    DrawGenderPreviewCard(NextCardRect(), option.DisplayName, option.Thumbnail,
+                        string.Equals(selectedPlayerCharacterId, optionId, StringComparison.OrdinalIgnoreCase),
+                        () => selectedPlayerCharacterId = optionId);
+                }
+
+                y += GetCharacterGridHeight(width) + 18f;
 
                 GUI.Label(new Rect(x, y, width, 30f), "Other Community-Informed Characters", onboardingSectionStyle);
                 y += 42f;
@@ -3523,9 +3622,17 @@ namespace SessionReview
                 targetSceneIndex = 0;
             }
 
+            ParticipantSession.Id = sessionIdInput;
+            sessionIdInput = ParticipantSession.Id; // re-read trimmed value
+
+            // Release the Session ID text field's focus so keyboardControl-guarded
+            // hotkeys (O, U) work again after the panel closes.
+            GUIUtility.keyboardControl = 0;
+
             SessionOnboardingSettings.Apply(
                 selectedPlayerMode,
                 selectedPwdGender,
+                selectedPlayerCharacterId,
                 targetSceneIndex,
                 targetSceneName,
                 selectedRobotStartupControl,
@@ -3536,6 +3643,8 @@ namespace SessionReview
             {
                 if (targetSceneName == currentSceneName)
                 {
+                    if (TryReloadForPlayerSelectionChange(currentSceneName))
+                        return;
                     ShowTrialStartPrompt();
                     return;
                 }
@@ -3546,11 +3655,53 @@ namespace SessionReview
 
             if (targetSceneName == currentSceneName)
             {
+                if (TryReloadForPlayerSelectionChange(currentSceneName))
+                    return;
                 ShowTrialStartPrompt();
                 return;
             }
 
             SceneManager.LoadScene(targetSceneName);
+        }
+
+        /// <summary>
+        /// The PWD player is spawned once during scene load, so a character/gender pick
+        /// made afterwards in this same scene needs a reload to take effect. Returns true
+        /// when a reload was started.
+        /// </summary>
+        private bool TryReloadForPlayerSelectionChange(string currentSceneName)
+        {
+            if (SpawnedPlayerMatchesSelection())
+                return false;
+
+            if (!Application.CanStreamedLevelBeLoaded(currentSceneName))
+            {
+                Debug.LogWarning($"[SessionReview] Player selection changed but scene '{currentSceneName}' is not in Build Settings; cannot reload to respawn the player.");
+                return false;
+            }
+
+            SessionReviewLog.Log("[SessionReview] Player character selection changed; reloading scene to respawn the player.");
+            SceneManager.LoadScene(currentSceneName);
+            return true;
+        }
+
+        private bool SpawnedPlayerMatchesSelection()
+        {
+            // No live player (e.g. deferred-spawn scenes) -- nothing to respawn.
+            if (GameObject.Find("PWDPlayer") == null)
+                return true;
+
+            string spawnedId = SEAN.Scenario.Agents.RandomAvatar.LastSpawnedCharacterId ?? string.Empty;
+            string wantedId = selectedPlayerCharacterId ?? string.Empty;
+            if (!string.Equals(spawnedId, wantedId, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            // Built-in wheelchair pair: the gendered prefab must match too.
+            if (wantedId.Length == 0 &&
+                SEAN.Scenario.Agents.RandomAvatar.LastSpawnedGender != selectedPwdGender)
+                return false;
+
+            return true;
         }
 
         private void SetRobotStartupControl(StartupControlMode mode)
@@ -3779,10 +3930,24 @@ namespace SessionReview
 
         private void LoadOnboardingPreviewTextures()
         {
-            femaleWheelchairPreview = LoadTextureFromAssets("UIResources/female-wheelchair.png");
-            maleWheelchairPreview = LoadTextureFromAssets("UIResources/male_wheelchair_user.png");
-            dogwalkerPreview = LoadTextureFromAssets("UIResources/dogwalker.png");
-            scooterUserPreview = LoadTextureFromAssets("UIResources/scooteruser.png");
+            femaleWheelchairPreview = LoadPreviewTexture("female-wheelchair");
+            maleWheelchairPreview = LoadPreviewTexture("male_wheelchair_user");
+            dogwalkerPreview = LoadPreviewTexture("dogwalker");
+            scooterUserPreview = LoadPreviewTexture("scooteruser");
+        }
+
+        /// <summary>
+        /// Preview art lives in Resources/PlayerCharactersUI (same folder as the walking
+        /// character thumbnails; also works in builds). The legacy Assets/UIResources disk
+        /// path is kept as a fallback for editor setups that still have the old folder.
+        /// </summary>
+        private Texture2D LoadPreviewTexture(string baseName)
+        {
+            Texture2D texture = Resources.Load<Texture2D>("PlayerCharactersUI/" + baseName);
+            if (texture != null)
+                return texture;
+
+            return LoadTextureFromAssets("UIResources/" + baseName + ".png");
         }
 
         private Texture2D LoadTextureFromAssets(string relativeAssetPath)

@@ -842,8 +842,12 @@ public class TrajectoryManager : MonoBehaviour
         // usable while drawing so the stroke can be compared against the trial
         // trajectories at a chosen replay point. Touches/clicks on them must operate
         // the control only — never also paint a stroke or pan.
-        Vector2 guiPoint = new Vector2(screenPos.x, Screen.height - screenPos.y);
+        Vector2 guiPoint = SessionReview.ReviewUiScale.ScreenToGui(screenPos);
         if (SessionReview.ReviewPanels.AnyPanelContains(guiPoint))
+            return true;
+        if (SessionReview.UiScaleController.ControlContains(guiPoint))
+            return true;
+        if (SessionReview.RosOverlayVisibility.ControlContains(guiPoint))
             return true;
 
         var rc = GetReviewController();

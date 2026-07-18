@@ -1,5 +1,6 @@
 using System.Collections;
 using UnityEngine;
+using UnityEngine.Serialization;
 using SessionReview;
 
 namespace IVI
@@ -43,17 +44,30 @@ namespace IVI
         public float manualDeceleration = 3.0f;
         public float manualAngularAcceleration = 1200f;
 
-        [Header("Gamepad Inertia Drive")]
-        [Tooltip("When the Gamepad profile is active the left stick commands acceleration instead of target velocity: push to accelerate, release to coast, pull back to brake. Keyboard and the Logitech stick keep the original direct-velocity behavior.")]
-        public bool gamepadAccelerationDrive = true;
-        [Tooltip("m/s^2 added per second at full stick deflection.")]
-        public float gamepadLinearAcceleration = 1.2f;
-        [Tooltip("m/s^2 of passive coasting decay while the stick is centered. Lower = more inertia.")]
-        public float gamepadCoastDeceleration = 0.35f;
-        [Tooltip("deg/s^2 added per second at full steering deflection.")]
-        public float gamepadAngularAcceleration = 420f;
-        [Tooltip("deg/s^2 of passive turn decay while the stick is centered.")]
-        public float gamepadAngularCoastDeceleration = 320f;
+        [Header("Manual Inertia Drive")]
+        [Tooltip("Manual driving commands acceleration instead of target velocity, for every input device: stick/W accelerates, releasing all input coasts, S/H brakes. Off = original direct-velocity behavior.")]
+        [FormerlySerializedAs("gamepadAccelerationDrive")]
+        public bool manualInertiaDrive = true;
+        [Tooltip("m/s^2 at full stick deflection or held W.")]
+        [FormerlySerializedAs("gamepadLinearAcceleration")]
+        public float inertiaLinearAcceleration = 1.2f;
+        [Tooltip("m/s^2 of passive coasting decay while no input is held. Lower = more inertia.")]
+        [FormerlySerializedAs("gamepadCoastDeceleration")]
+        public float inertiaCoastDeceleration = 0.35f;
+        [Tooltip("deg/s^2 at full steering deflection or held A/D.")]
+        [FormerlySerializedAs("gamepadAngularAcceleration")]
+        public float inertiaAngularAcceleration = 420f;
+        [Tooltip("deg/s^2 of passive turn decay while no steering input is held.")]
+        [FormerlySerializedAs("gamepadAngularCoastDeceleration")]
+        public float inertiaAngularCoastDeceleration = 320f;
+
+        [Header("Ground Follow / Step Climb")]
+        [Tooltip("Ease the character up onto small steps/curbs it drives into (position-driven movement is otherwise blocked by their colliders). No effect on flat ground.")]
+        public bool stepClimb = true;
+        [Tooltip("Tallest step (m) that can be climbed.")]
+        public float maxStepHeight = 0.35f;
+        [Tooltip("Vertical speed (m/s) used to ease onto the detected ground height.")]
+        public float stepClimbSpeed = 3f;
 
         [Header("Debug Manual Brake (read-only)")]
         public int debugSBrakePressCount;
@@ -161,6 +175,7 @@ namespace IVI
                 HandleInput();
                 transform.position += manualVelocity * Time.deltaTime;
                 UpdateAnimator();
+                FollowGround(Time.deltaTime);
             }
             else if (sfpwdAgent != null && sfpwdAgent.enabled)
             {
@@ -170,8 +185,72 @@ namespace IVI
                 Vector3 vel = sfpwdAgent.velocity;
                 vel.y = 0f;
                 if (vel.sqrMagnitude > 0.001f)
+                {
                     transform.position += vel * Time.deltaTime;
+                    FollowGround(Time.deltaTime);
+                }
             }
+        }
+
+        // Position-driven movement cannot climb: driving into a curb/step just gets the
+        // capsule depenetrated sideways. Probe the ground at the body and slightly ahead;
+        // when it is a climbable step above the feet, ease the transform up onto it.
+        // Descending is left to rigidbody gravity, except for kinematic/rigidbody-less
+        // bodies (e.g. the TestScene practice robot) which are eased down too.
+        private void FollowGround(float deltaTime)
+        {
+            if (!stepClimb || maxStepHeight <= 0f)
+                return;
+
+            float probeUp = maxStepHeight + 0.3f;
+            float probeLength = probeUp + maxStepHeight + 0.6f;
+            Vector3 fwd = transform.forward;
+            fwd.y = 0f;
+            if (fwd.sqrMagnitude > 0.001f) fwd.Normalize();
+
+            float ground = float.NegativeInfinity;
+            if (TryProbeGround(transform.position + Vector3.up * probeUp, probeLength, out float hCenter))
+                ground = Mathf.Max(ground, hCenter);
+            if (TryProbeGround(transform.position + fwd * 0.35f + Vector3.up * probeUp, probeLength, out float hFront))
+                ground = Mathf.Max(ground, hFront);
+            if (float.IsNegativeInfinity(ground))
+                return;
+
+            float diff = ground - transform.position.y;
+            bool climbUp = diff > 0.01f && diff <= maxStepHeight;
+            bool easeDown = diff < -0.01f && (rb == null || rb.isKinematic);
+            if (!climbUp && !easeDown)
+                return;
+
+            Vector3 p = transform.position;
+            p.y = Mathf.MoveTowards(p.y, ground, stepClimbSpeed * deltaTime);
+            transform.position = p;
+
+            if (climbUp && rb != null && !rb.isKinematic)
+            {
+                Vector3 v = rb.velocity;
+                if (v.y < 0f) { v.y = 0f; rb.velocity = v; }
+            }
+        }
+
+        private bool TryProbeGround(Vector3 origin, float length, out float groundY)
+        {
+            groundY = 0f;
+            float best = float.NegativeInfinity;
+            foreach (var hit in Physics.RaycastAll(origin, Vector3.down, length, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+            {
+                if (hit.collider == null) continue;
+                // Environment only: skip our own body and anything with a rigidbody
+                // (pedestrians, robots) so we never "climb" onto another agent.
+                if (hit.collider.attachedRigidbody != null) continue;
+                if (hit.collider.transform.IsChildOf(transform)) continue;
+                best = Mathf.Max(best, hit.point.y);
+            }
+
+            if (float.IsNegativeInfinity(best))
+                return false;
+            groundY = best;
+            return true;
         }
 
         void HandleInput()
@@ -180,8 +259,6 @@ namespace IVI
             float manualDesiredAng = 0f;
             float joystickSteer = 0f;
             float joystickThrottle = 0f;
-            bool keyboardLinearOverride = false;
-            bool keyboardAngularOverride = false;
 
             if (ManualUsesJoystick)
             {
@@ -234,13 +311,11 @@ namespace IVI
             if (wHeld)
             {
                 manualDesiredLin = EffectiveMoveSpeed;
-                keyboardLinearOverride = true;
                 debugSBrakePressCount = 0;
                 lastSBrakePressRealtime = -1f;
             }
             else if (sHeld)
             {
-                keyboardLinearOverride = true;
                 bool movingForward = currentManualLinearSpeed > brakeStopThreshold;
                 bool nearStop = Mathf.Abs(currentManualLinearSpeed) <= brakeStopThreshold;
                 bool reverseArmed = debugSBrakePressCount >= Mathf.Max(1, sPressesToEnableReverse);
@@ -264,38 +339,75 @@ namespace IVI
                 if (ManualKeyHeld(KeyCode.A, KeyCode.LeftArrow))
                 {
                     manualDesiredAng = -rotationSpeed;
-                    keyboardAngularOverride = true;
                 }
                 else if (ManualKeyHeld(KeyCode.D, KeyCode.RightArrow))
                 {
                     manualDesiredAng = rotationSpeed;
-                    keyboardAngularOverride = true;
                 }
             }
 
-            if (Input.GetKey(KeyCode.H))
+            bool hardStopHeld = Input.GetKey(KeyCode.H);
+            if (hardStopHeld)
             {
                 manualDesiredLin = 0f;
                 manualDesiredAng = 0f;
-                keyboardLinearOverride = true;
-                keyboardAngularOverride = true;
                 debugSBrakePressCount = 0;
                 lastSBrakePressRealtime = -1f;
             }
 
-            bool inertiaDrive = gamepadAccelerationDrive && ManualUsesJoystick &&
-                SEAN.Input.JoystickProfiles.EffectiveProfile == SEAN.Input.JoystickProfileType.XInputGamepad;
-
-            if (inertiaDrive && !keyboardLinearOverride)
+            if (manualInertiaDrive)
             {
-                // Gamepad stick = acceleration; a released stick coasts instead of braking.
-                if (Mathf.Abs(joystickThrottle) > 0.001f)
+                // Manual driving models a mass, for every input device: stick/W commands
+                // acceleration, releasing all input coasts, S (once armed for reverse it
+                // accelerates backward instead) and H brake at the firm legacy rate.
+                float linearInput = joystickThrottle;
+                bool linearBrake = hardStopHeld;
+                if (wHeld)
+                {
+                    linearInput = 1f;
+                }
+                else if (sHeld)
+                {
+                    // Reuse the S state machine's verdict: negative desired = reverse intent.
+                    if (manualDesiredLin < -brakeStopThreshold)
+                        linearInput = -1f;
+                    else
+                    {
+                        linearInput = 0f;
+                        linearBrake = true;
+                    }
+                }
+
+                if (linearBrake)
+                    currentManualLinearSpeed = Mathf.MoveTowards(
+                        currentManualLinearSpeed, 0f, manualDeceleration * Time.deltaTime);
+                else if (Mathf.Abs(linearInput) > 0.001f)
                     currentManualLinearSpeed = Mathf.Clamp(
-                        currentManualLinearSpeed + joystickThrottle * gamepadLinearAcceleration * Time.deltaTime,
+                        currentManualLinearSpeed + linearInput * inertiaLinearAcceleration * Time.deltaTime,
                         -EffectiveMoveSpeed, EffectiveMoveSpeed);
                 else
                     currentManualLinearSpeed = Mathf.MoveTowards(
-                        currentManualLinearSpeed, 0f, gamepadCoastDeceleration * Time.deltaTime);
+                        currentManualLinearSpeed, 0f, inertiaCoastDeceleration * Time.deltaTime);
+
+                float angularInput = joystickSteer;
+                if (useWASD)
+                {
+                    if (ManualKeyHeld(KeyCode.A, KeyCode.LeftArrow))
+                        angularInput = -1f;
+                    else if (ManualKeyHeld(KeyCode.D, KeyCode.RightArrow))
+                        angularInput = 1f;
+                }
+
+                if (hardStopHeld)
+                    currentManualAngularSpeed = Mathf.MoveTowards(
+                        currentManualAngularSpeed, 0f, manualAngularAcceleration * Time.deltaTime);
+                else if (Mathf.Abs(angularInput) > 0.001f)
+                    currentManualAngularSpeed = Mathf.Clamp(
+                        currentManualAngularSpeed + angularInput * inertiaAngularAcceleration * Time.deltaTime,
+                        -rotationSpeed, rotationSpeed);
+                else
+                    currentManualAngularSpeed = Mathf.MoveTowards(
+                        currentManualAngularSpeed, 0f, inertiaAngularCoastDeceleration * Time.deltaTime);
             }
             else
             {
@@ -306,20 +418,6 @@ namespace IVI
                     currentManualLinearSpeed,
                     manualDesiredLin,
                     linearStep * Time.deltaTime);
-            }
-
-            if (inertiaDrive && !keyboardAngularOverride)
-            {
-                if (Mathf.Abs(joystickSteer) > 0.001f)
-                    currentManualAngularSpeed = Mathf.Clamp(
-                        currentManualAngularSpeed + joystickSteer * gamepadAngularAcceleration * Time.deltaTime,
-                        -rotationSpeed, rotationSpeed);
-                else
-                    currentManualAngularSpeed = Mathf.MoveTowards(
-                        currentManualAngularSpeed, 0f, gamepadAngularCoastDeceleration * Time.deltaTime);
-            }
-            else
-            {
                 currentManualAngularSpeed = Mathf.MoveTowards(
                     currentManualAngularSpeed,
                     manualDesiredAng,

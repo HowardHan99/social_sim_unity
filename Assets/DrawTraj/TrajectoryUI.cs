@@ -65,6 +65,7 @@ public class TrajectoryUI : MonoBehaviour
         if (manager == null || !IsReviewActive())
             return;
 
+        SessionReview.ReviewUiScale.Apply();
         EnsureStyles();
 
         if (manager.IsDrawMode)
@@ -80,7 +81,7 @@ public class TrajectoryUI : MonoBehaviour
         // The old floating "Play=.. FollowMode=.." diagnostic HUD now lives inside
         // the review Metrics panel (MetricsOverlayUI).
         float defaultHeight = SessionReview.ReviewPanels.TitleH + buttonHeight * 4f + buttonSpacing * 4f + 8f;
-        Rect defaultRect = new Rect(24f, Screen.height - defaultHeight - 24f, buttonWidth + 24f, defaultHeight);
+        Rect defaultRect = new Rect(24f, SessionReview.ReviewUiScale.Height - defaultHeight - 24f, buttonWidth + 24f, defaultHeight);
         if (SessionReview.ReviewPanels.Begin(controlsPanel, this, "Trajectory", defaultRect, out Rect content))
             DrawControlsPanelBody(content);
         SessionReview.ReviewPanels.End(controlsPanel);
@@ -256,7 +257,7 @@ public class TrajectoryUI : MonoBehaviour
         // Dock above the replay progress bar: the bar's scrubber is an IMGUI slider
         // that consumes clicks/touches first, so a button overlapping it can never
         // be pressed (it would scrub the timeline instead of arming drawing).
-        float y = Screen.height - DrawButtonH - 24f;
+        float y = SessionReview.ReviewUiScale.Height - DrawButtonH - 24f;
         var rewind = GetReviewController();
         if (rewind != null && rewind.TryGetProgressBarRect(out Rect bar) && y + DrawButtonH > bar.y)
             y = bar.y - DrawButtonH - 12f;
@@ -282,7 +283,7 @@ public class TrajectoryUI : MonoBehaviour
             Touch t = Input.GetTouch(i);
             if (t.phase == TouchPhase.Ended || t.phase == TouchPhase.Canceled)
                 continue;
-            Vector2 guiPoint = new Vector2(t.position.x, Screen.height - t.position.y);
+            Vector2 guiPoint = SessionReview.ReviewUiScale.ScreenToGui(t.position);
             if (rect.Contains(guiPoint))
                 return true;
         }
@@ -302,11 +303,11 @@ public class TrajectoryUI : MonoBehaviour
         float h = 210f;
         // Bottom-right (above the replay progress bar so the scrubber cannot steal
         // the thr +/- button clicks); the review Metrics panel docks at the top-right.
-        float boxY = Screen.height - h - 24f;
+        float boxY = SessionReview.ReviewUiScale.Height - h - 24f;
         var rewind = GetReviewController();
         if (rewind != null && rewind.TryGetProgressBarRect(out Rect bar) && boxY + h > bar.y)
             boxY = bar.y - h - 12f;
-        Rect box = new Rect(Screen.width - w - 16f, boxY, w, h);
+        Rect box = new Rect(SessionReview.ReviewUiScale.Width - w - 16f, boxY, w, h);
         _debugBoxRectGui = box;
         _debugBoxActive = true;
         GUI.Box(box, GUIContent.none, panelStyle);
@@ -336,7 +337,7 @@ public class TrajectoryUI : MonoBehaviour
     /// </summary>
     public bool BlocksInputAt(Vector2 screenPos)
     {
-        Vector2 guiPoint = new Vector2(screenPos.x, Screen.height - screenPos.y);
+        Vector2 guiPoint = SessionReview.ReviewUiScale.ScreenToGui(screenPos);
 
         if (_drawPanelActive && _drawPanelRectGui.Contains(guiPoint))
             return true;

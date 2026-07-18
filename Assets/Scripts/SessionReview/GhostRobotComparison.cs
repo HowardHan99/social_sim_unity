@@ -328,8 +328,10 @@ namespace SessionReview
 
         private bool PointerBlockedByUi(Vector3 pointer)
         {
-            Vector2 guiPoint = new Vector2(pointer.x, Screen.height - pointer.y);
+            Vector2 guiPoint = ReviewUiScale.ScreenToGui(pointer);
             if (ReviewPanels.AnyPanelContains(guiPoint))
+                return true;
+            if (UiScaleController.ControlContains(guiPoint))
                 return true;
             return rewind != null && rewind.ProgressBarContains(guiPoint);
         }

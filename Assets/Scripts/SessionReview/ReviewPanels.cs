@@ -318,11 +318,14 @@ namespace SessionReview
 
         private static void ClampToScreen(State s)
         {
-            s.rect.width = Mathf.Clamp(s.rect.width, MinW, Mathf.Max(MinW, Screen.width));
-            s.rect.height = Mathf.Clamp(s.rect.height, TitleH + MinContentH, Mathf.Max(TitleH + MinContentH, Screen.height));
+            // Virtual (user-zoomed) screen size: panels are drawn under ReviewUiScale's GUI matrix.
+            float screenW = ReviewUiScale.Width;
+            float screenH = ReviewUiScale.Height;
+            s.rect.width = Mathf.Clamp(s.rect.width, MinW, Mathf.Max(MinW, screenW));
+            s.rect.height = Mathf.Clamp(s.rect.height, TitleH + MinContentH, Mathf.Max(TitleH + MinContentH, screenH));
             // Keep at least a corner of the title bar on-screen so it can always be grabbed.
-            s.rect.x = Mathf.Clamp(s.rect.x, -s.rect.width + 48f, Screen.width - 48f);
-            s.rect.y = Mathf.Clamp(s.rect.y, 0f, Screen.height - TitleH);
+            s.rect.x = Mathf.Clamp(s.rect.x, -s.rect.width + 48f, screenW - 48f);
+            s.rect.y = Mathf.Clamp(s.rect.y, 0f, screenH - TitleH);
         }
 
         /// <summary>
@@ -343,7 +346,7 @@ namespace SessionReview
             const float gap = 6f;
             const float pad = 6f;
             float totalW = registry.Count * (bw + gap) - gap + pad * 2f;
-            float x = Mathf.Max(4f, (Screen.width - totalW) * 0.5f);
+            float x = Mathf.Max(4f, (ReviewUiScale.Width - totalW) * 0.5f);
             float y = 4f;
 
             toggleBarRect = new Rect(x, y, totalW, bh + pad * 2f);

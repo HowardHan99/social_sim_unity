@@ -67,6 +67,9 @@ namespace SessionReview
         // Scene the trial ran in; lets a loaded replay warn when the active scene differs.
         // Empty for trials saved before this field existed.
         public string sceneName;
+        // Participant/session id typed on the onboarding page (ParticipantSession).
+        // Empty for trials saved before this field existed or when none was entered.
+        public string sessionId;
         public ushort trialNumber;
         public float startTime;
         public float endTime;
@@ -125,6 +128,7 @@ namespace SessionReview
             {
                 trialName = info.trialName,
                 sceneName = UnityEngine.SceneManagement.SceneManager.GetActiveScene().name,
+                sessionId = ParticipantSession.Id,
                 trialNumber = info.trialNumber,
                 startTime = info.startTime,
                 endTime = info.endTime,
@@ -259,9 +263,43 @@ namespace SessionReview
             }
         }
 
+        /// <summary>
+        /// Absolute folder for one session's data (trial subfolders, joystick config, ...).
+        /// </summary>
+        public static string SessionFolder(string sessionId)
+        {
+            return Path.Combine(LogFolder, SanitizeFolderName(sessionId, "unassigned"));
+        }
+
+        /// <summary>
+        /// Filesystem-safe folder name from a user-typed value; fallback when empty.
+        /// </summary>
+        public static string SanitizeFolderName(string raw, string fallback)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+                return fallback;
+
+            string s = raw.Trim();
+            foreach (char c in Path.GetInvalidFileNameChars())
+                s = s.Replace(c, '_');
+            return s;
+        }
+
+        /// <summary>
+        /// Logs are grouped one session -> scenes -> trials:
+        /// SessionLogs/&lt;sessionId&gt;/&lt;sceneName&gt;/trial_NNN_stamp/. Trial folder
+        /// naming and everything inside (timestamps, agent roles) is unchanged.
+        /// </summary>
+        private static string SessionSceneFolder(TrialRecord record)
+        {
+            return Path.Combine(
+                SanitizeFolderName(record.sessionId, "unassigned"),
+                SanitizeFolderName(record.sceneName, "unknown_scene"));
+        }
+
         public static string CreateReviewExportFolder(TrialRecord record)
         {
-            string root = Path.Combine(LogFolder, "ReviewExports");
+            string root = Path.Combine(LogFolder, "ReviewExports", SessionSceneFolder(record));
             if (!Directory.Exists(root))
                 Directory.CreateDirectory(root);
 
@@ -284,7 +322,7 @@ namespace SessionReview
         {
             string stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
             string folderName = $"trial_{record.trialNumber:D3}_{stamp}";
-            string path = Path.Combine(LogFolder, folderName);
+            string path = Path.Combine(LogFolder, SessionSceneFolder(record), folderName);
             if (!Directory.Exists(path))
                 Directory.CreateDirectory(path);
             SessionReview.SessionReviewLog.Log($"[SessionReview] Trial folder: {path}");

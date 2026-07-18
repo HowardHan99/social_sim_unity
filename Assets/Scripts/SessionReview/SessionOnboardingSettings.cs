@@ -21,6 +21,11 @@ namespace SessionReview
         public static StartupControlMode RobotStartupControl { get; private set; } = StartupControlMode.Manual;
         public static StartupControlMode PwdStartupControl { get; private set; } = StartupControlMode.Auto;
         public static SEAN.Scenario.Agents.PwdGender SelectedPwdGender { get; private set; } = SEAN.Scenario.Agents.PwdGender.Male;
+        /// <summary>
+        /// Prefab name of the selected player character from Resources/PlayerCharacters.
+        /// Empty = built-in wheelchair pair (SelectedPwdGender picks male/female).
+        /// </summary>
+        public static string SelectedPlayerCharacterId { get; private set; } = string.Empty;
         public static int SelectedSceneIndex { get; private set; } = -1;
         public static string SelectedSceneName { get; private set; } = string.Empty;
         public static bool PendingTrialStart { get; private set; }
@@ -33,6 +38,7 @@ namespace SessionReview
             RobotStartupControl = StartupControlMode.Manual;
             PwdStartupControl = StartupControlMode.Auto;
             SelectedPwdGender = SEAN.Scenario.Agents.PwdGender.Male;
+            SelectedPlayerCharacterId = string.Empty;
             SelectedSceneIndex = -1;
             SelectedSceneName = string.Empty;
             PendingTrialStart = false;
@@ -40,6 +46,7 @@ namespace SessionReview
 
         public static void Apply(OnboardingPlayerMode playerMode,
                                  SEAN.Scenario.Agents.PwdGender pwdGender,
+                                 string playerCharacterId,
                                  int sceneIndex,
                                  string sceneName,
                                  StartupControlMode robotStartupControl,
@@ -50,9 +57,21 @@ namespace SessionReview
             RobotStartupControl = robotStartupControl;
             PwdStartupControl = pwdStartupControl;
             SelectedPwdGender = pwdGender;
+            SelectedPlayerCharacterId = playerCharacterId ?? string.Empty;
             SelectedSceneIndex = sceneIndex;
             SelectedSceneName = sceneName ?? string.Empty;
             PendingTrialStart = true;
+        }
+
+        /// <summary>
+        /// Sets only the player character choice (used by lightweight scenes like the
+        /// TestScene practice flow that spawn the player without full onboarding).
+        /// </summary>
+        public static void SetPlayerCharacterSelection(string playerCharacterId,
+                                                       SEAN.Scenario.Agents.PwdGender pwdGender)
+        {
+            SelectedPlayerCharacterId = playerCharacterId ?? string.Empty;
+            SelectedPwdGender = pwdGender;
         }
 
         public static void UpdateStartupControls(OnboardingPlayerMode playerMode,

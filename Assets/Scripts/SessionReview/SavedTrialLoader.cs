@@ -10,10 +10,13 @@ namespace SessionReview
     public class SavedTrialInfo
     {
         public string folderPath;
+        // Path relative to SessionLogs/, e.g. "P01/TestScene/trial_001_20260716_1200"
+        // (legacy flat trials keep just their folder name).
         public string folderName;
         public ushort trialNumber;
         public string trialName;
         public string sceneName;
+        public string sessionId;
         public float durationSeconds;
         public DateTime savedAt;
     }
@@ -45,7 +48,12 @@ namespace SessionReview
             if (!Directory.Exists(root))
                 return result;
 
-            foreach (string folder in Directory.GetDirectories(root))
+            string rootFull = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+            // Trials are grouped SessionLogs/<sessionId>/<sceneName>/trial_.../ since the
+            // session-id hierarchy was added; legacy trials sit flat in SessionLogs/.
+            // A recursive scan finds both (any folder holding trial_info.json + trajectories).
+            foreach (string folder in Directory.GetDirectories(root, "*", SearchOption.AllDirectories))
             {
                 string infoPath = Path.Combine(folder, "trial_info.json");
                 string trajPath = Path.Combine(folder, "trajectories_all.json");
@@ -58,13 +66,18 @@ namespace SessionReview
                     if (trial == null)
                         continue;
 
+                    string relative = Path.GetFullPath(folder).StartsWith(rootFull, StringComparison.OrdinalIgnoreCase)
+                        ? Path.GetFullPath(folder).Substring(rootFull.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                        : Path.GetFileName(folder);
+
                     result.Add(new SavedTrialInfo
                     {
                         folderPath = folder,
-                        folderName = Path.GetFileName(folder),
+                        folderName = relative.Replace(Path.DirectorySeparatorChar, '/'),
                         trialNumber = trial.trialNumber,
                         trialName = trial.trialName,
                         sceneName = trial.sceneName,
+                        sessionId = trial.sessionId,
                         durationSeconds = trial.Duration,
                         savedAt = Directory.GetLastWriteTime(folder)
                     });

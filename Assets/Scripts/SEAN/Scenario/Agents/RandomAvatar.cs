@@ -20,6 +20,11 @@ namespace SEAN.Scenario.Agents
         static private bool autonomousPwdSpawned = false;
         static private int lastSceneHandle = int.MinValue;
 
+        /// <summary>Character id of the most recently spawned player ("" = wheelchair). Lets
+        /// onboarding detect that the live player no longer matches the selection.</summary>
+        public static string LastSpawnedCharacterId { get; private set; } = string.Empty;
+        public static PwdGender LastSpawnedGender { get; private set; } = PwdGender.Male;
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         static void ResetStatics()
         {
@@ -28,10 +33,14 @@ namespace SEAN.Scenario.Agents
             pwdPlayerSpawned = false;
             autonomousPwdSpawned = false;
             lastSceneHandle = int.MinValue;
+            LastSpawnedCharacterId = string.Empty;
+            LastSpawnedGender = PwdGender.Male;
         }
 
         [Header("PWD Player")]
         public bool isPwdPlayer = false;
+        [Tooltip("Spawn the player during Awake (default). Untick in lightweight scenes (TestScene) where a flow manager calls SpawnPwdPlayerNow() after the user picks a character.")]
+        public bool spawnPlayerOnAwake = true;
         public PwdGender pwdGender = PwdGender.Male;
         public GameObject pwdAvatarPrefabMale;
         public GameObject pwdAvatarPrefabFemale;
@@ -45,10 +54,17 @@ namespace SEAN.Scenario.Agents
         [Header("Background PWD Gender")]
         public PwdGender bgPwdGender = PwdGender.Random;
 
+        [Header("Walking Player Tuning")]
+        [Tooltip("Max manual turn rate (deg/s) for walking player characters; the wheelchair keeps the controller default (240). Turn acceleration/coast scale down proportionally so the ramp feel stays the same. <= 0 disables the override.")]
+        public float walkerTurnSpeed = 120f;
+
         private GameObject avatarPrefab;
         private GameObject avatarObject;
         private LowLevelControl assignedController;
         private bool spawnAutonomousPwdFromOnboarding;
+        // True while the current SpawnPwdPlayer() call is building a walking (on-foot)
+        // character from Resources/PlayerCharacters instead of the wheelchair pair.
+        private bool spawnedWalkingCharacter;
 
         private void RebuildAvatarPoolIfNeeded()
         {
@@ -130,6 +146,12 @@ namespace SEAN.Scenario.Agents
 
             if (isPwdPlayer)
             {
+                if (!spawnPlayerOnAwake)
+                {
+                    // Deferred: a flow manager (e.g. TestSceneFlowManager) calls
+                    // SpawnPwdPlayerNow() once the user has picked a character.
+                    return;
+                }
                 if (pwdPlayerSpawned)
                 {
                     Debug.LogWarning($"[PWD] Duplicate isPwdPlayer on '{gameObject.name}' -- already spawned. Spawning as normal agent instead.", this);
@@ -197,6 +219,55 @@ namespace SEAN.Scenario.Agents
             spawnAutonomousPwdFromOnboarding = false;
         }
 
+        /// <summary>
+        /// Spawns the player immediately using the current SessionOnboardingSettings
+        /// character/gender selection. For scenes with spawnPlayerOnAwake unticked.
+        /// </summary>
+        public void SpawnPwdPlayerNow()
+        {
+            if (!isPwdPlayer)
+            {
+                Debug.LogWarning($"[PWD] SpawnPwdPlayerNow called on '{gameObject.name}' which is not an isPwdPlayer spawner.", this);
+                return;
+            }
+            if (pwdPlayerSpawned)
+            {
+                Debug.LogWarning("[PWD] SpawnPwdPlayerNow: player already spawned.", this);
+                return;
+            }
+
+            pwdGender = SessionReview.SessionOnboardingSettings.SelectedPwdGender;
+            pwdPlayerSpawned = true;
+            SpawnPwdPlayer();
+        }
+
+        /// <summary>
+        /// Selected walking character from Resources/PlayerCharacters, or the built-in
+        /// gendered wheelchair pair when no character is selected / it can't be found.
+        /// Sets spawnedWalkingCharacter and the LastSpawned* statics as a side effect.
+        /// </summary>
+        private GameObject ResolvePlayerCharacterPrefab()
+        {
+            string characterId = SessionReview.SessionOnboardingSettings.SelectedPlayerCharacterId;
+            if (!string.IsNullOrEmpty(characterId))
+            {
+                GameObject prefab = SessionReview.PlayerCharacterLibrary.FindPrefab(characterId);
+                if (prefab != null)
+                {
+                    spawnedWalkingCharacter = true;
+                    LastSpawnedCharacterId = characterId;
+                    LastSpawnedGender = pwdGender;
+                    return prefab;
+                }
+                Debug.LogWarning($"[PWD] Player character '{characterId}' not found in Resources/PlayerCharacters; falling back to wheelchair.", this);
+            }
+
+            spawnedWalkingCharacter = false;
+            LastSpawnedCharacterId = string.Empty;
+            LastSpawnedGender = pwdGender;
+            return ResolvePwdPrefab(pwdGender);
+        }
+
         private void SpawnPwdPlayer()
         {
             // Populate the shared static avatarsList so that other agents
@@ -207,7 +278,7 @@ namespace SEAN.Scenario.Agents
                 RebuildAvatarPoolIfNeeded();
             }
 
-            avatarPrefab = ResolvePwdPrefab(pwdGender);
+            avatarPrefab = ResolvePlayerCharacterPrefab();
             if (avatarPrefab == null)
             {
                 Debug.LogError("No PWD avatar prefab assigned for gender: " + pwdGender, this);
@@ -234,8 +305,11 @@ namespace SEAN.Scenario.Agents
             avatarObject.name = "PWDPlayer";
 
             Animator animator = avatarObject.GetComponent<Animator>();
-            if (animator != null && pwdAnimationController != null)
-                animator.runtimeAnimatorController = pwdAnimationController;
+            RuntimeAnimatorController playerAnimController = spawnedWalkingCharacter ? animationController : pwdAnimationController;
+            if (animator != null && playerAnimController != null)
+                animator.runtimeAnimatorController = playerAnimController;
+            else if (animator != null)
+                Debug.LogWarning($"[PWD] No {(spawnedWalkingCharacter ? "walking" : "wheelchair")} animation controller assigned on '{gameObject.name}'.", this);
 
             Vector3 goalPos = spawnPos;
             if (goalObj != null)
@@ -252,6 +326,14 @@ namespace SEAN.Scenario.Agents
             sfpwd.useWaypoints = true;
             sfpwd.waypointStart = spawnPos;
             sfpwd.waypointGoal = goalPos;
+            if (spawnedWalkingCharacter)
+            {
+                // Standing avatar: keep the Base-computed capsule center (seated recenter
+                // would sink it) and claim normal pedestrian personal space, not the
+                // wheelchair's doubled radius.
+                sfpwd.applyWheelchairColliderCenter = false;
+                sfpwd.pwdPersonalRadius = Base.RADIUS;
+            }
 
             // Reuse existing ManualWheelchairController from the prefab if present;
             // only add a new one if the prefab doesn't have one.
@@ -261,8 +343,19 @@ namespace SEAN.Scenario.Agents
             manualCtrl.enabled = true;
             manualCtrl.startInManualMode = SessionReview.SessionOnboardingSettings.PwdStartupControl == SessionReview.StartupControlMode.Manual;
 
-            AttachCameraToHead(avatarObject);
-            AttachPlayerMiniScreens(avatarObject);
+            if (spawnedWalkingCharacter && walkerTurnSpeed > 0f && manualCtrl.rotationSpeed > 0f)
+            {
+                // Walking humans turn slower than the wheelchair. Scale the angular
+                // accelerations by the same ratio so time-to-full-turn feels unchanged.
+                float turnScale = walkerTurnSpeed / manualCtrl.rotationSpeed;
+                manualCtrl.inertiaAngularAcceleration *= turnScale;
+                manualCtrl.inertiaAngularCoastDeceleration *= turnScale;
+                manualCtrl.manualAngularAcceleration *= turnScale;
+                manualCtrl.rotationSpeed = walkerTurnSpeed;
+            }
+
+            AttachCameraToHead(avatarObject, spawnedWalkingCharacter);
+            AttachPlayerMiniScreens(avatarObject, spawnedWalkingCharacter);
 
             // Disable the Agent_X scene object since PWDPlayer is independent
             gameObject.SetActive(false);
@@ -378,7 +471,7 @@ namespace SEAN.Scenario.Agents
             return null;
         }
 
-        private void AttachCameraToHead(GameObject avatar)
+        private void AttachCameraToHead(GameObject avatar, bool standing)
         {
             // Third-person camera: temporarily parent to avatar so
             // WheelchairCameraSmoothing.Start() can read the follow target,
@@ -397,14 +490,17 @@ namespace SEAN.Scenario.Agents
                 }
             }
 
-            Vector3 thirdPersonOffset = new Vector3(0f, 1.9f, -1.5f);
+            // A standing avatar is a head taller than the seated wheelchair user, so the
+            // orbit camera sits higher/farther and aims at standing chest height.
+            Vector3 thirdPersonOffset = standing ? new Vector3(0f, 2.2f, -2.2f) : new Vector3(0f, 1.9f, -1.5f);
+            float lookAtHeight = standing ? 1.5f : 1.0f;
             Vector3 spawnPos = avatar.transform.position + avatar.transform.rotation * thirdPersonOffset;
 
             if (wheelchairCam != null)
             {
                 wheelchairCam.SetParent(avatar.transform, false);
                 wheelchairCam.position = spawnPos;
-                wheelchairCam.LookAt(avatar.transform.position + Vector3.up * 1.0f);
+                wheelchairCam.LookAt(avatar.transform.position + Vector3.up * lookAtHeight);
 
                 Camera cam = wheelchairCam.GetComponent<Camera>();
                 if (cam != null)
@@ -426,7 +522,7 @@ namespace SEAN.Scenario.Agents
                 GameObject camObj = new GameObject("PWDThirdPersonCamera");
                 camObj.transform.SetParent(avatar.transform, false);
                 camObj.transform.position = spawnPos;
-                camObj.transform.LookAt(avatar.transform.position + Vector3.up * 1.0f);
+                camObj.transform.LookAt(avatar.transform.position + Vector3.up * lookAtHeight);
 
                 Camera cam = camObj.AddComponent<Camera>();
                 cam.targetDisplay = 1;
@@ -456,7 +552,7 @@ namespace SEAN.Scenario.Agents
         // them for robot play (both recognize the names below). This avoids them
         // overlapping the robot's own minis during onboarding / robot play.
         // View-only: no ROS publishing and no extra AudioListener.
-        private void AttachPlayerMiniScreens(GameObject avatar)
+        private void AttachPlayerMiniScreens(GameObject avatar, bool standing)
         {
             // Match the PWD main view, which SessionReviewManager moves to display 0
             // when the human drives the PWD. Higher depth so the panels draw on top
@@ -502,7 +598,8 @@ namespace SEAN.Scenario.Agents
             firstPersonCam.depth = miniDepth;
             firstPersonCam.enabled = false; // SessionReviewManager enables during PWD play
             var firstPersonLevel = firstPersonObj.AddComponent<IVI.FirstPersonCameraLevel>();
-            firstPersonLevel.eyeOffset = new Vector3(0f, 1.15f, 0.35f);
+            // Standing eye height vs seated wheelchair eye height.
+            firstPersonLevel.eyeOffset = standing ? new Vector3(0f, 1.65f, 0.35f) : new Vector3(0f, 1.15f, 0.35f);
 
             Debug.Log($"[PWD] Created top-down + first-person mini screens on '{avatar.name}' (enabled during PWD play)");
         }

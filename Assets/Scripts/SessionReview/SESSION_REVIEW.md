@@ -23,23 +23,109 @@ A self-contained post-trial review system for the social simulation. Records age
 | **F4** | Top-down orthographic view |
 | **F5** | Free camera view |
 | **G** | Toggle ghost trails |
+| **V** | Show/hide the robot's intent overlays (ROS control trajectory + robot goal marker) |
 | **[ / ]** | Previous/next trial |
+| **Ctrl +/-** | Zoom all overlay UI (fonts + layout) up/down — for large displays |
+| **Ctrl 0** | Reset UI zoom to 100% |
+
+### UI Scale (large displays)
+
+All IMGUI overlays share a global user zoom (`ReviewUiScale`, persisted in PlayerPrefs).
+Besides the hotkeys above, click the **"Aa NN%"** badge in the top-left corner to open a
+slider with 100/125/150/200% presets. The zoom stacks with the existing responsive
+behavior (panels still clamp to the screen and resolution-based auto-scaling still applies),
+so layouts stay usable at any zoom. New overlays opt in by calling `ReviewUiScale.Apply()`
+first thing in `OnGUI` and using `ReviewUiScale.Width/Height` instead of `Screen.width/height`;
+manual hit-testing from `Input.mousePosition`/touches must convert via `ReviewUiScale.ScreenToGui()`.
+
+### Robot Intent Overlays ([V])
+
+`RosOverlayVisibility` is one switch over the two overlays that give away where the robot is
+headed: the **control trajectory** (the ROS nav-plan line `PlanVisualizer` draws from the global
+plan) and the **robot goal marker** (its flag cube/arrow, plus the "ROBOT GOAL" label and orange
+highlight `RobotGoalObjectBinding` adds). Both are **hidden at every trial start** so a
+participant never sees the robot's preset path, **[V]** flips them mid-run, and **entering review
+turns them back on** — review is where they are wanted. The button strip sits under the "Aa NN%"
+badge in the top-left; the Control Traj button only appears when the scene actually has a
+`PlanVisualizer` (i.e. ROS is in the loop).
+
+The **player** goal is deliberately not covered — the human participant needs it to know where to
+walk. Nothing is disconnected, only hidden: `PlanVisualizer` keeps computing the plan while
+suppressed (so `LiveTrajectoryRecorder` still records it and the trial-start readiness check still
+sees it), and only the goal marker's *renderers* are touched, never its transform — that is what
+feeds ROS goal publishing, completion checks and metrics.
+
+In review the live plan line is force-suppressed for the whole session and the plan is shown as a
+recorded snapshot instead, so there the switch drives the Legend's **"ROS Nav Plan"** row; that row
+(and "Show All"/"Hide All") can still override it per-review.
+
+### Player Character Selection (wheelchair + walking avatars)
+
+The onboarding panel's "PWD Player Character" card grid offers the built-in wheelchair
+pair plus every prefab found in `Resources/PlayerCharacters` (`PlayerCharacterLibrary`;
+thumbnails matched by name from `Resources/PlayerCharactersUI`, optional). Walking
+characters reuse the exact wheelchair player pipeline — spawned by
+`RandomAvatar.SpawnPwdPlayer()` as `"PWDPlayer"` with `SFPWDAgent` +
+`ManualWheelchairController` — so task sync, tracking, review, and overlays all work
+unchanged. Walker-specific tweaks at spawn: the walking locomotion animator controller,
+`SFPWDAgent.applyWheelchairColliderCenter = false` (keeps the standing capsule center),
+normal pedestrian personal radius, and taller camera offsets. Selection is stored in
+`SessionOnboardingSettings.SelectedPlayerCharacterId` ("" = wheelchair); picking a
+different character in the current scene reloads it so the player respawns.
+
+### Joystick Tuning Overlay ([U])
+
+`JoystickTuningOverlay` (self-bootstraps, **U** toggles; the TestScene shows it
+automatically once driving starts) has an input-device row plus sliders for linear/turn
+sensitivity, full-throw (stick travel that already commands max speed), deadzone and max
+speed. ONE set of values is applied to BOTH the player's `ManualWheelchairController` and
+the robot's `VelocityController`. Nothing is overridden until a slider is first moved;
+after that the values are re-applied to every live controller once per second (this
+survives `ApplyJoystickResponseDefaults()` in the controllers' `Start()`, scene loads,
+and respawns). "Reset Defaults" hands the fields back to the Inspector values.
+
+**Per-session config**: the tuning is saved as
+`SessionLogs/<sessionId>/joystick_config.json`, not global PlayerPrefs. Switching the
+session id (onboarding page) hot-loads that session's saved tuning; a fresh session
+inherits the current live values and gets its own file on the first change. So a
+participant tunes the feel in the TestScene and it carries into their real study scene.
+
+**Input-device profile**: the top row (Auto / Stick / Gamepad) picks the `JoystickProfiles`
+mapping and is stored in the same per-session file. **Auto** (the default, and forced for
+any fresh session) follows the connected controller by name, so the profile matches
+whatever device the participant is actually using — which is also the device they use in
+the real session. An explicit pick is remembered and re-applied when the study scene
+loads. The "Detected: ..." line shows the connected controller name.
+
+### TestScene Practice Flow
+
+`TestSceneFlowManager` runs a lightweight practice loop with NO SEAN objects at all:
+session id + character select → drive to the WHITE goal → control switches to a dummy
+robot body (any robot-looking prefab; its scripts are auto-disabled and it is driven by
+the same `ManualWheelchairController` as the player) → drive to the YELLOW goal → done
+(R reloads). Scene checklist in the header comment of `TestSceneFlowManager.cs`: a
+`RandomAvatar` spawner with `spawnPlayerOnAwake` unticked, four uniquely-named markers,
+a robot body transform, baked NavMesh, scene added to Build Settings for the R-restart.
 
 ## Output Files
 
-Each trial creates a timestamped folder under `SessionLogs/` (project root in Editor, `persistentDataPath` in builds):
+Each trial creates a timestamped folder under `SessionLogs/` (project root in Editor, `persistentDataPath` in builds), grouped one session -> scenes -> trials. The session id comes from the onboarding page's Session ID field (`ParticipantSession`, kept from the previous session until changed) and is also written into `trial_info.json` (`sessionId`):
 
 ```
 SessionLogs/
-  trials.json                                    <- cumulative index
-  trial_001_20260308_151944/
-    trial_info.json                              <- metadata, metrics, agent roster
-    trajectories_all.json                        <- all agents combined
-    trajectory_base_link_robot.json              <- robot only
-    trajectory_PWDAgent_pwdplayer.json           <- PWD player only
-    trajectory_Pedestrian01_backgroundped.json   <- individual pedestrian
-    control_modes.ctrlmode                       <- timestamped control transitions
+  trials.json                                      <- cumulative index (all sessions)
+  P01/                                             <- session id ("unassigned" when empty)
+    sidewalkOutofStore/                            <- scene
+      trial_001_20260308_151944/
+        trial_info.json                            <- metadata, metrics, agent roster, sessionId
+        trajectories_all.json                      <- all agents combined
+        trajectory_base_link_robot.json            <- robot only
+        trajectory_PWDAgent_pwdplayer.json         <- PWD player only
+        trajectory_Pedestrian01_backgroundped.json <- individual pedestrian
+        control_modes.ctrlmode                     <- timestamped control transitions
 ```
+
+Trial folder naming and every file inside are unchanged; only the grouping folders are new. Legacy flat `SessionLogs/trial_xxx/` folders still load (the F12 panel scans recursively). ROI exports nest the same way under `SessionLogs/ReviewExports/<session>/<scene>/`.
 
 ### Trajectory JSON Format
 
@@ -84,6 +170,7 @@ Assets/Scripts/SessionReview/
   MultiAgentTrajectoryRenderer.cs  <- Draws trajectory lines with per-agent colors
   RewindController.cs         <- Playback scrubbing, camera perspective management
   MetricsOverlayUI.cs         <- IMGUI panel showing trial metrics
+  UiScaleController.cs        <- Global UI zoom (ReviewUiScale) + top-left "Aa" control, Ctrl +/-/0
   ComfortMotionBlur.cs        <- Camera image-effect: rotation-driven motion blur + vignette
   Shaders/ComfortMotionBlur.shader  <- Corresponding HLSL shader (two-ring Gaussian kernel)
 ```

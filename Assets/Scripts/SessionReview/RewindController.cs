@@ -90,7 +90,7 @@ namespace SessionReview
         [SerializeField] private Color activePlanColor = new Color(0.2f, 1f, 0.3f, 0.9f);
         [SerializeField] private float activePlanWidth = 0.14f;
         private LineRenderer activePlanLine;
-        private const string ActivePlanLegendKey = "active_plan";
+        public const string ActivePlanLegendKey = "active_plan";
 
         [Header("Signal Replay")]
         [SerializeField] private float lightingReplayHoldSeconds = 1.1f;
@@ -168,11 +168,13 @@ namespace SessionReview
             // Expose the live "active plan" line in the Review Legend so "Hide All"/"Show All"
             // and its own row can toggle it (UpdateActivePlanPath rebuilds it every frame, so it
             // can only be governed by a flag the renderer owns, not by disabling it directly).
-            // Default the ROS plan to hidden in review; it stays recorded and can be turned on
-            // from the legend row (or "Show All") when the reviewer wants to see it.
+            // The plan starts out however the RosOverlayVisibility switch is currently set —
+            // review entry turns that switch on, so the snapshot is visible by default here and
+            // the legend row (or "Show All"/"Hide All") can still override it per-review.
             if (trajectoryRenderer != null)
                 trajectoryRenderer.RegisterExternalLegendGroup(
-                    ActivePlanLegendKey, "ROS Nav Plan", activePlanColor, initiallyVisible: false);
+                    ActivePlanLegendKey, "ROS Nav Plan", activePlanColor,
+                    initiallyVisible: RosOverlayVisibility.PlanVisible);
             drawTrajectoryManager = FindObjectOfType<TrajectoryManager>();
             timeOffset = recordingTimeOffset;
             signalAnnotations = annotations ?? trial.signalAnnotations ?? new List<SignalAnnotation>();
@@ -1745,14 +1747,15 @@ namespace SessionReview
         {
             if (!isRewinding) return;
 
+            ReviewUiScale.Apply();
             EnsureProgressBarStyles();
 
             // Centered control card, capped width so it never stretches edge-to-edge.
             // Collapses to just the scrubber when the info text is hidden.
             float barHeight = showReplayInfo ? 98f : 40f;
-            float panelW = Mathf.Min(Screen.width - 40f, ProgressBarMaxWidth);
-            float panelX = (Screen.width - panelW) * 0.5f;
-            float panelY = Screen.height - barHeight - 14f;
+            float panelW = Mathf.Min(ReviewUiScale.Width - 40f, ProgressBarMaxWidth);
+            float panelX = (ReviewUiScale.Width - panelW) * 0.5f;
+            float panelY = ReviewUiScale.Height - barHeight - 14f;
 
             progressBarRect = new Rect(panelX, panelY, panelW, barHeight);
             progressBarFrame = Time.frameCount;
@@ -1807,7 +1810,7 @@ namespace SessionReview
 
             float width = 330f;
             float height = vlmActive ? 68f : 48f;
-            Rect rect = new Rect(Screen.width - width - 20f, Screen.height - 150f, width, height);
+            Rect rect = new Rect(ReviewUiScale.Width - width - 20f, ReviewUiScale.Height - 150f, width, height);
             GUI.Box(rect, "");
 
             string lightingText = lightingActive ? "LightingAnnotation: ACTIVE" : "LightingAnnotation: idle";

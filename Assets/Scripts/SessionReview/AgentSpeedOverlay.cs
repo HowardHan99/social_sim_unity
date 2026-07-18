@@ -172,6 +172,8 @@ namespace SessionReview
         {
             if (!visible || tracked.Count == 0 || ShouldHide()) return;
 
+            ReviewUiScale.Apply();
+
             if (titleStyle == null)
             {
                 titleStyle = new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleLeft, fontSize = 15 };
@@ -187,10 +189,10 @@ namespace SessionReview
             const float labelW = 150f;  // "Robot: 0.00 m/s"
             const float scaleW = 52f;   // "x1.00"
 
-            float barW = Mathf.Min(400f, Screen.width - 2f * margin);
+            float barW = Mathf.Min(400f, ReviewUiScale.Width - 2f * margin);
             float barH = pad * 2f + headerH + tracked.Count * rowH;
-            float x = Screen.width - barW - margin;   // bottom-right corner
-            float y = Screen.height - barH - margin;
+            float x = ReviewUiScale.Width - barW - margin;   // bottom-right corner
+            float y = ReviewUiScale.Height - barH - margin;
 
             GUI.Box(new Rect(x, y, barW, barH), GUIContent.none);
 

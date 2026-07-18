@@ -23,6 +23,9 @@ namespace IVI
 
         public float pwdPersonalRadius = 2*RADIUS;
 
+        [Tooltip("Recenter the capsule collider at the wheelchair's seated height (y=0.78). Disable for standing/walking player characters so the Base-computed mesh-height center is kept.")]
+        public bool applyWheelchairColliderCenter = true;
+
         [Header("Auto Speed Scaling (live scenario tuning)")]
         [Tooltip("Live speed multiplier for this pedestrian's autonomous (social-force) walking speed. Scales desired and max speed. 1 = default. Set live from the Agent Speed overlay.")]
         public float autoSpeedScale = 1.0f;
@@ -88,7 +91,7 @@ namespace IVI
         {
             base.Start();
 
-            if (collisionCapsule != null)
+            if (applyWheelchairColliderCenter && collisionCapsule != null)
             {
                 Vector3 center = collisionCapsule.center;
                 center.y = PwdColliderCenterY;
@@ -140,10 +143,21 @@ namespace IVI
             {
                 if (CloseEnough())
                 {
-                    headingToGoal = !headingToGoal;
-                    Vector3 next = headingToGoal ? waypointGoal : waypointStart;
-                    InitDest(next);
-                    Debug.Log($"[PWD] Reached waypoint, heading to {(headingToGoal ? "goal" : "start")} at ({next.x:F1},{next.z:F1})");
+                    if (headingToGoal)
+                    {
+                        // Arrived at the goal: STOP. Ping-ponging back to the start made the
+                        // auto chair wander away from the goal the moment it arrived (and all
+                        // through the post-trial menu). The next trial teleports the chair to
+                        // its new start and SetAutomaticMode restarts navigation.
+                        Debug.Log("[PWD] Reached goal waypoint; stopping navigation.");
+                        velocity = Vector3.zero;
+                        enabled = false;
+                        yield break;
+                    }
+
+                    headingToGoal = true;
+                    InitDest(waypointGoal);
+                    Debug.Log($"[PWD] Reached start waypoint, heading to goal at ({waypointGoal.x:F1},{waypointGoal.z:F1})");
                 }
                 else
                 {
