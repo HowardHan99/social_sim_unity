@@ -14,12 +14,12 @@ using UnityEngine;
 ///   6. Wire TrajectoryUI separately (see TrajectoryUI.cs).
 ///
 /// DRAW MODE CONTROLS (iPad):
-///   Apple Pencil              — draw (fingers reserved for navigation; resting palm ignored)
+///   Apple Pencil              — draw / erase (tap DRAW or ERASE to toggle; fingers navigate)
 ///   One-finger drag           — pan
 ///   Two-finger pinch / drag   — zoom + pan
-///   On-screen buttons         — Undo · Clear · Zoom · Pencil-only · Finish · Cancel
+///   On-screen buttons         — DRAW · ERASE · Undo · Clear · Zoom · Finish · Cancel
 /// DRAW MODE CONTROLS (desktop):
-///   Mouse left-hold           — draw
+///   Mouse left-drag           — draw / erase (while DRAW or ERASE is toggled on)
 ///   Mouse wheel / MMB drag    — zoom / pan (standalone scene only; review supplies its own)
 ///   ESC                       — finish & save
 /// </summary>
@@ -81,10 +81,18 @@ public class TrajectoryManager : MonoBehaviour
     [Min(0f)] public float outlierJumpMultiplier = 4f;
 
     [Tooltip("Moving-average window size for smoothing (odd numbers recommended). <=1 to disable.")]
-    [Min(1)] public int smoothingWindow = 15;
+    [Min(1)] public int smoothingWindow = 7;
 
     [Tooltip("Number of smoothing passes. 0 to disable.")]
-    [Min(0)] public int smoothingPasses = 5;
+    [Min(0)] public int smoothingPasses = 2;
+
+    [Tooltip("Strokes whose endpoints are closer than this (meters) are connected into one " +
+             "trajectory on save/load, so a briefly lifted pen doesn't split the path in review.")]
+    [Min(0f)] public float strokeConnectDistance = 2f;
+
+    [Header("Eraser")]
+    [Tooltip("Eraser brush radius in screen pixels (world size follows the current zoom).")]
+    [Min(1f)] public float eraserRadiusPixels = 28f;
 
     [Header("Follow Trajectory")]
     [Tooltip("Base speed (m/s) the robot uses when following the drawn trajectory.")]
@@ -181,9 +189,13 @@ public class TrajectoryManager : MonoBehaviour
     // ── Private state ────────────────────────────────────────────────────────
     private TrajectoryRenderer _activeRenderer;
     private readonly List<Vector3> _sessionPoints = new List<Vector3>();
-    private TrajectoryCollection _sessionCollection;
-    // Renderers drawn live this session — replaced by Traj_Display after save
+    // Renderers drawn live this session — replaced by Traj_Display after save.
+    // The saved collection is built from these at save time (the eraser can split
+    // or delete strokes mid-session, so no incremental collection is kept).
     private readonly List<TrajectoryRenderer> _sessionRenderers = new List<TrajectoryRenderer>();
+
+    // Legend row for the drawn trajectory in the review Legend panel (bottom-right).
+    private const string DrawnLegendKey = "drawn_trajectory";
 
     private bool _trajectoriesVisible = true;
     private bool _cameraReady = false;   // false while camera is still flying in
@@ -226,15 +238,25 @@ public class TrajectoryManager : MonoBehaviour
         bool reviewActive = IsReviewActive();
         if (reviewActive && !_wasReviewActive && !IsDrawMode)
             RefreshDisplay();
+        // Review UI gone (world building / gameplay) — the drawn lines must not
+        // linger over those modes.
+        if (!reviewActive && _wasReviewActive && !IsDrawMode)
+            SetVisibility(false);
         _wasReviewActive = reviewActive;
 
         if (IsDrawMode && !reviewActive)
         {
             ExitDrawMode();
+            SetVisibility(false);
             return;
         }
 
-        if (!IsDrawMode) return;
+        if (!IsDrawMode)
+        {
+            if (reviewActive)
+                SyncLegendVisibility();
+            return;
+        }
 
         // Block input until camera has finished flying in
         if (_cameraReady)
@@ -259,7 +281,6 @@ public class TrajectoryManager : MonoBehaviour
         _lmbPanning = false;
 
         SetVisibility(true);
-        _sessionCollection = new TrajectoryCollection();
         SwitchCamera(topDown: true);
 
         // A stroke now begins on the first pen-down so multiple strokes + Undo work.
@@ -282,6 +303,10 @@ public class TrajectoryManager : MonoBehaviour
         SaveSession();
         SwitchCamera(topDown: false);
         RefreshDisplay();
+
+        // A freshly saved drawing must be visible even if the Legend row was
+        // toggled off during a previous review pass.
+        GetLegendRenderer()?.SetExternalGroupVisible(DrawnLegendKey, true);
     }
 
     /// <summary>Remove the most recent stroke (or the in-progress one) from this session.</summary>
@@ -304,9 +329,6 @@ public class TrajectoryManager : MonoBehaviour
         if (_sessionRenderers[last] != null)
             Destroy(_sessionRenderers[last].gameObject);
         _sessionRenderers.RemoveAt(last);
-
-        if (_sessionCollection != null && _sessionCollection.trajectories.Count > 0)
-            _sessionCollection.trajectories.RemoveAt(_sessionCollection.trajectories.Count - 1);
     }
 
     /// <summary>Discard every stroke drawn so far this session (stays in draw mode).</summary>
@@ -323,7 +345,6 @@ public class TrajectoryManager : MonoBehaviour
         foreach (var r in _sessionRenderers)
             if (r != null) Destroy(r.gameObject);
         _sessionRenderers.Clear();
-        _sessionCollection = new TrajectoryCollection();
     }
 
     /// <summary>Leave draw mode WITHOUT saving — discards everything drawn this session.</summary>
@@ -344,7 +365,6 @@ public class TrajectoryManager : MonoBehaviour
         foreach (var r in _sessionRenderers)
             if (r != null) Destroy(r.gameObject);
         _sessionRenderers.Clear();
-        _sessionCollection = null;
 
         SwitchCamera(topDown: false);
         RefreshDisplay();
@@ -355,6 +375,44 @@ public class TrajectoryManager : MonoBehaviour
     {
         if (!IsReviewActive()) return;
         SetVisibility(!_trajectoriesVisible);
+        // Keep the Legend row (bottom-right panel) in agreement with this button.
+        GetLegendRenderer()?.SetExternalGroupVisible(DrawnLegendKey, _trajectoriesVisible);
+    }
+
+    /// <summary>
+    /// Mirrors the drawn-trajectory visibility with its row in the review Legend
+    /// panel (bottom-right). Registers the row lazily — the Legend rebuilds its
+    /// entries every time a review is (re)entered, so a one-shot registration
+    /// could be wiped; re-registering when the entry is missing self-heals that.
+    /// </summary>
+    private void SyncLegendVisibility()
+    {
+        if (_displayedRenderers.Count == 0)
+            return;
+
+        var legend = GetLegendRenderer();
+        if (legend == null)
+            return;
+
+        if (!legend.HasLegendEntry(DrawnLegendKey))
+        {
+            if (!legend.IsShowing)
+                return; // legend not built yet — register once it is
+            legend.RegisterExternalLegendGroup(DrawnLegendKey, "Drawn Trajectory",
+                loadedColor, initiallyVisible: _trajectoriesVisible);
+        }
+
+        bool visible = legend.IsExternalGroupVisible(DrawnLegendKey);
+        if (visible != _trajectoriesVisible)
+            SetVisibility(visible);
+    }
+
+    private SessionReview.MultiAgentTrajectoryRenderer GetLegendRenderer()
+    {
+        var reviewManager = SessionReview.SessionReviewManager.Instance;
+        return reviewManager != null
+            ? reviewManager.GetComponent<SessionReview.MultiAgentTrajectoryRenderer>()
+            : null;
     }
 
     public void ToggleFollowMode()
@@ -660,15 +718,27 @@ public class TrajectoryManager : MonoBehaviour
             drawPos = Input.mousePosition;
         }
 
-        // ── DRAW gate ──────────────────────────────────────────────────────────
-        // Strokes only land while the bottom-left DRAW button is held (touch) or
-        // toggled on (mouse click), so panning around never scribbles by accident.
+        // ── DRAW / ERASE gate ─────────────────────────────────────────────────
+        // Strokes only land while the bottom-left DRAW toggle is on; with ERASE
+        // on the same contact erases instead. Disarmed contacts navigate only,
+        // so panning around never scribbles by accident.
         bool drawArmed = _ui == null || _ui.DrawInputArmed;
-        if (!drawArmed)
+        bool eraseArmed = _ui != null && _ui.EraseInputArmed;
+        bool armed = drawArmed || eraseArmed;
+        if (!armed)
             drawDown = false;
 
         // ── Stroke begin / continue / end (rising & falling edges) ────────────
-        if (drawDown)
+        if (drawDown && eraseArmed)
+        {
+            if (_strokeDown)
+            {
+                _strokeDown = false;
+                EndStroke();
+            }
+            EraseAtScreen(drawPos);
+        }
+        else if (drawDown)
         {
             if (!_strokeDown)
             {
@@ -686,14 +756,14 @@ public class TrajectoryManager : MonoBehaviour
         // ── Finger pan / pinch-zoom (never while the pencil is drawing) ───────
         // While disarmed a single finger always pans, whatever the pencil mode.
         bool canNavigate = !stylusDown &&
-                           (fingerCount >= 2 || ((applePencilOnly || !drawArmed) && fingerCount == 1));
+                           (fingerCount >= 2 || ((applePencilOnly || !armed) && fingerCount == 1));
         if (canNavigate)
             HandleTouchNavigation(fingerCount, finger0, finger1);
         else
             _navActive = false;
 
         // ── Disarmed left-mouse drag pans the draw camera (desktop) ───────────
-        if (!drawArmed && Input.touchCount == 0)
+        if (!armed && Input.touchCount == 0)
         {
             if (Input.GetMouseButtonDown(0) && !IsBlockedByUI(Input.mousePosition))
             {
@@ -924,26 +994,106 @@ public class TrajectoryManager : MonoBehaviour
 
     private void TryAddPointFromScreen(Vector2 screenPos)
     {
-        Camera cam = GetDrawingCamera();
-        if (cam == null)
+        if (!TryGetDrawSurfacePoint(screenPos, out Vector3 point))
             return;
-        Ray ray = cam.ScreenPointToRay(screenPos);
-
-        Vector3 point;
-        if (Physics.Raycast(ray, out RaycastHit hit, 1000f, groundLayer))
-        {
-            point = hit.point + Vector3.up * heightOffset;
-        }
-        else
-        {
-            // Fallback: flat plane at heightOffset
-            Plane ground = new Plane(Vector3.up, Vector3.up * heightOffset);
-            if (!ground.Raycast(ray, out float dist)) return;
-            point = ray.GetPoint(dist);
-        }
 
         _activeRenderer?.AddPoint(point);
         _sessionPoints.Add(point);
+    }
+
+    /// <summary>Project a screen position onto the drawing surface (ground mesh, or a flat plane fallback).</summary>
+    private bool TryGetDrawSurfacePoint(Vector2 screenPos, out Vector3 point)
+    {
+        point = Vector3.zero;
+        Camera cam = GetDrawingCamera();
+        if (cam == null)
+            return false;
+        Ray ray = cam.ScreenPointToRay(screenPos);
+
+        if (Physics.Raycast(ray, out RaycastHit hit, 1000f, groundLayer))
+        {
+            point = hit.point + Vector3.up * heightOffset;
+            return true;
+        }
+
+        // Fallback: flat plane at heightOffset
+        Plane ground = new Plane(Vector3.up, Vector3.up * heightOffset);
+        if (!ground.Raycast(ray, out float dist))
+            return false;
+        point = ray.GetPoint(dist);
+        return true;
+    }
+
+    /// <summary>
+    /// Erase every session-stroke point within the eraser brush of the given screen
+    /// position. A stroke can lose its ends, be split into several pieces, or be
+    /// removed entirely; pieces left with fewer than 2 points are dropped.
+    /// </summary>
+    private void EraseAtScreen(Vector2 screenPos)
+    {
+        if (!TryGetDrawSurfacePoint(screenPos, out Vector3 center))
+            return;
+
+        Camera cam = GetDrawingCamera();
+        float worldPerPixel = (cam != null && cam.orthographic)
+            ? (cam.orthographicSize * 2f) / Mathf.Max(Screen.height, 1f)
+            : 0.02f;
+        float radius = Mathf.Max(0.05f, eraserRadiusPixels * worldPerPixel);
+        float sqrRadius = radius * radius;
+
+        for (int i = _sessionRenderers.Count - 1; i >= 0; i--)
+        {
+            var r = _sessionRenderers[i];
+            if (r == null) { _sessionRenderers.RemoveAt(i); continue; }
+
+            List<Vector3> pts = r.Points;
+            bool removedAny = false;
+            var runs = new List<List<Vector3>>();
+            List<Vector3> current = null;
+            for (int p = 0; p < pts.Count; p++)
+            {
+                Vector3 d = pts[p] - center;
+                d.y = 0f; // brush is a vertical cylinder — height offset must not matter
+                if (d.sqrMagnitude <= sqrRadius)
+                {
+                    removedAny = true;
+                    current = null;
+                    continue;
+                }
+                if (current == null)
+                {
+                    current = new List<Vector3>();
+                    runs.Add(current);
+                }
+                current.Add(pts[p]);
+            }
+
+            if (!removedAny)
+                continue;
+
+            runs.RemoveAll(run => run.Count < 2);
+            if (runs.Count == 0)
+            {
+                Destroy(r.gameObject);
+                _sessionRenderers.RemoveAt(i);
+                continue;
+            }
+
+            r.ReplacePoints(runs[0]);
+            for (int k = 1; k < runs.Count; k++)
+                _sessionRenderers.Insert(i + k, CreateSessionStroke(runs[k]));
+        }
+    }
+
+    private TrajectoryRenderer CreateSessionStroke(List<Vector3> points)
+    {
+        var go = new GameObject("Stroke_Session");
+        go.transform.SetParent(transform);
+        var r = go.AddComponent<TrajectoryRenderer>();
+        r.lineColor = drawColor;
+        r.ApplyVisualSettings();
+        r.ReplacePoints(points);
+        return r;
     }
 
     // ── Stroke / Session Management ──────────────────────────────────────────
@@ -970,8 +1120,6 @@ public class TrajectoryManager : MonoBehaviour
             if (processed.Count >= 2)
                 _activeRenderer.ReplacePoints(processed);
 
-            var data = _activeRenderer.ExportData();
-            _sessionCollection.trajectories.Add(data);
             _activeRenderer.gameObject.name = "Stroke_Session";
             _sessionRenderers.Add(_activeRenderer);
         }
@@ -1062,13 +1210,81 @@ public class TrajectoryManager : MonoBehaviour
 
     private void SaveSession()
     {
-        if (_sessionCollection == null || _sessionCollection.trajectories.Count == 0)
+        var polylines = new List<List<Vector3>>();
+        foreach (var r in _sessionRenderers)
+            if (r != null && r.Points != null && r.Points.Count >= 2)
+                polylines.Add(new List<Vector3>(r.Points));
+
+        polylines = ConnectNearbyPolylines(polylines, strokeConnectDistance);
+
+        if (polylines.Count == 0)
         {
             Debug.Log("[Trajectory] Session empty — nothing saved.");
             return;
         }
-        TrajectoryIO.SaveNewSession(_sessionCollection);
-        Debug.Log($"[Trajectory] Session saved ({_sessionCollection.trajectories.Count} stroke(s)).");
+
+        var collection = new TrajectoryCollection();
+        foreach (var line in polylines)
+        {
+            var data = new TrajectoryData();
+            foreach (var p in line)
+                data.points.Add(new TrajectoryPoint(p));
+            collection.trajectories.Add(data);
+        }
+
+        TrajectoryIO.SaveNewSession(collection);
+        Debug.Log($"[Trajectory] Session saved ({collection.trajectories.Count} trajectory(ies) after connecting nearby strokes).");
+    }
+
+    /// <summary>
+    /// Greedily joins polylines whose endpoints are within maxGap of each other,
+    /// reversing pieces as needed, so a briefly lifted pen still produces one
+    /// continuous trajectory (Follow mode only ever uses the first one).
+    /// </summary>
+    private static List<List<Vector3>> ConnectNearbyPolylines(List<List<Vector3>> lines, float maxGap)
+    {
+        var result = new List<List<Vector3>>();
+        foreach (var l in lines)
+            if (l != null && l.Count >= 2)
+                result.Add(new List<Vector3>(l));
+
+        if (maxGap <= 0f || result.Count < 2)
+            return result;
+
+        float sqrGap = maxGap * maxGap;
+        bool mergedAny = true;
+        while (mergedAny && result.Count > 1)
+        {
+            mergedAny = false;
+            for (int i = 0; i < result.Count && !mergedAny; i++)
+            {
+                for (int j = i + 1; j < result.Count && !mergedAny; j++)
+                {
+                    var a = result[i];
+                    var b = result[j];
+                    Vector3 aStart = a[0], aEnd = a[a.Count - 1];
+                    Vector3 bStart = b[0], bEnd = b[b.Count - 1];
+
+                    float dEndStart = (aEnd - bStart).sqrMagnitude;     // a → b
+                    float dEndEnd = (aEnd - bEnd).sqrMagnitude;         // a → reversed b
+                    float dStartEnd = (aStart - bEnd).sqrMagnitude;     // b → a
+                    float dStartStart = (aStart - bStart).sqrMagnitude; // reversed a → b
+
+                    float best = Mathf.Min(Mathf.Min(dEndStart, dEndEnd), Mathf.Min(dStartEnd, dStartStart));
+                    if (best > sqrGap)
+                        continue;
+
+                    if (best == dEndStart) { a.AddRange(b); }
+                    else if (best == dEndEnd) { b.Reverse(); a.AddRange(b); }
+                    else if (best == dStartEnd) { b.AddRange(a); result[i] = b; }
+                    else { a.Reverse(); a.AddRange(b); }
+
+                    result.RemoveAt(j);
+                    mergedAny = true;
+                }
+            }
+        }
+        return result;
     }
 
     // ── Display / Viz ────────────────────────────────────────────────────────
@@ -1093,11 +1309,23 @@ public class TrajectoryManager : MonoBehaviour
         for (int i = 0; i < count; i++)
         {
             TrajectoryCollection col = TrajectoryIO.LoadFromPath(files[i]);
+            var polylines = new List<List<Vector3>>();
             foreach (var data in col.trajectories)
             {
                 if (data.points.Count < 2) continue;
-                CaptureFollowTrajectory(data);
-                StartCoroutine(SpawnDisplayRenderer(data));
+                var line = new List<Vector3>(data.points.Count);
+                foreach (var pt in data.points)
+                    line.Add(pt.ToVector3());
+                polylines.Add(line);
+            }
+
+            // Also heals sessions saved before strokes were connected on save.
+            polylines = ConnectNearbyPolylines(polylines, strokeConnectDistance);
+
+            foreach (var line in polylines)
+            {
+                CaptureFollowTrajectory(line);
+                StartCoroutine(SpawnDisplayRenderer(line));
             }
         }
 
@@ -1107,14 +1335,12 @@ public class TrajectoryManager : MonoBehaviour
         _trajectoriesVisible = true;
     }
 
-    private void CaptureFollowTrajectory(TrajectoryData data)
+    private void CaptureFollowTrajectory(List<Vector3> points)
     {
-        if (_followTrajectoryPoints.Count > 0 || data == null || data.points == null || data.points.Count < 2)
+        if (_followTrajectoryPoints.Count > 0 || points == null || points.Count < 2)
             return;
 
-        _followTrajectoryPoints.Clear();
-        for (int i = 0; i < data.points.Count; i++)
-            _followTrajectoryPoints.Add(data.points[i].ToVector3());
+        _followTrajectoryPoints.AddRange(points);
 
         _followTrajectoryLength = 0f;
         for (int i = 1; i < _followTrajectoryPoints.Count; i++)
@@ -1163,7 +1389,7 @@ public class TrajectoryManager : MonoBehaviour
         return true;
     }
 
-    private IEnumerator SpawnDisplayRenderer(TrajectoryData data)
+    private IEnumerator SpawnDisplayRenderer(List<Vector3> line)
     {
         var go = new GameObject("Traj_Display");
         go.transform.SetParent(transform);
@@ -1173,7 +1399,13 @@ public class TrajectoryManager : MonoBehaviour
 
         yield return null;
 
-        r.LoadFromData(data, heightOffset);
+        var lifted = new List<Vector3>(line.Count);
+        foreach (var p in line)
+            lifted.Add(p + Vector3.up * heightOffset);
+        r.ReplacePoints(lifted);
+        // Visibility may have been toggled off (Legend row / review exit) while
+        // this renderer was still one frame away from existing.
+        r.gameObject.SetActive(_trajectoriesVisible && IsReviewActive());
         _displayedRenderers.Add(r);
     }
 

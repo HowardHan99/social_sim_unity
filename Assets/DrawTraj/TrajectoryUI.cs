@@ -15,6 +15,11 @@ public class TrajectoryUI : MonoBehaviour
     [SerializeField] private float buttonHeight = 34f;
     [SerializeField] private float buttonSpacing = 8f;
 
+    [Header("Advanced")]
+    [Tooltip("Show the pencil-detection / touch-debug calibration controls in the draw panel. " +
+             "Hidden by default — they are only needed when pencil-vs-finger detection misbehaves.")]
+    [SerializeField] private bool showAdvancedControls = false;
+
     private GUIStyle panelStyle;
     private GUIStyle buttonStyle;
     private GUIStyle buttonActiveStyle;
@@ -36,16 +41,20 @@ public class TrajectoryUI : MonoBehaviour
     private Rect _debugBoxRectGui;
     private bool _debugBoxActive;
 
-    // Bottom-left DRAW gate button. Strokes only land while it is held down with a
-    // finger (touch) or toggled on with a click (desktop); TrajectoryManager reads
-    // DrawInputArmed every frame, so releasing it makes pen/finger/mouse navigate only.
-    private const float DrawButtonW = 240f;
-    private const float DrawButtonH = 96f;
+    // Bottom-left DRAW / ERASE gate buttons. Both are plain toggles (tap or click to
+    // switch on and off — no holding); TrajectoryManager reads DrawInputArmed /
+    // EraseInputArmed every frame, so switching both off makes pen/finger/mouse
+    // navigate only. Arming one disarms the other.
+    private const float GateButtonW = 170f;
+    private const float GateButtonH = 96f;
+    private const float GateButtonGap = 12f;
     private bool drawToggleLatched;
-    private Rect _drawButtonRectGui;
-    private bool _drawButtonActive;
+    private bool eraseToggleLatched;
+    private Rect _gateAreaRectGui;
+    private bool _gateAreaActive;
 
-    public bool DrawInputArmed => drawToggleLatched || IsTouchHoldingDrawButton();
+    public bool DrawInputArmed => drawToggleLatched;
+    public bool EraseInputArmed => eraseToggleLatched;
 
     private void Start()
     {
@@ -60,7 +69,7 @@ public class TrajectoryUI : MonoBehaviour
     {
         _drawPanelActive = false;
         _debugBoxActive = false;
-        _drawButtonActive = false;
+        _gateAreaActive = false;
 
         if (manager == null || !IsReviewActive())
             return;
@@ -76,6 +85,7 @@ public class TrajectoryUI : MonoBehaviour
 
         // Each draw session starts disarmed so the view can be framed first.
         drawToggleLatched = false;
+        eraseToggleLatched = false;
 
         // Default control panel: draggable / resizable / closable window chrome.
         // The old floating "Play=.. FollowMode=.." diagnostic HUD now lives inside
@@ -147,7 +157,9 @@ public class TrajectoryUI : MonoBehaviour
 
         const float headerH = 26f;
         const float hintH = 64f;
-        const int rows = 8;      // undo, clear, zoom row, pencil, detect/debug row, traj/ghosts row, finish, cancel
+        // undo, clear, zoom row, traj/ghosts row, finish, cancel (+ pencil and
+        // detect/debug rows when the advanced calibration controls are shown)
+        int rows = showAdvancedControls ? 8 : 6;
         float contentH = headerH + 6f + hintH + 8f + bh * rows + sp * (rows - 1);
 
         Rect panel = new Rect(x - pad, top - pad, bw + pad * 2f, contentH + pad * 2f);
@@ -163,7 +175,7 @@ public class TrajectoryUI : MonoBehaviour
             ? (manager.StylusDetected ? "Apple Pencil draws" : "Pencil-only - waiting for pencil")
             : "Finger or pencil draws";
         GUI.Label(new Rect(x, cy, bw, hintH),
-            line1 + "\nHold DRAW (bottom-left) while drawing\n1 finger = pan  -  2 fingers = pinch-zoom",
+            line1 + "\nTap DRAW / ERASE (bottom-left) to toggle\n1 finger = pan  -  2 fingers = pinch-zoom",
             hintStyle);
         cy += hintH + 8f;
 
@@ -184,20 +196,25 @@ public class TrajectoryUI : MonoBehaviour
             manager.ZoomStep(false);
         cy += bh + sp;
 
-        string pencilLabel = manager.ApplePencilOnly ? "Pencil-only: ON" : "Pencil-only: OFF";
-        if (GUI.Button(new Rect(x, cy, bw, bh), pencilLabel,
-            manager.ApplePencilOnly ? buttonActiveStyle : buttonStyle))
-            manager.ApplePencilOnly = !manager.ApplePencilOnly;
-        cy += bh + sp;
+        // Pencil / detection calibration controls — hidden unless explicitly enabled
+        // (showAdvancedControls) to keep the panel down to what is actually used.
+        if (showAdvancedControls)
+        {
+            string pencilLabel = manager.ApplePencilOnly ? "Pencil-only: ON" : "Pencil-only: OFF";
+            if (GUI.Button(new Rect(x, cy, bw, bh), pencilLabel,
+                manager.ApplePencilOnly ? buttonActiveStyle : buttonStyle))
+                manager.ApplePencilOnly = !manager.ApplePencilOnly;
+            cy += bh + sp;
 
-        // Detection strategy + debug toggle (for calibrating pencil-vs-finger).
-        if (GUI.Button(new Rect(x, cy, halfW, bh), "Detect: " + manager.PencilDetection, buttonStyle))
-            manager.CyclePencilDetection();
-        if (GUI.Button(new Rect(x + halfW + sp, cy, halfW, bh),
-            manager.ShowTouchDebug ? "Debug: ON" : "Debug: OFF",
-            manager.ShowTouchDebug ? buttonActiveStyle : buttonStyle))
-            manager.ShowTouchDebug = !manager.ShowTouchDebug;
-        cy += bh + sp;
+            // Detection strategy + debug toggle (for calibrating pencil-vs-finger).
+            if (GUI.Button(new Rect(x, cy, halfW, bh), "Detect: " + manager.PencilDetection, buttonStyle))
+                manager.CyclePencilDetection();
+            if (GUI.Button(new Rect(x + halfW + sp, cy, halfW, bh),
+                manager.ShowTouchDebug ? "Debug: ON" : "Debug: OFF",
+                manager.ShowTouchDebug ? buttonActiveStyle : buttonStyle))
+                manager.ShowTouchDebug = !manager.ShowTouchDebug;
+            cy += bh + sp;
+        }
 
         // Comparison overlays: the trial trajectory lines + Legend panel, and the
         // ghost robots (drawn / planned / driven), so the stroke being drawn can be
@@ -228,66 +245,61 @@ public class TrajectoryUI : MonoBehaviour
         if (GUI.Button(new Rect(x, cy, bw, bh), "Cancel (discard)", cancelStyle))
             manager.CancelDrawMode();
 
-        DrawGateButton();
+        DrawGateButtons();
         DrawTouchDebugOverlay();
     }
 
     /// <summary>
-    /// The bottom-left DRAW gate. On touch it arms only while a finger holds it down
-    /// (draw with the pencil/other hand, release to stop); with a mouse a click
-    /// toggles it, since one mouse cannot hold a button and draw at the same time.
+    /// The bottom-left DRAW and ERASE gates. Both are simple toggles — tap or click
+    /// to switch on, tap again to switch off; arming one disarms the other. While
+    /// neither is armed, pen/finger/mouse input only navigates the view.
     /// </summary>
-    private void DrawGateButton()
+    private void DrawGateButtons()
     {
-        Rect rect = GetDrawButtonRect();
-        _drawButtonRectGui = rect;
-        _drawButtonActive = true;
+        Rect area = GetGateAreaRect();
+        _gateAreaRectGui = area;
+        _gateAreaActive = true;
 
-        bool armed = DrawInputArmed;
-        string label = armed
-            ? "DRAWING\n(release / click to stop)"
-            : "HOLD TO DRAW\n(click = toggle)";
+        Rect drawRect = new Rect(area.x, area.y, GateButtonW, area.height);
+        Rect eraseRect = new Rect(area.x + GateButtonW + GateButtonGap, area.y, GateButtonW, area.height);
 
-        if (GUI.Button(rect, label, armed ? finishStyle : buttonStyle) && Input.touchCount == 0)
+        string drawLabel = drawToggleLatched ? "DRAW: ON\n(tap to stop)" : "DRAW\n(tap to start)";
+        if (GUI.Button(drawRect, drawLabel, drawToggleLatched ? finishStyle : buttonStyle))
+        {
             drawToggleLatched = !drawToggleLatched;
+            if (drawToggleLatched)
+                eraseToggleLatched = false;
+        }
+
+        string eraseLabel = eraseToggleLatched ? "ERASE: ON\n(tap to stop)" : "ERASE\n(tap to start)";
+        if (GUI.Button(eraseRect, eraseLabel, eraseToggleLatched ? cancelStyle : buttonStyle))
+        {
+            eraseToggleLatched = !eraseToggleLatched;
+            if (eraseToggleLatched)
+                drawToggleLatched = false;
+        }
     }
 
-    private Rect GetDrawButtonRect()
+    private Rect GetGateAreaRect()
     {
+        float w = GateButtonW * 2f + GateButtonGap;
+
         // Dock above the replay progress bar: the bar's scrubber is an IMGUI slider
         // that consumes clicks/touches first, so a button overlapping it can never
         // be pressed (it would scrub the timeline instead of arming drawing).
-        float y = SessionReview.ReviewUiScale.Height - DrawButtonH - 24f;
+        float y = SessionReview.ReviewUiScale.Height - GateButtonH - 24f;
         var rewind = GetReviewController();
-        if (rewind != null && rewind.TryGetProgressBarRect(out Rect bar) && y + DrawButtonH > bar.y)
-            y = bar.y - DrawButtonH - 12f;
+        if (rewind != null && rewind.TryGetProgressBarRect(out Rect bar) && y + GateButtonH > bar.y)
+            y = bar.y - GateButtonH - 12f;
 
-        Rect rect = new Rect(24f, y, DrawButtonW, DrawButtonH);
+        Rect rect = new Rect(24f, y, w, GateButtonH);
 
-        // On short screens the lifted button can reach the control panel; slide it
-        // right so it never sits under the Finish/Cancel buttons.
+        // On short screens the lifted buttons can reach the control panel; slide them
+        // right so they never sit under the Finish/Cancel buttons.
         if (_drawPanelActive && rect.Overlaps(_drawPanelRectGui))
             rect.x = _drawPanelRectGui.xMax + 12f;
 
         return rect;
-    }
-
-    private bool IsTouchHoldingDrawButton()
-    {
-        if (manager == null || !manager.IsDrawMode)
-            return false;
-
-        Rect rect = GetDrawButtonRect();
-        for (int i = 0; i < Input.touchCount; i++)
-        {
-            Touch t = Input.GetTouch(i);
-            if (t.phase == TouchPhase.Ended || t.phase == TouchPhase.Canceled)
-                continue;
-            Vector2 guiPoint = SessionReview.ReviewUiScale.ScreenToGui(t.position);
-            if (rect.Contains(guiPoint))
-                return true;
-        }
-        return false;
     }
 
     /// <summary>
@@ -343,7 +355,7 @@ public class TrajectoryUI : MonoBehaviour
             return true;
         if (_debugBoxActive && _debugBoxRectGui.Contains(guiPoint))
             return true;
-        if (_drawButtonActive && _drawButtonRectGui.Contains(guiPoint))
+        if (_gateAreaActive && _gateAreaRectGui.Contains(guiPoint))
             return true;
 
         return false;

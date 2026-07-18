@@ -953,6 +953,18 @@ namespace SessionReview
         }
 
         /// <summary>
+        /// Whether a legend row with this key currently exists. Owners that outlive a
+        /// review pass (ClearAll wipes the entries) use this to re-register lazily.
+        /// </summary>
+        public bool HasLegendEntry(string key)
+        {
+            for (int i = 0; i < legendEntries.Count; i++)
+                if (legendEntries[i].key == key)
+                    return true;
+            return false;
+        }
+
+        /// <summary>
         /// Drives an externally-owned group's legend row from outside the Legend panel, so a
         /// switch elsewhere (RosOverlayVisibility's control-trajectory button) and the row itself
         /// stay in agreement instead of each holding their own idea of visibility.

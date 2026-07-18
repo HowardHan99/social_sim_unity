@@ -12,6 +12,16 @@ This export is built on top of the existing Session Review system.
 
 No separate runtime logger was introduced for ROI export.
 
+## Automatic Save (no export needed)
+
+`TrialDataArchive` writes the same ROI export (`review_roi_export.json` +
+`roi_topdown.png`) into every trial's own save folder when the trial auto-saves
+at trial end (and again from `FinalizeLatestTrial`, overwriting in place with
+the extended window). Default `ReviewExportSettings` are used; both the toggle
+(`autoSaveRoiWithTrial`) and the settings are editable on the `TrialDataArchive`
+inspector. The manual review-time export below still exists for tuned
+padding/offset exports and writes to `SessionLogs/ReviewExports/` as before.
+
 ## Review Flow
 
 1. Finish a trial.

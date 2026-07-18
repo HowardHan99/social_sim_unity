@@ -129,7 +129,7 @@ public class RuntimeEditorManager : MonoBehaviour
         if (!isEditorActive)
             return false;
 
-        if (showClickDebug && GetClickDebugPanelRect().Contains(guiPoint))
+        if (showClickDebug && !suppressSpawnCanvas && GetClickDebugPanelRect().Contains(guiPoint))
             return true;
 
         if (highlightMoveableObjects && ContainsWorldBuildingHelpUi(guiPoint))
@@ -985,8 +985,9 @@ public class RuntimeEditorManager : MonoBehaviour
         // Moveable legend + optional controls, combined in a ? help popup.
         DrawWorldBuildingHelpButtonAndPopup();
 
-        // Debug HUD describing the last click; shown in both modes when enabled.
-        DrawClickDebug();
+        // SessionReviewManager owns the right-side spawn palette while world building.
+        if (!suppressSpawnCanvas)
+            DrawClickDebug();
 
         // Marquee rectangle while box-selecting.
         DrawSelectionBox();
@@ -1468,8 +1469,16 @@ public class RuntimeEditorManager : MonoBehaviour
         Vector3 spawnPosition = GetSpawnPosition();
 
         GameObject spawnedObject = Instantiate(spawnableObject.prefab, spawnPosition, Quaternion.identity);
+        if (spawnedObject == null)
+        {
+            Debug.LogError($"[RuntimeEditor] Failed to instantiate prefab '{spawnableObject.prefab.name}'.");
+            return;
+        }
+
         if (WorldBuildingSpawnLibrary.IsCharacterSpawnPrefab(spawnableObject.prefab.name))
             PrepareCharacterSpawnForWorldBuilding(spawnedObject, spawnPosition);
+        else
+            EnsureRootSelectionCollider(spawnedObject);
 
         if (spawnedObject.GetComponent<SEAN.Scenario.Obstacles.TrackedObstacle>() == null)
         {
@@ -1477,7 +1486,8 @@ public class RuntimeEditorManager : MonoBehaviour
             // lives on a child (e.g. Road_Decal) would otherwise publish nothing useful.
             EnsureRootSelectionCollider(spawnedObject);
             var obstacle = spawnedObject.AddComponent<SEAN.Scenario.Obstacles.TrackedObstacle>();
-            obstacle.type = spawnableObject.prefab.name.ToLower();
+            if (obstacle != null)
+                obstacle.type = spawnableObject.prefab.name.ToLower();
             NotifyObstaclePublishersOfNewObstacle();
         }
 
@@ -1487,6 +1497,54 @@ public class RuntimeEditorManager : MonoBehaviour
         SelectObject(spawnedObject);
 
         undoStack.Push(new SpawnAction(spawnedObject, this));
+        redoStack.Clear();
+    }
+
+    /// <summary>
+    /// Places a runtime-imported model (e.g. Meshy GLB) into the scene with the same
+    /// collider, selection, gizmo, and undo behavior as <see cref="SpawnObject"/>.
+    /// </summary>
+    public void SpawnImportedInstance(GameObject instance, string displayName)
+    {
+        if (!isEditorActive)
+        {
+            Debug.LogWarning("[RuntimeEditor] Editor mode is not active! Cannot spawn imported object.");
+            return;
+        }
+
+        if (mainCamera == null)
+        {
+            Debug.LogError("[RuntimeEditor] Main camera is not set! Cannot spawn imported object.");
+            return;
+        }
+
+        if (instance == null)
+        {
+            Debug.LogWarning("[RuntimeEditor] SpawnImportedInstance called with null instance.");
+            return;
+        }
+
+        Vector3 spawnPosition = GetSpawnPosition();
+        instance.transform.position = spawnPosition;
+        AlignSpawnedObjectToSpawnPoint(instance, spawnPosition);
+        EnsureRootSelectionCollider(instance);
+
+        string obstacleType = string.IsNullOrWhiteSpace(displayName)
+            ? instance.name.ToLower()
+            : displayName.Trim().ToLower();
+
+        if (instance.GetComponent<SEAN.Scenario.Obstacles.TrackedObstacle>() == null)
+        {
+            var obstacle = instance.AddComponent<SEAN.Scenario.Obstacles.TrackedObstacle>();
+            obstacle.type = obstacleType;
+        }
+
+        Debug.Log($"[RuntimeEditor] Spawned imported object: {instance.name} at {spawnPosition}");
+
+        RegisterEditableObject(instance);
+        SelectObject(instance);
+
+        undoStack.Push(new SpawnAction(instance, this));
         redoStack.Clear();
     }
 

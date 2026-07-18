@@ -106,19 +106,22 @@ namespace SessionReview
         private static Texture2D lineTexture;
         private Vector2 worldBuildingAddObjectsScroll;
         private Vector2 worldBuildingAddCharactersScroll;
-        private bool worldBuildingAddObjectsMinimized = true;
+        private bool worldBuildingAddObjectsMinimized = false;
         private bool worldBuildingAddCharactersMinimized = true;
         private bool worldBuildingGenerateObjectsMinimized = true;
         private bool worldBuildingOverlayMinimized;
         private const float WorldBuildingSidePanelMarginBase = 24f;
         private const float WorldBuildingSidePanelGapBase = 10f;
         private const float WorldBuildingSidePanelHeaderHeightBase = 44f;
-        private const float WorldBuildingGenerateObjectsBodyHeightBase = 100f;
+        private const float WorldBuildingAddObjectsExpandedHeaderHeightBase = 68f;
+        private const float WorldBuildingGenerateObjectsBodyHeightBase = 108f;
+        private const float WorldBuildingGenerateObjectsLoadingLabelHeightBase = 22f;
         private const float WorldBuildingSidePanelEmptyBodyHeightBase = 56f;
+        private const float WorldBuildingSpawnCardPanelMinScrollHeightBase = 120f;
         private const float WorldBuildingOverlayHeaderHeightBase = 44f;
         private const float WorldBuildingOverlayWidthBase = 380f;
         private const string WorldBuildingAddObjectsSubtitle =
-            "Only prefabs with a matching image in Resources/WorldBuildingUI are listed (others in WorldBuildingSpawns are ignored).";
+            "Click Add on a card to place that object in the scene.";
 
         // World-building UI scales up with resolution (1x at 1600x900) so text stays readable on large
         // displays. Based on the virtual (user-zoomed) screen so it stacks cleanly with ReviewUiScale.
@@ -128,8 +131,11 @@ namespace SessionReview
         private static float WorldBuildingSidePanelMargin => WorldBuildingSidePanelMarginBase * WorldBuildingUiScale;
         private static float WorldBuildingSidePanelGap => WorldBuildingSidePanelGapBase * WorldBuildingUiScale;
         private static float WorldBuildingSidePanelHeaderHeight => WorldBuildingSidePanelHeaderHeightBase * WorldBuildingUiScale;
+        private static float WorldBuildingAddObjectsExpandedHeaderHeight => WorldBuildingAddObjectsExpandedHeaderHeightBase * WorldBuildingUiScale;
         private static float WorldBuildingGenerateObjectsBodyHeight => WorldBuildingGenerateObjectsBodyHeightBase * WorldBuildingUiScale;
+        private static float WorldBuildingGenerateObjectsLoadingLabelHeight => WorldBuildingGenerateObjectsLoadingLabelHeightBase * WorldBuildingUiScale;
         private static float WorldBuildingSidePanelEmptyBodyHeight => WorldBuildingSidePanelEmptyBodyHeightBase * WorldBuildingUiScale;
+        private static float WorldBuildingSpawnCardPanelMinScrollHeight => WorldBuildingSpawnCardPanelMinScrollHeightBase * WorldBuildingUiScale;
         private static float WorldBuildingOverlayHeaderHeight => WorldBuildingOverlayHeaderHeightBase * WorldBuildingUiScale;
         private static float WorldBuildingOverlayWidth => WorldBuildingOverlayWidthBase * WorldBuildingUiScale;
         private bool showReviewCompletionPrompt;
@@ -151,6 +157,8 @@ namespace SessionReview
             new System.Collections.Generic.Dictionary<Behaviour, bool>();
 
         private string aiGenerationPrompt = "";
+        private GenerateModel meshyGenerator;
+        private bool meshyGlbImportInProgress;
         private static float worldBuildingOverlayHeight = 228f;
         private const int WorldBuildingSpawnPaletteCols = 2;
         private const float WorldBuildingSidePanelWidthBase = 380f;
@@ -302,6 +310,13 @@ namespace SessionReview
             // Owns its own hotkey + button strip; hidden during a trial, shown for review.
             if (GetComponent<RosOverlayVisibility>() == null)
                 gameObject.AddComponent<RosOverlayVisibility>();
+
+            meshyGenerator = GetComponent<GenerateModel>();
+            if (meshyGenerator == null)
+                meshyGenerator = gameObject.AddComponent<GenerateModel>();
+
+            meshyGenerator.Completed -= OnMeshyGenerateComplete;
+            meshyGenerator.Completed += OnMeshyGenerateComplete;
         }
 
         void Start()
@@ -353,6 +368,8 @@ namespace SessionReview
             }
             if (rewindController != null)
                 rewindController.PlaybackReachedEnd -= HandleReviewPlaybackReachedEnd;
+            if (meshyGenerator != null)
+                meshyGenerator.Completed -= OnMeshyGenerateComplete;
             if (Instance == this)
                 Instance = null;
         }
@@ -1784,6 +1801,7 @@ namespace SessionReview
         {
             EnsureWorldBuildingStyles();
             worldBuildingAddObjectsHeaderHeight = ComputeWorldBuildingAddObjectsHeaderHeight(GetWorldBuildingSidePanelWidth());
+            EnsureWorldBuildingSpawnLibraryCurrent();
 
             GetWorldBuildingSidePanelRects(
                 out Rect generateRect,
@@ -1793,9 +1811,12 @@ namespace SessionReview
             IReadOnlyList<WorldBuildingSpawnUiRow> objectRows = WorldBuildingSpawnLibrary.LastObjectUiRows;
             IReadOnlyList<WorldBuildingSpawnUiRow> characterRows = WorldBuildingSpawnLibrary.LastCharacterUiRows;
 
+            int previousDepth = GUI.depth;
+            GUI.depth = -1000;
             DrawWorldBuildingGenerateObjectsPanel(generateRect);
             DrawWorldBuildingAddCharactersPanel(charactersRect, characterRows);
             DrawWorldBuildingAddObjectsPanel(objectsRect, objectRows);
+            GUI.depth = previousDepth;
         }
 
         private void DrawWorldBuildingAddObjectsPanel(Rect panelRect, IReadOnlyList<WorldBuildingSpawnUiRow> rows)
@@ -1810,6 +1831,20 @@ namespace SessionReview
 
             if (worldBuildingAddObjectsMinimized)
                 return;
+
+            if (rows == null || rows.Count == 0)
+            {
+                float s = WorldBuildingUiScale;
+                GUI.Label(
+                    new Rect(
+                        panelRect.x + 14f * s,
+                        panelRect.y + GetWorldBuildingAddObjectsHeaderHeight() + 12f * s,
+                        panelRect.width - 28f * s,
+                        64f * s),
+                    "No object prefabs registered.\nExpected assets under Resources/WorldBuildingSpawns with optional thumbnails in Resources/WorldBuildingUI.",
+                    worldBuildingBodyStyle);
+                return;
+            }
 
             DrawWorldBuildingSpawnCardGrid(
                 panelRect,
@@ -1932,12 +1967,15 @@ namespace SessionReview
 
             float s = WorldBuildingUiScale;
             int rowCount = (totalCards + WorldBuildingSpawnPaletteCols - 1) / WorldBuildingSpawnPaletteCols;
-            float scrollAreaMin = 120f * s;
+            float scrollAreaMin = WorldBuildingSpawnCardPanelMinScrollHeight;
             float scrollAreaMax = Mathf.Min(280f * s, ReviewUiScale.Height * 0.38f);
             float scrollInnerHeight = rowCount * (WorldBuildingSpawnPaletteCardHeight + WorldBuildingSpawnPaletteCardGap)
                                       + WorldBuildingSpawnPaletteCardGap;
+            float availableHeight = panelRect.height - headerHeight - 16f * s;
             float scrollViewportH = Mathf.Clamp(scrollInnerHeight, scrollAreaMin, scrollAreaMax);
-            scrollViewportH = Mathf.Min(scrollViewportH, Mathf.Max(0f, panelRect.height - headerHeight - 16f * s));
+            scrollViewportH = Mathf.Min(scrollViewportH, Mathf.Max(0f, availableHeight));
+            if (scrollViewportH < scrollAreaMin && availableHeight >= scrollAreaMin)
+                scrollViewportH = scrollAreaMin;
             if (scrollViewportH <= 0f)
                 return;
 
@@ -1978,17 +2016,126 @@ namespace SessionReview
             float innerW = panelRect.width - pad * 2f;
             float y = panelRect.y + WorldBuildingSidePanelHeaderHeight + 6f * s;
 
-            GUI.Label(new Rect(panelRect.x + pad, y, innerW, 22f * s), "Describe an object (placeholder):", worldBuildingBodyStyle);
+            if (runtimeEditorManager != null)
+                EnsureWorldBuildingSpawnPrefabsConfigured();
+
+            GUI.Label(new Rect(panelRect.x + pad, y, innerW, 22f * s), "Describe an object:", worldBuildingBodyStyle);
             y += 26f * s;
 
             aiGenerationPrompt = GUI.TextField(new Rect(panelRect.x + pad, y, innerW, 26f * s), aiGenerationPrompt ?? string.Empty, worldBuildingTextFieldStyle);
             y += 34f * s;
 
-            if (GUI.Button(new Rect(panelRect.x + pad, y, innerW, 32f * s), "Add Cardboard Box", worldBuildingButtonStyle))
+            bool canRunMeshyAction = !IsMeshyModelLoading();
+
+            GUI.enabled = canRunMeshyAction;
+            if (GUI.Button(new Rect(panelRect.x + pad, y, innerW, 32f * s), "Generate Object", worldBuildingButtonStyle))
+                GenerateObjectFromPrompt();
+            GUI.enabled = true;
+
+            if (IsMeshyModelLoading())
             {
-                Debug.Log($"[WorldBuilding/AI] Placeholder clicked. Prompt='{aiGenerationPrompt}'");
-                GeneratePlaceholderObject();
+                y += 38f * s;
+                GUI.Label(new Rect(panelRect.x + pad, y, innerW, WorldBuildingGenerateObjectsLoadingLabelHeight), "Loading...", worldBuildingBodyStyle);
             }
+        }
+
+        private bool IsMeshyModelLoading()
+        {
+            return meshyGlbImportInProgress
+                || (meshyGenerator != null && meshyGenerator.IsGenerating);
+        }
+
+        private void GenerateObjectFromPrompt()
+        {
+            Debug.Log("[GenerateModel] Generate Object button clicked.");
+
+            string prompt = (aiGenerationPrompt ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(prompt))
+            {
+                Debug.LogWarning("[GenerateModel] Text field is empty — enter a description first.");
+                return;
+            }
+
+            string localPath = MeshyGlbSceneImporter.GetSavedGlbPath(prompt);
+            if (File.Exists(localPath))
+            {
+                Debug.Log($"[GenerateModel] Saved GLB found — importing instead of generating: {localPath}");
+                StartImportSavedGlb(localPath, prompt);
+                return;
+            }
+
+            if (meshyGenerator == null)
+            {
+                Debug.LogError("[GenerateModel] No GenerateModel component found on SessionReviewManager GameObject.");
+                return;
+            }
+
+            Debug.Log($"[GenerateModel] No saved GLB — calling Meshy for \"{prompt}\"");
+            meshyGenerator.Generate(prompt);
+        }
+
+        private void OnMeshyGenerateComplete(GenerateModelResult result)
+        {
+            if (result == null)
+                return;
+
+            if (!result.Success)
+            {
+                Debug.LogWarning($"[GenerateModel] Generation failed — not importing: {result.Error}");
+                return;
+            }
+
+            if (!inWorldBuildingMode)
+            {
+                Debug.LogWarning("[GenerateModel] Model ready but World Building is not active — GLB saved to disk only.");
+                return;
+            }
+
+            if (string.IsNullOrEmpty(result.LocalGlbPath) || !File.Exists(result.LocalGlbPath))
+            {
+                Debug.LogError($"[GenerateModel] GLB missing after generation: {result.LocalGlbPath}");
+                return;
+            }
+
+            StartImportSavedGlb(result.LocalGlbPath, result.Prompt);
+        }
+
+        private void StartImportSavedGlb(string localGlbPath, string displayName)
+        {
+            if (meshyGlbImportInProgress)
+            {
+                Debug.LogWarning("[GenerateModel] GLB import already in progress.");
+                return;
+            }
+
+            if (runtimeEditorManager == null)
+                runtimeEditorManager = RuntimeEditorManager.Instance;
+
+            if (runtimeEditorManager == null)
+            {
+                Debug.LogError("[GenerateModel] RuntimeEditorManager not found — cannot spawn imported GLB.");
+                return;
+            }
+
+            if (!runtimeEditorManager.isEditorActive)
+            {
+                Debug.LogError("[GenerateModel] Editor mode is not active — enter World Building first.");
+                return;
+            }
+
+            meshyGlbImportInProgress = true;
+            Debug.Log($"[GenerateModel] Importing saved GLB: {localGlbPath}");
+            StartCoroutine(ImportSavedGlbCoroutine(localGlbPath, displayName));
+        }
+
+        private IEnumerator ImportSavedGlbCoroutine(string localGlbPath, string displayName)
+        {
+            yield return MeshyGlbSceneImporter.ImportAndSpawn(
+                localGlbPath,
+                displayName,
+                runtimeEditorManager,
+                error => Debug.LogError($"[GenerateModel] Import/spawn failed: {error}"));
+            meshyGlbImportInProgress = false;
         }
 
         private float GetWorldBuildingSpawnCardPanelHeight(
@@ -2005,7 +2152,7 @@ namespace SessionReview
 
             float s = WorldBuildingUiScale;
             int rowCount = (totalCards + WorldBuildingSpawnPaletteCols - 1) / WorldBuildingSpawnPaletteCols;
-            float scrollAreaMin = 120f * s;
+            float scrollAreaMin = WorldBuildingSpawnCardPanelMinScrollHeight;
             float scrollAreaMax = Mathf.Min(280f * s, ReviewUiScale.Height * 0.38f);
             float scrollInnerHeight = rowCount * (WorldBuildingSpawnPaletteCardHeight + WorldBuildingSpawnPaletteCardGap)
                                       + WorldBuildingSpawnPaletteCardGap;
@@ -2013,12 +2160,29 @@ namespace SessionReview
             return expandedHeaderHeight + scrollViewportH + 16f * s;
         }
 
+        private static float GetWorldBuildingSpawnCardPanelMinimumExpandedHeight(float expandedHeaderHeight)
+        {
+            return expandedHeaderHeight + WorldBuildingSpawnCardPanelMinScrollHeight + 16f * WorldBuildingUiScale;
+        }
+
+        private void EnsureWorldBuildingSpawnLibraryCurrent()
+        {
+            if (runtimeEditorManager != null)
+                EnsureWorldBuildingSpawnPrefabsConfigured();
+            else
+                WorldBuildingSpawnLibrary.RefreshFromResources();
+        }
+
         private float GetWorldBuildingGenerateObjectsPanelHeight()
         {
             if (worldBuildingGenerateObjectsMinimized)
                 return WorldBuildingSidePanelHeaderHeight;
 
-            return WorldBuildingSidePanelHeaderHeight + WorldBuildingGenerateObjectsBodyHeight + 12f * WorldBuildingUiScale;
+            float bodyHeight = WorldBuildingGenerateObjectsBodyHeight;
+            if (IsMeshyModelLoading())
+                bodyHeight += WorldBuildingGenerateObjectsLoadingLabelHeight;
+
+            return WorldBuildingSidePanelHeaderHeight + bodyHeight + 12f * WorldBuildingUiScale;
         }
 
         private static float GetWorldBuildingSidePanelWidth()
@@ -2031,31 +2195,6 @@ namespace SessionReview
         {
             float margin = 24f * WorldBuildingUiScale;
             return new Rect(margin, margin, WorldBuildingOverlayWidth, worldBuildingOverlayHeight);
-        }
-
-        // Placeholder until real AI generation is wired up: spawns a cardboard box exactly like
-        // clicking "Add Cardboard Box" in the palette. Looks the prop up by prefab name because
-        // WorldBuildingSpawnLibrary assigns spawn ids dynamically.
-        private void GeneratePlaceholderObject()
-        {
-            if (runtimeEditorManager == null)
-                return;
-
-            IReadOnlyList<SpawnableObject> spawnables = WorldBuildingSpawnLibrary.LastSpawnables;
-            if (spawnables == null)
-                return;
-
-            foreach (SpawnableObject spawnable in spawnables)
-            {
-                if (spawnable?.prefab != null &&
-                    spawnable.prefab.name.ToLower().Contains("cardboard"))
-                {
-                    runtimeEditorManager.SpawnObject(spawnable.id);
-                    return;
-                }
-            }
-
-            Debug.LogWarning("[WorldBuilding/AI] Cardboard box prefab not found in WorldBuildingSpawns.");
         }
 
         private bool IsMouseOverWorldBuildingUi()
@@ -2081,6 +2220,8 @@ namespace SessionReview
 
         private bool ContainsWorldBuildingSidePanel(Vector2 guiPoint)
         {
+            EnsureWorldBuildingSpawnLibraryCurrent();
+
             GetWorldBuildingSidePanelRects(
                 out Rect generateRect,
                 out Rect charactersRect,
@@ -2115,16 +2256,21 @@ namespace SessionReview
             ReducePanelHeightForOverflow(
                 ref objectsHeight,
                 worldBuildingAddObjectsMinimized,
-                GetWorldBuildingAddObjectsHeaderHeight(),
+                GetWorldBuildingSpawnCardPanelMinimumExpandedHeight(GetWorldBuildingAddObjectsHeaderHeight()),
                 ref overflow);
             ReducePanelHeightForOverflow(
                 ref charactersHeight,
                 worldBuildingAddCharactersMinimized,
+                GetWorldBuildingSpawnCardPanelMinimumExpandedHeight(WorldBuildingSidePanelHeaderHeight),
+                ref overflow);
+            ReducePanelHeightForOverflow(
+                ref generateHeight,
+                worldBuildingGenerateObjectsMinimized,
                 WorldBuildingSidePanelHeaderHeight,
                 ref overflow);
 
+            float x = GetWorldBuildingSidePanelX(panelWidth);
             float yBottom = ReviewUiScale.Height - WorldBuildingSidePanelMargin;
-            float x = ReviewUiScale.Width - panelWidth - WorldBuildingSidePanelMargin;
 
             generateRect = new Rect(x, yBottom - generateHeight, panelWidth, generateHeight);
 
@@ -2133,6 +2279,11 @@ namespace SessionReview
 
             yBottom = charactersRect.y - WorldBuildingSidePanelGap;
             objectsRect = new Rect(x, yBottom - objectsHeight, panelWidth, objectsHeight);
+        }
+
+        private static float GetWorldBuildingSidePanelX(float panelWidth)
+        {
+            return ReviewUiScale.Width - panelWidth - WorldBuildingSidePanelMargin;
         }
 
         private static void ReducePanelHeightForOverflow(
@@ -2165,7 +2316,12 @@ namespace SessionReview
             DrawWorldBuildingSpawnThumbnail(previewRect, thumbnail);
 
             if (GUI.Button(new Rect(rect.x + pad, rect.yMax - buttonHeight - pad, rect.width - pad * 2f, buttonHeight), $"Add {label}", worldBuildingButtonStyle))
-                runtimeEditorManager?.SpawnObject(spawnId);
+            {
+                if (runtimeEditorManager == null)
+                    runtimeEditorManager = RuntimeEditorManager.Instance;
+                if (runtimeEditorManager != null && !string.IsNullOrEmpty(spawnId))
+                    runtimeEditorManager.SpawnObject(spawnId);
+            }
         }
 
         private static void DrawWorldBuildingSpawnThumbnail(Rect rect, Texture2D thumbnail)
@@ -2401,7 +2557,7 @@ namespace SessionReview
 
             showPostTrialPrompt = false;
             showReviewCompletionPrompt = false;
-            worldBuildingAddObjectsMinimized = true;
+            worldBuildingAddObjectsMinimized = false;
             worldBuildingAddCharactersMinimized = true;
             worldBuildingGenerateObjectsMinimized = true;
             inWorldBuildingMode = true;

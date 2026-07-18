@@ -98,6 +98,10 @@ namespace SessionReview
 
     public class TrialDataArchive : MonoBehaviour
     {
+        [Tooltip("Write the review ROI export (JSON + top-down PNG) into each trial folder when the trial auto-saves, so the ROI survives even if it is never exported manually from review.")]
+        [SerializeField] private bool autoSaveRoiWithTrial = true;
+        [SerializeField] private ReviewExportSettings autoSaveRoiSettings = new ReviewExportSettings();
+
         public List<TrialRecord> Trials { get; private set; } = new List<TrialRecord>();
 
         private SessionTracker sessionTracker;
@@ -172,7 +176,34 @@ namespace SessionReview
             if (controlModeLog != null)
                 controlModeLog.SaveToFile(Path.Combine(trialFolder, "control_modes"), record.startTime, record.endTime);
 
+            SaveTrialRoi(record, trialFolder);
+
             SaveTrials();
+        }
+
+        /// <summary>
+        /// Auto-save the review ROI (JSON + top-down PNG) into the trial's own folder so it
+        /// is kept even when nobody presses the export key in review. Failures only log:
+        /// the ROI is derived data and must never block the trial save itself.
+        /// </summary>
+        private void SaveTrialRoi(TrialRecord record, string trialFolder)
+        {
+            if (!autoSaveRoiWithTrial || trajectoryRecorder == null || string.IsNullOrEmpty(trialFolder))
+                return;
+
+            try
+            {
+                ReviewRoiExporter.ExportTrialRoi(
+                    record,
+                    trajectoryRecorder.BuildSnapshot(),
+                    trajectoryRecorder.RecordingStartTime,
+                    autoSaveRoiSettings,
+                    trialFolder);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[SessionReview] Auto ROI save failed for {record.trialName}: {ex}");
+            }
         }
 
         private MetricsSnapshot CaptureMetrics()
@@ -386,6 +417,7 @@ namespace SessionReview
                     trajectoryRecorder.SaveTrialTrajectories(latestTrialFolder, record);
                 if (controlModeLog != null)
                     controlModeLog.SaveToFile(Path.Combine(latestTrialFolder, "control_modes"), record.startTime, record.endTime);
+                SaveTrialRoi(record, latestTrialFolder);
             }
 
             SaveTrials();

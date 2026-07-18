@@ -195,6 +195,8 @@ Trial ends (task completes / timeout)
      -> creates per-trial folder
      -> calls LiveTrajectoryRecorder.SaveTrialTrajectories()
      -> saves trial_info.json, control_modes.ctrlmode
+     -> auto-saves ROI export (review_roi_export.json + roi_topdown.png)
+        into the same trial folder (SaveTrialRoi; toggle: autoSaveRoiWithTrial)
 
 User presses Tab:
   -> SessionReviewManager.EnterRewindMode()

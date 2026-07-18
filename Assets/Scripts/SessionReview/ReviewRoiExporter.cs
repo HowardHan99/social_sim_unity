@@ -168,6 +168,17 @@ namespace SessionReview
 
         public static string ExportTrialRoi(TrialRecord trial, StateRecording recording, float recordingTimeOffset, ReviewExportSettings settings)
         {
+            return ExportTrialRoi(trial, recording, recordingTimeOffset, settings, null);
+        }
+
+        /// <summary>
+        /// Export the trial ROI into <paramref name="outputFolder"/>. Pass null to create a
+        /// fresh timestamped folder under SessionLogs/ReviewExports (manual F7 export);
+        /// pass the trial's own save folder to auto-save alongside trial_info.json, where
+        /// re-exports (e.g. FinalizeLatestTrial) overwrite the fixed file names in place.
+        /// </summary>
+        public static string ExportTrialRoi(TrialRecord trial, StateRecording recording, float recordingTimeOffset, ReviewExportSettings settings, string outputFolder)
+        {
             if (trial == null || recording == null)
                 throw new ArgumentNullException("trial/recording");
 
@@ -178,7 +189,9 @@ namespace SessionReview
                 throw new InvalidOperationException("Could not compute trajectory envelope for the selected trial.");
 
             Bounds roi = ApplySettings(envelope, settings);
-            string exportFolder = CreateExportFolder(trial);
+            string exportFolder = string.IsNullOrEmpty(outputFolder) ? CreateExportFolder(trial) : outputFolder;
+            if (!Directory.Exists(exportFolder))
+                Directory.CreateDirectory(exportFolder);
 
             var data = new ReviewExportData
             {
