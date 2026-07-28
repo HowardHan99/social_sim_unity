@@ -23,7 +23,7 @@ public class RuntimeEditorManager : MonoBehaviour
     [Tooltip("Key to toggle runtime editor mode")]
     public KeyCode toggleKey = KeyCode.E;
 
-    [Tooltip("When true, an external system (e.g. Session Review world building) owns enter/exit. The editor will NOT self-toggle on its hotkey and ESC only deselects — so ESC can't tear down the external camera/flow.")]
+    [Tooltip("When true, an external system (e.g. Session Review world building) owns enter/exit. The editor will NOT self-toggle on its hotkey and ESC only deselects —so ESC can't tear down the external camera/flow.")]
     public bool externalLifecycleControl = false;
 
     [Header("Editable Objects")]
@@ -32,6 +32,9 @@ public class RuntimeEditorManager : MonoBehaviour
 
     [Tooltip("Manually assign objects to edit (optional)")]
     public List<GameObject> editableObjects = new List<GameObject>();
+
+    [Tooltip("Lock the robot and pedestrian avatars during world-building so only the start/end markers (and props) can be dragged.")]
+    public bool lockRobotAndPedestrians = true;
 
     [Header("Raycast Settings")]
     [Tooltip("Layers that can be selected. Set to 'Everything' to select all layers, or customize in Inspector")]
@@ -333,6 +336,12 @@ public class RuntimeEditorManager : MonoBehaviour
             HandleObjectSelection();
             HandleBoxSelection();
 
+            // An IMGUI text field has focus (e.g. the "Save World" name box): the letters being
+            // typed are text, not editor hotkeys —'g' must not rebind the robot goal and
+            // Delete must not delete the selection.
+            if (GUIUtility.keyboardControl != 0)
+                return;
+
             bool ctrl = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
             if (ctrl && Input.GetKeyDown(KeyCode.Z))
             {
@@ -361,7 +370,7 @@ public class RuntimeEditorManager : MonoBehaviour
     {
         if (IsTaskMarkerObject(obj))
         {
-            _clickDebug = $"'{obj.name}' is a start/goal marker itself — it can't be bound as the robot goal.";
+            _clickDebug = $"'{obj.name}' is a start/goal marker itself —it can't be bound as the robot goal.";
             return;
         }
 
@@ -382,7 +391,7 @@ public class RuntimeEditorManager : MonoBehaviour
         }
         else
         {
-            _clickDebug = $"'{obj.name}' can't be the robot goal — see the Console for why.";
+            _clickDebug = $"'{obj.name}' can't be the robot goal —see the Console for why.";
         }
     }
 
@@ -448,6 +457,10 @@ public class RuntimeEditorManager : MonoBehaviour
         // Show in the 3D scene which objects are moveable.
         RefreshMoveableHighlights(true);
 
+        // World-building is where the user positions the pedestrian's start/end markers, so make
+        // sure they're visible here even if a robot trial (or load) had hidden them.
+        SEAN.Scenario.Agents.RandomAvatar.SetAllPedestrianMarkersVisible(true);
+
         if (spawnCanvas != null)
             spawnCanvas.gameObject.SetActive(!suppressSpawnCanvas);
 
@@ -471,6 +484,10 @@ public class RuntimeEditorManager : MonoBehaviour
 
         // Hide the moveable outlines.
         RefreshMoveableHighlights(false);
+
+        // Leaving world-building returns the pedestrian markers to their default hidden state; a
+        // pedestrian trial re-shows them via RandomAvatar.ApplyTrialRoute.
+        SEAN.Scenario.Agents.RandomAvatar.SetAllPedestrianMarkersVisible(false);
 
         // Cleanup all editors
         CleanupAllEditors();
@@ -532,6 +549,16 @@ public class RuntimeEditorManager : MonoBehaviour
 
         RegisterTaskStartGoalMarkers();
 
+        // Lock the robot and pedestrian avatars during world-building: the user only repositions the
+        // start/end markers (and props), so those two prefabs must not be draggable. Task markers
+        // are always kept editable (a marker never carries a Robot or INavigable component).
+        if (lockRobotAndPedestrians)
+        {
+            editableObjects.RemoveAll(o => o != null && !taskMarkerObjects.Contains(o) &&
+                (o.GetComponent<SEAN.Scenario.Robot>() != null ||
+                 o.GetComponentInChildren<IVI.INavigable>(true) != null));
+        }
+
         if (editableObjects.Count == 0)
         {
             // Debug.LogWarning("No editable objects found! Assign objects manually or set a tag.");
@@ -544,7 +571,7 @@ public class RuntimeEditorManager : MonoBehaviour
 
     /// <summary>
     /// Registers the active task's start/goal marker ROOTS ("Start"/"Target" under StartAndGoal) as
-    /// editable, so a click on a child flag mesh selects and drags the whole marker — moving the
+    /// editable, so a click on a child flag mesh selects and drags the whole marker —moving the
     /// marker root is what actually feeds the published ROS goal, a dragged child flag does not.
     /// </summary>
     void RegisterTaskStartGoalMarkers()
@@ -558,7 +585,7 @@ public class RuntimeEditorManager : MonoBehaviour
         }
         catch (System.Exception)
         {
-            // Scene without a (valid) SEAN rig — markers simply aren't available.
+            // Scene without a (valid) SEAN rig —markers simply aren't available.
             return;
         }
 
@@ -569,6 +596,28 @@ public class RuntimeEditorManager : MonoBehaviour
         RegisterTaskMarker(task.robotGoal);
         RegisterTaskMarker(task.playerStart);
         RegisterTaskMarker(task.playerGoal);
+
+        RegisterPwdSpawnerMarkers();
+    }
+
+    /// <summary>
+    /// In robot-controlled scenes the pedestrian's goal is NOT the task's playerGoal:
+    /// RandomAvatar resolves its startObjectName/goalObjectName scene objects by name and
+    /// bakes their positions into the spawned PWD. Register those markers as editable (with
+    /// the same marker protections) so the pedestrian goal can be dragged like the robot goal.
+    /// </summary>
+    void RegisterPwdSpawnerMarkers()
+    {
+        foreach (var spawner in FindObjectsOfType<SEAN.Scenario.Agents.RandomAvatar>(true))
+        {
+            if (spawner == null)
+                continue;
+
+            RegisterTaskMarker(SEAN.Scenario.Agents.RandomAvatar.FindSceneObjectByName(spawner.startObjectName));
+            RegisterTaskMarker(SEAN.Scenario.Agents.RandomAvatar.FindSceneObjectByName(spawner.goalObjectName));
+            RegisterTaskMarker(SEAN.Scenario.Agents.RandomAvatar.FindSceneObjectByName(spawner.robotTrialStartObjectName));
+            RegisterTaskMarker(SEAN.Scenario.Agents.RandomAvatar.FindSceneObjectByName(spawner.robotTrialGoalObjectName));
+        }
     }
 
     void RegisterTaskMarker(GameObject marker)
@@ -582,6 +631,14 @@ public class RuntimeEditorManager : MonoBehaviour
             editableObjects.Add(marker);
             EnsureObjectLayerIsSelectable(marker);
         }
+
+        // Snapshot the pristine pose right away (not just on first selection) so scenario
+        // saving records marker moves, and flag it: marker active state is engine-managed,
+        // so only the POSE may ever be recorded —never a "deleted" delta.
+        EnsureSceneObjectBaseline(marker);
+        WorldBuildingSceneObjectBaseline baseline = marker.GetComponent<WorldBuildingSceneObjectBaseline>();
+        if (baseline != null)
+            baseline.isProtectedMarker = true;
     }
 
     /// <summary>True when the object is a task start/goal marker root or lives under one.</summary>
@@ -613,7 +670,18 @@ public class RuntimeEditorManager : MonoBehaviour
             if (mainCamera == null)
             {
                 Debug.LogError("MainCamera is NULL! Cannot perform raycast.");
-                _clickDebug = "ERROR: raycast camera is NULL — selection cannot work.";
+                _clickDebug = "ERROR: raycast camera is NULL —selection cannot work.";
+                return;
+            }
+
+            // The gizmo owns this click. The Gizmo layer is excluded from selectableLayers (above),
+            // so otherwise the selection ray passes straight through the handle being grabbed, hits
+            // whatever prop happens to sit behind it, and selects that instead —disabling the
+            // RuntimeEditor mid-drag. Whether a prop was behind the handle is what made the gizmo
+            // fail only "sometimes".
+            if (currentEditor != null && currentEditor.enabled && currentEditor.WouldConsumeClick())
+            {
+                _clickDebug = $"Click consumed by the {currentSelectedObject?.name} gizmo.";
                 return;
             }
 
@@ -635,12 +703,12 @@ public class RuntimeEditorManager : MonoBehaviour
                 if (clickedObject.layer == LayerMask.NameToLayer("UI"))
                 {
                     Debug.Log("[Raycast] Pointer is over UI. Ignoring click.");
-                    _clickDebug = $"Hit '{clickedObject.name}' on UI layer — ignored.";
+                    _clickDebug = $"Hit '{clickedObject.name}' on UI layer —ignored.";
                     return;
                 }
 
                 GameObject resolved = ResolveEditableObject(clickedObject);
-                // Neglect static objects (ground, buildings, scenery) — they aren't draggable props.
+                // Neglect static objects (ground, buildings, scenery) —they aren't draggable props.
                 bool staticBlocked = clickedObject.isStatic || (resolved != null && resolved.isStatic);
                 if (resolved != null && !staticBlocked)
                     editableObject = resolved;
@@ -701,7 +769,7 @@ public class RuntimeEditorManager : MonoBehaviour
             }
             else if (!externalLifecycleControl)
             {
-                // If no object selected, exit editor mode — but only when we own the lifecycle.
+                // If no object selected, exit editor mode —but only when we own the lifecycle.
                 // Under external control (world building), ESC must not tear down the editor/camera.
                 SetEditorMode(false);
             }
@@ -749,7 +817,7 @@ public class RuntimeEditorManager : MonoBehaviour
             return;
         }
 
-        // Mouse released — apply if it was an actual drag.
+        // Mouse released —apply if it was an actual drag.
         if (Input.GetMouseButtonUp(0))
         {
             if (_isBoxSelecting)
@@ -885,7 +953,7 @@ public class RuntimeEditorManager : MonoBehaviour
     /// <summary>
     /// Returns the front-most moveable object (registered editable, or any TrackedObstacle prop)
     /// whose world-space renderer bounds the cursor ray passes through. Used as a fallback when the
-    /// precise collider raycast misses — e.g. clicking a transparent region of a PNG sprite/quad
+    /// precise collider raycast misses —e.g. clicking a transparent region of a PNG sprite/quad
     /// whose collider is missing or tight-fitted to opaque pixels. Returns null if none match.
     /// </summary>
     GameObject FindMoveableUnderCursor(Ray ray)
@@ -917,6 +985,25 @@ public class RuntimeEditorManager : MonoBehaviour
         return best;
     }
 
+    /// <summary>
+    /// A RuntimeEditor is meant to be added dynamically to a *selected* object (see SelectObject),
+    /// never authored onto the manager's own GameObject. A few scene assets have a stray
+    /// RuntimeEditor baked onto the RuntimeEdit object; activating the (normally inactive) manager
+    /// would run that stray component's Start() and spawn a free-floating translate gizmo anchored
+    /// to nothing. Disable any such stray component BEFORE activation so its Start()/OnEnable()
+    /// never run. Safe to call on an inactive GameObject and cheap enough to call every activation.
+    /// </summary>
+    public static void DisableStrayEditorComponents(GameObject managerObject)
+    {
+        if (managerObject == null)
+            return;
+        foreach (RuntimeEditor stray in managerObject.GetComponents<RuntimeEditor>())
+        {
+            if (stray != null)
+                stray.enabled = false;
+        }
+    }
+
     public void SelectObject(GameObject obj)
     {
         // Deselect previous object if any
@@ -924,6 +1011,10 @@ public class RuntimeEditorManager : MonoBehaviour
         {
             DeselectObject();
         }
+
+        // Selection precedes any gizmo move, so this snapshots the pre-edit pose of
+        // pre-existing scene objects for scenario saving.
+        EnsureSceneObjectBaseline(obj);
 
         currentSelectedObject = obj;
 
@@ -1032,7 +1123,7 @@ public class RuntimeEditorManager : MonoBehaviour
 
         Rect r = MakeScreenRect(_boxStartScreen, _boxEndScreen);
         // Convert mouse-space (bottom-left, y up, real pixels) to scaled GUI-space (top-left, y down).
-        float ui = SessionReview.ReviewUiScale.Value;
+        float ui = SessionReview.ReviewUiScale.Effective;
         Rect gui = new Rect(r.xMin / ui, (Screen.height - r.yMax) / ui, r.width / ui, r.height / ui);
 
         Color prev = GUI.color;
@@ -1448,6 +1539,17 @@ public class RuntimeEditorManager : MonoBehaviour
     //============= SPAWNING =============
     public void SpawnObject(string id)
     {
+        SpawnObject(id, null);
+    }
+
+    /// <summary>
+    /// Spawns a palette entry. For character prefabs <paramref name="dynamicAgentMode"/>
+    /// picks the mode: true = moving agent (SFAgent wandering the NavMesh), false = static
+    /// prop. Null keeps the legacy default (the random pedestrian walks, everything else is
+    /// static). Non-character prefabs ignore the mode.
+    /// </summary>
+    public void SpawnObject(string id, bool? dynamicAgentMode)
+    {
         if (!isEditorActive)
         {
             Debug.LogWarning("Editor mode is not active! Cannot spawn objects.");
@@ -1475,10 +1577,61 @@ public class RuntimeEditorManager : MonoBehaviour
             return;
         }
 
-        if (WorldBuildingSpawnLibrary.IsCharacterSpawnPrefab(spawnableObject.prefab.name))
+        string prefabName = spawnableObject.prefab.name;
+        bool isPedestrianPrefab = WorldBuildingSpawnLibrary.IsDynamicPedestrianPrefab(prefabName);
+        bool isCharacter = isPedestrianPrefab || WorldBuildingSpawnLibrary.IsCharacterSpawnPrefab(prefabName);
+        bool dynamicAgent = dynamicAgentMode ?? isPedestrianPrefab;
+
+        if (dynamicAgent && isPedestrianPrefab)
+        {
+            TagPlacedObject(spawnedObject, prefabName, null, null);
+
+            // A dynamic pedestrian keeps its navigation controllers and walks the NavMesh, so it
+            // must skip the passive-prop pipeline (which would strip them) and the TrackedObstacle
+            // tagging below (it is already published as a live TrackedAgent).
+            PrepareDynamicPedestrianSpawn(spawnedObject, spawnPosition);
+
+            Debug.Log($"Spawned dynamic pedestrian: {spawnedObject.name} at {spawnPosition}");
+            RegisterEditableObject(spawnedObject);
+            undoStack.Push(new SpawnAction(spawnedObject, this));
+            redoStack.Clear();
+            return;
+        }
+
+        if (dynamicAgent && isCharacter && PrepareDynamicCharacterSpawn(spawnedObject, spawnPosition, prefabName))
+        {
+            TagPlacedObject(spawnedObject, prefabName, null,
+                WorldBuildingSpawnLibrary.HumanizePrefabName(prefabName) + " (Moving)",
+                dynamicAgent: true);
+
+            Debug.Log($"Spawned dynamic character agent: {spawnedObject.name} at {spawnPosition}");
+            RegisterEditableObject(spawnedObject);
+            undoStack.Push(new SpawnAction(spawnedObject, this));
+            redoStack.Clear();
+            return;
+        }
+
+        // Static placement —also the fallback when a character rig can't drive an agent.
+        TagPlacedObject(
+            spawnedObject,
+            isPedestrianPrefab ? WorldBuildingSpawnLibrary.StaticPedestrianPaletteName : prefabName,
+            null,
+            isPedestrianPrefab ? WorldBuildingSpawnLibrary.StaticPedestrianDisplayName : null);
+
+        if (isCharacter)
+        {
+            // The static pedestrian must be forced through the character pipeline: its prefab
+            // name alone would route it to the prop path, leaving the SFAgent that RandomAvatar
+            // builds on Awake alive —and the "static" pedestrian would walk away.
             PrepareCharacterSpawnForWorldBuilding(spawnedObject, spawnPosition);
+        }
         else
+        {
+            // Props whose pivot is not at their base sink into / float above the ground
+            // when instantiated at the hit point; rest their bounds on it instead.
+            AlignSpawnedObjectToSpawnPoint(spawnedObject, spawnPosition);
             EnsureRootSelectionCollider(spawnedObject);
+        }
 
         if (spawnedObject.GetComponent<SEAN.Scenario.Obstacles.TrackedObstacle>() == null)
         {
@@ -1555,16 +1708,142 @@ public class RuntimeEditorManager : MonoBehaviour
         RaycastHit hit;
         if (Physics.Raycast(ray, out hit, maxRaycastDistance, selectableLayers))
         {
-            return hit.point;
+            return DropSpawnPointToGround(hit.point);
         }
 
         // Top-down / ortho: ray usually points into the scene; avoid using world-space forward alone (can miss the ground).
-        return ray.GetPoint(spawnDistance);
+        return DropSpawnPointToGround(ray.GetPoint(spawnDistance));
+    }
+
+    /// <summary>
+    /// Drops a candidate spawn point onto the surface below it. The screen-center ray can
+    /// hit a wall face or miss everything (mid-air fallback), and RuntimeEditor locks Y
+    /// after spawn (lockVerticalMovement), so a floating spawn could never be corrected.
+    /// </summary>
+    Vector3 DropSpawnPointToGround(Vector3 point)
+    {
+        // Start slightly above the candidate so a point already on a surface re-hits it.
+        Vector3 origin = point + Vector3.up * 2f;
+        if (Physics.Raycast(origin, Vector3.down, out RaycastHit groundHit, maxRaycastDistance, selectableLayers))
+            return groundHit.point;
+        return point;
     }
 
     void PrepareCharacterSpawnForWorldBuilding(GameObject obj, Vector3 spawnPoint)
     {
         AlignSpawnedObjectToSpawnPoint(obj, spawnPoint);
+        PrepareCharacterPropComponents(obj);
+    }
+
+    /// <summary>
+    /// Places a spawned pedestrian agent so it walks the baked NavMesh instead of becoming a
+    /// passive prop: snaps it onto the NavMesh and attaches the wander driver. Unlike
+    /// <see cref="PrepareCharacterSpawnForWorldBuilding"/> this preserves the SFAgent/TrackedAgent
+    /// controllers that RandomAvatar builds on the avatar child. Needs a baked NavMesh in the
+    /// active scene (the standalone RuntimeEditor scene has none; sidewalk / SEAN scenes do).
+    /// </summary>
+    void PrepareDynamicPedestrianSpawn(GameObject obj, Vector3 spawnPoint)
+    {
+        Vector3 pos = spawnPoint;
+        if (UnityEngine.AI.NavMesh.SamplePosition(spawnPoint, out UnityEngine.AI.NavMeshHit hit, 5f, UnityEngine.AI.NavMesh.AllAreas))
+            pos = hit.position;
+        obj.transform.position = pos;
+
+        if (obj.GetComponent<WorldBuildingWanderPedestrian>() == null)
+            obj.AddComponent<WorldBuildingWanderPedestrian>();
+
+        // Every spawn shares the prefab's "(Clone)" name, which SessionTracker would use
+        // as the trajectory-log id —two pedestrians would merge into one timeline. Use
+        // the same "<name>_<8-hex-instance>" convention as TrackedObject ids so review
+        // can strip the suffix when matching across runs.
+        obj.name = $"WB_Pedestrian_{obj.GetInstanceID():x8}";
+
+        // Keep the World Building UI label human-readable despite the unique name.
+        var marker = obj.GetComponent<WorldBuildingPlacedObject>();
+        if (marker != null && string.IsNullOrEmpty(marker.displayName))
+            marker.displayName = "Pedestrian (Moving)";
+    }
+
+    /// <summary>
+    /// Turns a spawned character prefab into a moving background agent: cleans off the
+    /// player-control components, swaps the Animator onto the shared walking controller
+    /// (the same Forward/Strafe/Idling blend tree RandomAvatar assigns to walking players
+    /// and background agents), attaches an IVI social-force agent to the rig and the wander
+    /// driver to the root. Returns false —leaving the object untouched —when the prefab
+    /// has no usable rig (no Animator / no SkinnedMeshRenderer, which SEAN.Agents.Base
+    /// requires); the caller then falls back to the static prop pipeline.
+    /// </summary>
+    bool PrepareDynamicCharacterSpawn(GameObject obj, Vector3 spawnPoint, string prefabName)
+    {
+        Animator animator = obj.GetComponentInChildren<Animator>(true);
+        // Base.Start reads GetComponentInChildren<SkinnedMeshRenderer>() (active only) for the
+        // capsule height, so gate on the same lookup or the agent would throw on its first frame.
+        if (animator == null || animator.GetComponentInChildren<SkinnedMeshRenderer>() == null)
+        {
+            Debug.LogWarning($"[RuntimeEditor] '{prefabName}' has no Animator/SkinnedMeshRenderer rig; spawning it as a static prop instead of a moving agent.");
+            return false;
+        }
+
+        Vector3 pos = spawnPoint;
+        if (UnityEngine.AI.NavMesh.SamplePosition(spawnPoint, out UnityEngine.AI.NavMeshHit hit, 5f, UnityEngine.AI.NavMesh.AllAreas))
+            pos = hit.position;
+        obj.transform.position = pos;
+
+        // Same passive cleanup as the prop pipeline, minus collider/physics freezing: the
+        // stripped controllers (manual wheelchair, CharacterController, any pre-built agents)
+        // would fight the SFAgent for the same rig.
+        DisableEmbeddedViewCameras(obj);
+        DisableSpawnedWorldUi(obj);
+        StripSpawnedAgentControllers(obj);
+
+        // Wheelchair characters use the PWD (seated) agent + animation set, like RandomAvatar's
+        // PWDSF background agents; everyone else gets the standard walking pair.
+        bool wheelchair = prefabName != null && prefabName.ToLowerInvariant().Contains("wheelchair");
+        SEAN.Scenario.Agents.RandomAvatar pedestrianTemplate = LoadPedestrianTemplate();
+        RuntimeAnimatorController walkController = null;
+        if (pedestrianTemplate != null)
+            walkController = wheelchair ? pedestrianTemplate.pwdAnimationController : pedestrianTemplate.animationController;
+
+        if (walkController != null)
+        {
+            animator.runtimeAnimatorController = walkController;
+        }
+        else
+        {
+            Debug.LogWarning($"[RuntimeEditor] No shared walking animation controller found for '{prefabName}'; the agent will move but may not animate correctly.");
+        }
+
+        // The agent must sit on the Animator's GameObject: Base only enables root motion (the
+        // thing that actually translates the agent) when the Animator is on the same object.
+        if (wheelchair)
+            animator.gameObject.AddComponent<IVI.SFPWDAgent>();
+        else
+            animator.gameObject.AddComponent<IVI.SFAgent>();
+
+        if (obj.GetComponent<WorldBuildingWanderPedestrian>() == null)
+            obj.AddComponent<WorldBuildingWanderPedestrian>();
+
+        // Same unique-name convention as the random pedestrian so SessionTracker logs each
+        // agent under its own trajectory id (shared "(Clone)" names would merge timelines).
+        obj.name = $"WB_Pedestrian_{obj.GetInstanceID():x8}";
+        return true;
+    }
+
+    /// <summary>
+    /// The RocketboxRandomAnimatedAgent prefab's RandomAvatar, used as the source of the
+    /// shared walking / PWD animation controllers for character agents.
+    /// </summary>
+    static SEAN.Scenario.Agents.RandomAvatar LoadPedestrianTemplate()
+    {
+        GameObject prefab = Resources.Load<GameObject>(
+            "Prefabs/" + WorldBuildingSpawnLibrary.DynamicPedestrianPrefabName);
+        return prefab != null ? prefab.GetComponent<SEAN.Scenario.Agents.RandomAvatar>() : null;
+    }
+
+    /// <summary>Turns a spawned character prefab into a passive prop (also used when a saved
+    /// scenario restores one at its exact recorded pose, where re-alignment is unwanted).</summary>
+    void PrepareCharacterPropComponents(GameObject obj)
+    {
         EnsureRootSelectionCollider(obj);
         DisableEmbeddedViewCameras(obj);
         DisableSpawnedWorldUi(obj);
@@ -1573,14 +1852,195 @@ public class RuntimeEditorManager : MonoBehaviour
         StripSpawnedAgentControllers(obj);
     }
 
+    /// <summary>
+    /// First time a PRE-EXISTING scene object is touched by World Building (registered,
+    /// selected or moved), snapshot its original pose so scenario saving can record the whole
+    /// scene as a delta over the base .unity scene. Runtime-spawned objects carry
+    /// WorldBuildingPlacedObject instead and are serialized directly.
+    /// </summary>
+    static void EnsureSceneObjectBaseline(GameObject obj)
+    {
+        if (obj == null ||
+            obj.GetComponent<WorldBuildingPlacedObject>() != null ||
+            obj.GetComponent<WorldBuildingSceneObjectBaseline>() != null)
+            return;
+
+        obj.AddComponent<WorldBuildingSceneObjectBaseline>().Capture();
+    }
+
+    static void EnsureSceneObjectBaseline(GameObject obj, Vector3 originalPosition, Quaternion originalRotation)
+    {
+        if (obj == null ||
+            obj.GetComponent<WorldBuildingPlacedObject>() != null ||
+            obj.GetComponent<WorldBuildingSceneObjectBaseline>() != null)
+            return;
+
+        obj.AddComponent<WorldBuildingSceneObjectBaseline>().Capture(originalPosition, originalRotation);
+    }
+
+    /// <summary>
+    /// Records where a placed object came from so WorldBuildingScenarioStore can serialize it
+    /// into a saved scenario. Palette spawns carry the Resources prefab name, imports the GLB path.
+    /// </summary>
+    static void TagPlacedObject(GameObject obj, string paletteName, string importGlbPath, string displayName, bool dynamicAgent = false)
+    {
+        if (obj == null)
+            return;
+
+        WorldBuildingPlacedObject marker = obj.GetComponent<WorldBuildingPlacedObject>();
+        if (marker == null)
+            marker = obj.AddComponent<WorldBuildingPlacedObject>();
+        marker.paletteName = paletteName;
+        marker.importGlbPath = importGlbPath;
+        marker.displayName = displayName;
+        marker.dynamicAgent = dynamicAgent;
+    }
+
+    /// <summary>
+    /// Re-creates one palette object recorded in a saved scenario at its exact saved pose.
+    /// Unlike <see cref="SpawnObject"/> this works while editor mode is inactive (scenario
+    /// restore runs right after scene load), selects nothing and pushes no undo entry.
+    /// </summary>
+    public GameObject RestorePaletteObject(string prefabName, Vector3 position, Quaternion rotation, Vector3 localScale, bool dynamicAgent = false)
+    {
+        if (string.IsNullOrEmpty(prefabName))
+            return null;
+
+        // A static pedestrian is saved under a virtual palette name; it loads the walking
+        // pedestrian's prefab but must go through the passive-prop pipeline below.
+        bool staticPedestrian = WorldBuildingSpawnLibrary.IsStaticPedestrianPaletteName(prefabName);
+        string prefabLookupName = staticPedestrian
+            ? WorldBuildingSpawnLibrary.DynamicPedestrianPrefabName
+            : prefabName;
+
+        GameObject prefab = Resources.Load<GameObject>("WorldBuildingSpawns/" + prefabLookupName);
+        if (prefab == null)
+        {
+            // The palette discovers prefabs recursively (LoadAll), so the prefab may live in
+            // a subfolder that a direct path load cannot reach.
+            foreach (GameObject candidate in Resources.LoadAll<GameObject>("WorldBuildingSpawns"))
+            {
+                if (candidate != null &&
+                    string.Equals(candidate.name, prefabLookupName, System.StringComparison.OrdinalIgnoreCase))
+                {
+                    prefab = candidate;
+                    break;
+                }
+            }
+        }
+
+        if (prefab == null)
+        {
+            // Walking player characters are palette entries too, but their prefabs live in
+            // Resources/PlayerCharacters rather than WorldBuildingSpawns.
+            prefab = PlayerCharacterLibrary.FindPrefab(prefabLookupName);
+        }
+
+        if (prefab == null && WorldBuildingSpawnLibrary.IsDynamicPedestrianPrefab(prefabLookupName))
+        {
+            // The walking pedestrian's prefab lives in Resources/Prefabs (shared with the
+            // gameplay spawners), not in either palette folder.
+            prefab = Resources.Load<GameObject>("Prefabs/" + prefabLookupName);
+        }
+
+        if (prefab == null)
+        {
+            Debug.LogWarning($"[RuntimeEditor] Scenario object '{prefabName}' not found under Resources/WorldBuildingSpawns or Resources/PlayerCharacters; skipped.");
+            return null;
+        }
+
+        GameObject spawned = Instantiate(prefab, position, rotation);
+        if (spawned == null)
+            return null;
+        if (localScale != Vector3.zero)
+            spawned.transform.localScale = localScale;
+
+        // Keep the virtual static name in the marker so re-saving preserves the choice.
+        TagPlacedObject(spawned, prefabName, null,
+            staticPedestrian ? WorldBuildingSpawnLibrary.StaticPedestrianDisplayName : null);
+
+        if (staticPedestrian)
+        {
+            FinishRestoredSpawn(spawned, prefabLookupName, isCharacter: true);
+            return spawned;
+        }
+
+        if (WorldBuildingSpawnLibrary.IsDynamicPedestrianPrefab(prefabName))
+        {
+            // Same as SpawnObject: keep the navigation controllers (no prop pipeline, no
+            // TrackedObstacle tag) and let it wander from its restored position.
+            PrepareDynamicPedestrianSpawn(spawned, position);
+            RegisterEditableObject(spawned);
+            return spawned;
+        }
+
+        if (dynamicAgent && WorldBuildingSpawnLibrary.IsCharacterSpawnPrefab(prefabName) &&
+            PrepareDynamicCharacterSpawn(spawned, position, prefabName))
+        {
+            var marker = spawned.GetComponent<WorldBuildingPlacedObject>();
+            if (marker != null)
+            {
+                marker.dynamicAgent = true;
+                marker.displayName = WorldBuildingSpawnLibrary.HumanizePrefabName(prefabName) + " (Moving)";
+            }
+            RegisterEditableObject(spawned);
+            return spawned;
+        }
+
+        FinishRestoredSpawn(spawned, prefabName, WorldBuildingSpawnLibrary.IsCharacterSpawnPrefab(prefabName));
+        return spawned;
+    }
+
+    /// <summary>
+    /// Registers an already-loaded imported model (e.g. a Meshy GLB re-imported while a saved
+    /// scenario loads) at its exact saved pose. Same no-editor/no-undo semantics as
+    /// <see cref="RestorePaletteObject"/>.
+    /// </summary>
+    public GameObject RestoreImportedObject(GameObject instance, string glbPath, string displayName, Vector3 position, Quaternion rotation, Vector3 localScale)
+    {
+        if (instance == null)
+            return null;
+
+        instance.transform.SetPositionAndRotation(position, rotation);
+        if (localScale != Vector3.zero)
+            instance.transform.localScale = localScale;
+
+        TagPlacedObject(instance, null, glbPath, displayName);
+        string obstacleType = string.IsNullOrWhiteSpace(displayName) ? instance.name : displayName;
+        FinishRestoredSpawn(instance, obstacleType, isCharacter: false);
+        return instance;
+    }
+
+    void FinishRestoredSpawn(GameObject spawned, string obstacleTypeName, bool isCharacter)
+    {
+        if (isCharacter)
+            PrepareCharacterPropComponents(spawned);
+        else
+            EnsureRootSelectionCollider(spawned);
+
+        if (spawned.GetComponent<SEAN.Scenario.Obstacles.TrackedObstacle>() == null)
+        {
+            EnsureRootSelectionCollider(spawned);
+            var obstacle = spawned.AddComponent<SEAN.Scenario.Obstacles.TrackedObstacle>();
+            if (obstacle != null)
+                obstacle.type = (obstacleTypeName ?? spawned.name).Trim().ToLower();
+            NotifyObstaclePublishersOfNewObstacle();
+        }
+
+        RegisterEditableObject(spawned);
+    }
+
     void AlignSpawnedObjectToSpawnPoint(GameObject obj, Vector3 spawnPoint)
     {
         if (obj == null || !TryGetRendererBounds(obj, out Bounds bounds))
             return;
 
+        // Near-flat visuals (e.g. road decals) would z-fight sitting exactly in the ground plane.
+        float lift = bounds.size.y < 0.05f ? 0.01f : 0f;
+
         Vector3 adjustment = new Vector3(
             spawnPoint.x - bounds.center.x,
-            spawnPoint.y - bounds.min.y,
+            spawnPoint.y - bounds.min.y + lift,
             spawnPoint.z - bounds.center.z);
         obj.transform.position += adjustment;
     }
@@ -1793,6 +2253,8 @@ public class RuntimeEditorManager : MonoBehaviour
 
     void RegisterEditableObject(GameObject obj)
     {
+        EnsureSceneObjectBaseline(obj);
+
         if(!string.IsNullOrEmpty(editableTag))
         {
             obj.tag = editableTag;
@@ -1853,7 +2315,7 @@ public class RuntimeEditorManager : MonoBehaviour
             return null;
         }
 
-        // Static objects are scenery and can't be dragged meaningfully — don't register them.
+        // Static objects are scenery and can't be dragged meaningfully —don't register them.
         if (target.isStatic)
         {
             Debug.LogWarning($"[RuntimeEditor] '{target.name}' is static; not adding to the editable list.");
@@ -2127,11 +2589,46 @@ public class RuntimeEditorManager : MonoBehaviour
         ExcludeGizmoLayerFromMainCamera();
     }
 
+    /// <summary>
+    /// Sets the selected object's world-space height. Drags and hotkeys keep Y fixed while
+    /// world building (lockVerticalMovement), so the side panel's Height field is the one
+    /// sanctioned way to move an object vertically. One undo entry per call.
+    /// </summary>
+    public void SetSelectedObjectHeight(float y)
+    {
+        if (currentSelectedObject == null)
+            return;
+
+        Transform t = currentSelectedObject.transform;
+        if (Mathf.Approximately(t.position.y, y))
+            return;
+
+        Vector3 beforePos = t.position;
+        Quaternion beforeRot = t.rotation;
+        t.position = new Vector3(beforePos.x, y, beforePos.z);
+
+        // Keep physics bodies in step, else the stale physics pose snaps the object back
+        // when the game un-pauses (Time.timeScale returns to 1 after world building).
+        foreach (Rigidbody rb in currentSelectedObject.GetComponentsInChildren<Rigidbody>())
+        {
+            if (rb == null)
+                continue;
+            rb.position = rb.transform.position;
+            rb.rotation = rb.transform.rotation;
+            rb.velocity = Vector3.zero;
+            rb.angularVelocity = Vector3.zero;
+        }
+
+        PushTransformAction(currentSelectedObject, beforePos, beforeRot, t.position, t.rotation);
+    }
+
     // ===== UNDO / REDO PUBLIC API =====
 
     public void PushTransformAction(GameObject target, Vector3 beforePos, Quaternion beforeRot, Vector3 afterPos, Quaternion afterRot)
     {
         if (target == null) return;
+        // The move already happened, so the baseline (if new) must use the BEFORE pose.
+        EnsureSceneObjectBaseline(target, beforePos, beforeRot);
         if (Vector3.Distance(beforePos, afterPos) < 0.001f && Quaternion.Angle(beforeRot, afterRot) < 0.1f) return;
         undoStack.Push(new TransformAction(target, beforePos, beforeRot, afterPos, afterRot));
         redoStack.Clear();

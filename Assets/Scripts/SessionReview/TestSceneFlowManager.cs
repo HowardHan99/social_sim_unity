@@ -61,6 +61,12 @@ namespace SessionReview
         /// <summary>True while the character-select page (with its Session ID text field) is up.</summary>
         public bool IsCharacterSelectOpen => phase == Phase.SelectCharacter;
 
+        /// <summary>
+        /// True once control has handed over to the robot (the "Try Robot Now" phase). GoalBeacon
+        /// reads this to show the robot goal and hide the pedestrian one, and vice versa before it.
+        /// </summary>
+        public bool IsDrivingRobot => phase == Phase.DriveRobot;
+
         // Arrival is acknowledged (banner) but never freezes control, so participants can
         // keep driving past the goal to practice.
         private bool playerReachedGoal;
@@ -593,7 +599,7 @@ namespace SessionReview
             const float cardH = 200f;
             const float gap = 16f;
 
-            var options = PlayerCharacterLibrary.Options;
+            var options = PlayerCharacterLibrary.OptionsWithPreview;
             int cardCount = 2 + options.Count;
             int perRow = Mathf.Max(1, Mathf.Min(cardCount,
                 Mathf.FloorToInt((ReviewUiScale.Width - 80f + gap) / (cardW + gap))));

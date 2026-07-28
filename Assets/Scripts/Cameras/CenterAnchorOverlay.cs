@@ -31,6 +31,16 @@ public class CenterAnchorOverlay : MonoBehaviour
             return;
         }
 
+        // "you are driving the agent" is untrue while a modal session page
+        // (onboarding, prompts, review) has taken over the screen, and this
+        // script draws after SessionReviewManager, so it would sit on top of
+        // those panels.
+        var review = SessionReview.SessionReviewManager.Instance;
+        if (review != null && review.IsMovementInputBlocked)
+        {
+            return;
+        }
+
         EnsureTexture();
         EnsureStyle();
 

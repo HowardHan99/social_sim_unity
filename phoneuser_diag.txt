@@ -1,0 +1,19 @@
+=== PhoneUserArmPose runtime diag, 14:27:19 ===
+t0: animator='Female_Adult_05 1 (1)' enabled=True activeInHierarchy=True isInitialized=True speed=1.00 culling=AlwaysAnimate controller=PlayerAnimatorController avatarValid=True layers=1 state0.normTime=0.000 state0.length=2.40 timeScale=0.00
+t1 (+1s): animator='Female_Adult_05 1 (1)' enabled=True activeInHierarchy=True isInitialized=True speed=1.00 culling=AlwaysAnimate controller=PlayerAnimatorController avatarValid=True layers=1 state0.normTime=0.000 state0.length=2.40 timeScale=0.00
+muscleTargets resolved: 14 (expected 14)
+  muscle 'Spine Front-Back' current=-0.15 target=-0.15
+  muscle 'Chest Front-Back' current=-0.20 target=-0.20
+  muscle 'Neck Nod Down-Up' current=-0.50 target=-0.50
+  muscle 'Head Nod Down-Up' current=-0.20 target=-0.20
+  muscle 'Left Arm Down-Up' current=0.40 target=-0.55
+  muscle 'Left Arm Front-Back' current=0.30 target=-0.35
+  muscle 'Left Forearm Stretch' current=1.00 target=-0.70
+  muscle 'Left Forearm Twist In-Out' current=0.00 target=-0.30
+  muscle 'Left Hand Down-Up' current=0.00 target=-0.15
+  muscle 'Right Arm Down-Up' current=0.40 target=-0.55
+  muscle 'Right Arm Front-Back' current=0.30 target=-0.35
+  muscle 'Right Forearm Stretch' current=1.00 target=-0.70
+  muscle 'Right Forearm Twist In-Out' current=0.00 target=-0.30
+  muscle 'Right Hand Down-Up' current=0.00 target=-0.15
+roundtrip 'Left Arm Down-Up': before=0.40 wrote=-0.55 readback=0.40

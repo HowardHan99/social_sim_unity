@@ -50,7 +50,34 @@ public static class MeshyGlbSceneImporter
         Debug.Log($"[GenerateModel] Importing GLB (sync): {localGlbPath} (Time.timeScale={Time.timeScale})");
         yield return null;
 
-        GameObject loaded = null;
+        GameObject loaded = LoadGlbInstance(localGlbPath, displayName, onError);
+        if (loaded == null)
+            yield break;
+
+        // Remember the source file so a saved World Building scenario can re-import it.
+        var marker = loaded.GetComponent<SessionReview.WorldBuildingPlacedObject>();
+        if (marker == null)
+            marker = loaded.AddComponent<SessionReview.WorldBuildingPlacedObject>();
+        marker.importGlbPath = localGlbPath;
+        marker.displayName = displayName;
+
+        editor.SpawnImportedInstance(loaded, displayName);
+        Debug.Log($"[GenerateModel] Spawned imported model '{loaded.name}' in World Building.");
+    }
+
+    /// <summary>
+    /// Synchronously loads a GLB into a scene GameObject without touching the editor —
+    /// used by scenario restore, which places the instance itself. Returns null on failure.
+    /// </summary>
+    public static GameObject LoadGlbInstance(string localGlbPath, string displayName, Action<string> onError = null)
+    {
+        if (string.IsNullOrEmpty(localGlbPath) || !File.Exists(localGlbPath))
+        {
+            onError?.Invoke($"GLB file not found: {localGlbPath}");
+            return null;
+        }
+
+        GameObject loaded;
         try
         {
             loaded = Importer.LoadFromFile(localGlbPath, new ImportSettings(), out _);
@@ -59,20 +86,19 @@ public static class MeshyGlbSceneImporter
         {
             Debug.LogException(ex);
             onError?.Invoke($"GLB import exception: {ex.Message}");
-            yield break;
+            return null;
         }
 
         if (loaded == null)
         {
             onError?.Invoke("GLTFUtility returned null — file may be corrupt or unsupported.");
-            yield break;
+            return null;
         }
 
         if (!string.IsNullOrWhiteSpace(displayName))
             loaded.name = displayName;
 
-        editor.SpawnImportedInstance(loaded, displayName);
-        Debug.Log($"[GenerateModel] Spawned imported model '{loaded.name}' in World Building.");
+        return loaded;
     }
 
     static string SanitizeFileName(string name)

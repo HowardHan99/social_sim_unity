@@ -14,14 +14,34 @@ public class RuntimeEditor : MonoBehaviour
     public enum GizmoMode { Translate, Rotate }
     public GizmoMode currentMode = GizmoMode.Translate;
 
+    [Header("Keyboard Move (while selected)")]
+    public bool keyboardMoveEnabled = true;
+    public float keyboardMoveSpeed = 3f;          // metres per second
+    public float keyboardBoostMultiplier = 3f;    // while Shift is held
+    [Tooltip("Hold this to fly the camera with WASD instead of moving the selected object.")]
+    public KeyCode cameraOverrideKey = KeyCode.LeftAlt;
+
+    // Below this many on-screen pixels a handle becomes effectively unclickable, so hit-testing
+    // widens to this radius even when the handle's world-space sphere is smaller.
+    private const float MinHandlePixelRadius = 12f;
+
     private bool isDragging = false;
     private Camera mainCamera;
+    [Tooltip("Lock vertical (Y-axis) movement during world-building so drags/keys only move objects on the horizontal plane. Height can still be set explicitly (world-building side panel).")]
+    public bool lockVerticalMovement = true;
+
     private Vector3 currentAxis = Vector3.zero;
     private Plane dragPlane;
-    private Vector3 dragOffset;
+    private Vector3 dragStartHit;      // where the grab ray met the drag plane, at mouse-down
+    private Vector3 dragStartPosition; // transform.position at mouse-down
     private float lastAngle;
     private Vector3 dragBeforePos;
     private Quaternion dragBeforeRot;
+
+    // Continuous WASD nudge of the selected object; batched into one undo entry per key-hold.
+    private bool keyboardMoveActive = false;
+    private Vector3 keyboardMoveBeforePos;
+    private Quaternion keyboardMoveBeforeRot;
 
     // Free "grab the body" dragging: when no axis handle is grabbed, the object itself can be
     // dragged across the ground plane. This makes props (and the robot) moveable even when the
@@ -91,13 +111,16 @@ public class RuntimeEditor : MonoBehaviour
 
     void Update()
     {
-        // Toggle mode with T (Translate) and R (Rotate)
-        if (Input.GetKeyDown(KeyCode.T))
+        // Toggle mode with T (Translate) and R (Rotate) -- unless an IMGUI text field has
+        // focus (e.g. the "Save World" name box), where those letters are text being typed.
+        bool typingInTextField = GUIUtility.keyboardControl != 0;
+
+        if (!typingInTextField && Input.GetKeyDown(KeyCode.T))
         {
             currentMode = GizmoMode.Translate;
             UpdateGizmoVisibility();
         }
-        if (Input.GetKeyDown(KeyCode.R))
+        if (!typingInTextField && Input.GetKeyDown(KeyCode.R))
         {
             currentMode = GizmoMode.Rotate;
             UpdateGizmoVisibility();
@@ -105,6 +128,57 @@ public class RuntimeEditor : MonoBehaviour
 
         UpdateGizmoPositions();
         HandleMouseInput();
+        HandleKeyboardMove();
+
+        // lockVerticalMovement is enforced per input path (body drag keeps Y, axis drags move
+        // strictly along X/Z, Q/E is gated, the Y handle is hidden and un-clickable) rather than
+        // by a global Y-clamp here — a clamp would also revert explicit height edits from the
+        // world-building Height field and break undo/redo of them.
+    }
+
+    /// <summary>
+    /// World-space length of the gizmo arms. Fixed <see cref="gizmoSize"/> alone puts the handles
+    /// inside anything bigger than a metre (invisible, unclickable) and shrinks them to a few
+    /// pixels when the building camera pulls back, so grow it past the object's own bounds and
+    /// keep a roughly constant on-screen size. Hit-testing uses this same value, so the grab
+    /// region always matches what is drawn.
+    /// </summary>
+    float CurrentGizmoScale()
+    {
+        float scale = gizmoSize;
+
+        if (TryGetWorldBounds(out Bounds b))
+            scale = Mathf.Max(scale, b.extents.magnitude * 0.9f);
+
+        if (mainCamera != null)
+        {
+            float viewScale = mainCamera.orthographic
+                ? mainCamera.orthographicSize * 0.35f
+                : Vector3.Distance(mainCamera.transform.position, GetGizmoCenter())
+                  * Mathf.Tan(mainCamera.fieldOfView * 0.5f * Mathf.Deg2Rad) * 0.35f;
+            scale = Mathf.Max(scale, viewScale);
+        }
+
+        return scale;
+    }
+
+    float CurrentHandleRadius(float scale)
+    {
+        return handleSize * (scale / Mathf.Max(0.0001f, gizmoSize));
+    }
+
+    /// <summary>How many world units one screen pixel spans at <paramref name="worldPoint"/>.</summary>
+    float WorldUnitsPerPixel(Vector3 worldPoint)
+    {
+        if (mainCamera == null)
+            return 0f;
+
+        float pixelHeight = Mathf.Max(1, mainCamera.pixelHeight);
+        if (mainCamera.orthographic)
+            return mainCamera.orthographicSize * 2f / pixelHeight;
+
+        float dist = Vector3.Distance(mainCamera.transform.position, worldPoint);
+        return 2f * dist * Mathf.Tan(mainCamera.fieldOfView * 0.5f * Mathf.Deg2Rad) / pixelHeight;
     }
 
     void CreateGizmoVisuals()
@@ -145,9 +219,15 @@ public class RuntimeEditor : MonoBehaviour
         xLine = CreateCylinderLine("X_Line", Color.red);
         xHandle = CreateSphere("X_Handle", Color.red, handleSize);
 
-        // Y-axis (Green)
+        // Y-axis (Green) -- hidden when vertical movement is locked (world-building), and
+        // TryGetTranslateAxis skips it so the invisible handle can't grab clicks either.
         yLine = CreateCylinderLine("Y_Line", Color.green);
         yHandle = CreateSphere("Y_Handle", Color.green, handleSize);
+        if (lockVerticalMovement)
+        {
+            yLine.SetActive(false);
+            yHandle.SetActive(false);
+        }
 
         // Z-axis (Blue)
         zLine = CreateCylinderLine("Z_Line", Color.blue);
@@ -241,38 +321,47 @@ public class RuntimeEditor : MonoBehaviour
         
         gizmoContainer.transform.position = pos;
 
+        // Same scale the hit-test uses, so what you see is what you can grab.
+        float scale = CurrentGizmoScale();
+        float relative = scale / Mathf.Max(0.0001f, gizmoSize);
+        float width = lineWidth * relative;
+        float handleScale = CurrentHandleRadius(scale);
+
         if (currentMode == GizmoMode.Translate)
         {
             // Update X-axis (Red) - cylinder along X
-            Vector3 xMid = pos + Vector3.right * gizmoSize * 0.5f;
+            Vector3 xMid = pos + Vector3.right * scale * 0.5f;
             xLine.transform.position = xMid;
             xLine.transform.rotation = Quaternion.Euler(0, 0, 90);
-            xLine.transform.localScale = new Vector3(lineWidth, gizmoSize * 0.5f, lineWidth);
-            xHandle.transform.position = pos + Vector3.right * gizmoSize;
+            xLine.transform.localScale = new Vector3(width, scale * 0.5f, width);
+            xHandle.transform.position = pos + Vector3.right * scale;
+            xHandle.transform.localScale = Vector3.one * handleScale;
 
             // Update Y-axis (Green) - cylinder along Y
-            Vector3 yMid = pos + Vector3.up * gizmoSize * 0.5f;
+            Vector3 yMid = pos + Vector3.up * scale * 0.5f;
             yLine.transform.position = yMid;
             yLine.transform.rotation = Quaternion.identity;
-            yLine.transform.localScale = new Vector3(lineWidth, gizmoSize * 0.5f, lineWidth);
-            yHandle.transform.position = pos + Vector3.up * gizmoSize;
+            yLine.transform.localScale = new Vector3(width, scale * 0.5f, width);
+            yHandle.transform.position = pos + Vector3.up * scale;
+            yHandle.transform.localScale = Vector3.one * handleScale;
 
             // Update Z-axis (Blue) - cylinder along Z
-            Vector3 zMid = pos + Vector3.forward * gizmoSize * 0.5f;
+            Vector3 zMid = pos + Vector3.forward * scale * 0.5f;
             zLine.transform.position = zMid;
             zLine.transform.rotation = Quaternion.Euler(90, 0, 0);
-            zLine.transform.localScale = new Vector3(lineWidth, gizmoSize * 0.5f, lineWidth);
-            zHandle.transform.position = pos + Vector3.forward * gizmoSize;
+            zLine.transform.localScale = new Vector3(width, scale * 0.5f, width);
+            zHandle.transform.position = pos + Vector3.forward * scale;
+            zHandle.transform.localScale = Vector3.one * handleScale;
         }
         else if (currentMode == GizmoMode.Rotate)
         {
-            UpdateCircleSegments(xCircle, pos, Vector3.right);
-            UpdateCircleSegments(yCircle, pos, Vector3.up);
-            UpdateCircleSegments(zCircle, pos, Vector3.forward);
+            UpdateCircleSegments(xCircle, pos, Vector3.right, relative);
+            UpdateCircleSegments(yCircle, pos, Vector3.up, relative);
+            UpdateCircleSegments(zCircle, pos, Vector3.forward, relative);
         }
     }
 
-    void UpdateCircleSegments(GameObject circleParent, Vector3 center, Vector3 normal)
+    void UpdateCircleSegments(GameObject circleParent, Vector3 center, Vector3 normal, float relative)
     {
         Vector3 forward = Vector3.Slerp(normal, -normal, 0.5f);
         if (forward == normal || forward == -normal)
@@ -285,10 +374,12 @@ public class RuntimeEditor : MonoBehaviour
         for (int i = 0; i < segmentCount; i++)
         {
             float angle = i * 360f / segmentCount * Mathf.Deg2Rad;
-            Vector3 point = center + (right * Mathf.Cos(angle) + forward * Mathf.Sin(angle)) * rotationGizmoRadius;
+            Vector3 point = center + (right * Mathf.Cos(angle) + forward * Mathf.Sin(angle))
+                            * rotationGizmoRadius * relative;
 
             Transform segment = circleParent.transform.GetChild(i);
             segment.position = point;
+            segment.localScale = new Vector3(lineWidth, lineWidth, rotationGizmoRadius * 0.2f) * relative;
             segment.LookAt(center);
         }
     }
@@ -299,10 +390,10 @@ public class RuntimeEditor : MonoBehaviour
         {
             // Show translate, hide rotate
             if (xLine != null) xLine.SetActive(true);
-            if (yLine != null) yLine.SetActive(true);
+            if (yLine != null) yLine.SetActive(!lockVerticalMovement);
             if (zLine != null) zLine.SetActive(true);
             if (xHandle != null) xHandle.SetActive(true);
-            if (yHandle != null) yHandle.SetActive(true);
+            if (yHandle != null) yHandle.SetActive(!lockVerticalMovement);
             if (zHandle != null) zHandle.SetActive(true);
 
             if (xCircle != null) xCircle.SetActive(false);
@@ -412,6 +503,93 @@ public class RuntimeEditor : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// WASD/QE nudge of the selected object. This component only runs while its object is selected,
+    /// so the keys are live exactly when there is something to move; <see cref="SimpleCameraController"/>
+    /// yields them for the same window (hold <see cref="cameraOverrideKey"/> to fly the camera anyway).
+    /// Movement is camera-relative on the ground plane, so W always pushes the prop away from the viewer.
+    /// </summary>
+    void HandleKeyboardMove()
+    {
+        if (!keyboardMoveEnabled || isDragging || pendingBodyDrag)
+        {
+            CommitKeyboardMove();
+            return;
+        }
+
+        // An IMGUI text field has focus (the "Save World" name box): these are characters, not hotkeys.
+        // Ctrl is reserved for undo/redo, and the override key belongs to the camera.
+        if (GUIUtility.keyboardControl != 0 ||
+            Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl) ||
+            Input.GetKey(cameraOverrideKey) || Input.GetKey(KeyCode.RightAlt))
+        {
+            CommitKeyboardMove();
+            return;
+        }
+
+        Vector3 input = Vector3.zero;
+        if (Input.GetKey(KeyCode.W)) input.z += 1f;
+        if (Input.GetKey(KeyCode.S)) input.z -= 1f;
+        if (Input.GetKey(KeyCode.A)) input.x -= 1f;
+        if (Input.GetKey(KeyCode.D)) input.x += 1f;
+        if (!lockVerticalMovement)
+        {
+            if (Input.GetKey(KeyCode.E)) input.y += 1f;
+            if (Input.GetKey(KeyCode.Q)) input.y -= 1f;
+        }
+
+        if (input == Vector3.zero || !EnsureCamera())
+        {
+            CommitKeyboardMove();
+            return;
+        }
+
+        Vector3 forward = Vector3.ProjectOnPlane(mainCamera.transform.forward, Vector3.up);
+        if (forward.sqrMagnitude < 1e-4f)
+        {
+            // Looking straight down (the default building view): the camera's up vector is what
+            // points "away" on screen.
+            forward = Vector3.ProjectOnPlane(mainCamera.transform.up, Vector3.up);
+            if (forward.sqrMagnitude < 1e-4f)
+                forward = Vector3.forward;
+        }
+        forward.Normalize();
+        Vector3 right = Vector3.Cross(Vector3.up, forward);
+
+        if (!keyboardMoveActive)
+        {
+            keyboardMoveActive = true;
+            keyboardMoveBeforePos = transform.position;
+            keyboardMoveBeforeRot = transform.rotation;
+        }
+
+        float speed = keyboardMoveSpeed;
+        if (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))
+            speed *= keyboardBoostMultiplier;
+
+        // World building runs with Time.timeScale at 0, so scaled deltaTime would be a flat zero.
+        Vector3 delta = (right * input.x + Vector3.up * input.y + forward * input.z).normalized
+                        * speed * Time.unscaledDeltaTime;
+        transform.position += delta;
+    }
+
+    /// <summary>Closes an in-progress WASD move: one undo entry per key-hold, not per frame.</summary>
+    void CommitKeyboardMove()
+    {
+        if (!keyboardMoveActive)
+            return;
+
+        keyboardMoveActive = false;
+
+        if (transform.position == keyboardMoveBeforePos && transform.rotation == keyboardMoveBeforeRot)
+            return;
+
+        SyncRigidbodiesToTransform();
+        RuntimeEditorManager.Instance?.PushTransformAction(
+            gameObject, keyboardMoveBeforePos, keyboardMoveBeforeRot,
+            transform.position, transform.rotation);
+    }
+
     // True if the click ray passes through this object's visual bounds (ignoring the gizmo itself).
     bool IsRayOverObject(Ray ray)
     {
@@ -472,31 +650,72 @@ public class RuntimeEditor : MonoBehaviour
 
     void CheckTranslateHandles(Ray ray)
     {
+        if (TryGetTranslateAxis(ray, out Vector3 axis))
+        {
+            Debug.Log($"Gizmo: {axis} handle clicked");
+            StartAxisDrag(axis, ray);
+        }
+    }
+
+    /// <summary>
+    /// Picks the translate handle under <paramref name="ray"/>, nearest-to-camera first. The old
+    /// fixed X-then-Y-then-Z order handed the drag to whichever axis was declared first whenever
+    /// two handles overlapped on screen, which reads as "the gizmo moved the wrong way".
+    /// </summary>
+    bool TryGetTranslateAxis(Ray ray, out Vector3 axis)
+    {
+        axis = Vector3.zero;
         Vector3 gizmoCenter = GetGizmoCenter();
+        float scale = CurrentGizmoScale();
+        float radius = CurrentHandleRadius(scale);
+        float bestDistance = float.MaxValue;
 
-        // Check X-axis handle (Red)
-        if (IsHandleClicked(ray, gizmoCenter + Vector3.right * gizmoSize))
+        foreach (Vector3 candidate in new[] { Vector3.right, Vector3.up, Vector3.forward })
         {
-            Debug.Log("Gizmo: X-axis handle clicked");
-            StartAxisDrag(Vector3.right, ray);
-            return;
+            // The Y handle is hidden while vertical movement is locked; skip it in hit-testing
+            // too so the invisible handle can't swallow a click meant for X/Z or selection.
+            if (lockVerticalMovement && candidate == Vector3.up)
+                continue;
+
+            Vector3 handlePos = gizmoCenter + candidate * scale;
+            if (!IsHandleClicked(ray, handlePos, radius))
+                continue;
+
+            float distance = Vector3.Distance(ray.origin, handlePos);
+            if (distance < bestDistance)
+            {
+                bestDistance = distance;
+                axis = candidate;
+            }
         }
 
-        // Check Y-axis handle (Green)  
-        if (IsHandleClicked(ray, gizmoCenter + Vector3.up * gizmoSize))
-        {
-            Debug.Log("Gizmo: Y-axis handle clicked");
-            StartAxisDrag(Vector3.up, ray);
-            return;
-        }
+        return axis != Vector3.zero;
+    }
 
-        // Check Z-axis handle (Blue)
-        if (IsHandleClicked(ray, gizmoCenter + Vector3.forward * gizmoSize))
-        {
-            Debug.Log("Gizmo: Z-axis handle clicked");
-            StartAxisDrag(Vector3.forward, ray);
-            return;
-        }
+    /// <summary>
+    /// True if this click belongs to the gizmo rather than to selection. <see cref="RuntimeEditorManager"/>
+    /// calls this before its own selection raycast: the Gizmo layer is excluded from
+    /// <c>selectableLayers</c>, so without this the selection ray passes straight through the handle
+    /// being grabbed, hits whatever prop is behind it, and re-selects it — which disables this
+    /// component mid-drag. That was the intermittent "gizmo move doesn't work".
+    /// </summary>
+    public bool WouldConsumeClick()
+    {
+        if (isDragging || pendingBodyDrag)
+            return true;
+
+        if (!EnsureCamera())
+            return false;
+
+        Ray ray = mainCamera.ScreenPointToRay(Input.mousePosition);
+
+        if (currentMode == GizmoMode.Translate)
+            return TryGetTranslateAxis(ray, out _);
+
+        Vector3 center = GetGizmoCenter();
+        return IsRotationHandleClicked(ray, center, Vector3.right)
+            || IsRotationHandleClicked(ray, center, Vector3.up)
+            || IsRotationHandleClicked(ray, center, Vector3.forward);
     }
 
     void CheckRotateHandles(Ray ray)
@@ -534,8 +753,11 @@ public class RuntimeEditor : MonoBehaviour
         {
             Vector3 hitPoint = ray.GetPoint(enter);
             float distance = Vector3.Distance(hitPoint, center);
+            float scale = CurrentGizmoScale() / Mathf.Max(0.0001f, gizmoSize);
+            float band = Mathf.Max(rotationHandleSize * scale,
+                                   WorldUnitsPerPixel(center) * MinHandlePixelRadius);
 
-            return Mathf.Abs(distance - rotationGizmoRadius) < rotationHandleSize;
+            return Mathf.Abs(distance - rotationGizmoRadius * scale) < band;
         }
 
         return false;
@@ -546,12 +768,13 @@ public class RuntimeEditor : MonoBehaviour
         float enter;
         if (dragPlane.Raycast(ray, out enter))
         {
+            // Rigid 1:1 follow: how far along the axis has the grab point travelled since
+            // mouse-down? The old code re-derived a delta from the (bounds-based) gizmo centre
+            // every frame, which only converged on the cursor asymptotically and drifted for any
+            // object whose pivot isn't its bounds centre.
             Vector3 hitPoint = ray.GetPoint(enter);
-            Vector3 newPos = hitPoint - dragOffset;
-            Vector3 gizmoCenter = GetGizmoCenter();
-
-            Vector3 axisLine = Vector3.Project(newPos - gizmoCenter, currentAxis);
-            transform.position = transform.position + axisLine;
+            float travel = Vector3.Dot(hitPoint - dragStartHit, currentAxis);
+            transform.position = dragStartPosition + currentAxis * travel;
         }
     }
 
@@ -585,33 +808,57 @@ public class RuntimeEditor : MonoBehaviour
         }
     }
 
-    bool IsHandleClicked(Ray ray, Vector3 handlePosition)
+    bool IsHandleClicked(Ray ray, Vector3 handlePosition, float radius)
     {
         Vector3 closestPoint = ClosestPointOnRay(ray, handlePosition);
-        return Vector3.Distance(closestPoint, handlePosition) < handleSize;
+        // A handle that is physically small or far away still needs a usable grab region.
+        float tolerance = Mathf.Max(radius, WorldUnitsPerPixel(handlePosition) * MinHandlePixelRadius);
+        return Vector3.Distance(closestPoint, handlePosition) < tolerance;
     }
 
     Vector3 ClosestPointOnRay(Ray ray, Vector3 point)
     {
         Vector3 pointToOrigin = point - ray.origin;
-        float projection = Vector3.Dot(pointToOrigin, ray.direction);
+        // Clamp to the forward half-line: without this a handle *behind* the camera projects to a
+        // near point and registers as clicked.
+        float projection = Mathf.Max(0f, Vector3.Dot(pointToOrigin, ray.direction));
         return ray.origin + ray.direction * projection;
     }
 
     void StartAxisDrag(Vector3 axis, Ray ray)
     {
-        isDragging = true;
-        currentAxis = axis;
         Vector3 gizmoCenter = GetGizmoCenter();
+        Vector3 viewDir = mainCamera.orthographic
+            ? mainCamera.transform.forward
+            : (gizmoCenter - mainCamera.transform.position).normalized;
 
-        dragPlane = new Plane(mainCamera.transform.forward, gizmoCenter);
+        // Drag on a plane that CONTAINS the axis and faces the camera as squarely as possible.
+        // The old plane used the camera forward as its normal, which collapses to zero motion
+        // whenever the axis points at the camera — e.g. the green Y handle in the top-down
+        // building view, where grabbing Y did nothing at all.
+        Vector3 normal = Vector3.Cross(axis, Vector3.Cross(viewDir, axis));
+        if (normal.sqrMagnitude < 1e-6f)
+        {
+            // Sighting straight down the axis: any containing plane works, pick a stable one.
+            normal = Vector3.Cross(axis, Vector3.up);
+            if (normal.sqrMagnitude < 1e-6f)
+                normal = Vector3.Cross(axis, Vector3.right);
+        }
+
+        dragPlane = new Plane(normal.normalized, gizmoCenter);
 
         float enter;
-        if (dragPlane.Raycast(ray, out enter))
+        if (!dragPlane.Raycast(ray, out enter))
         {
-            Vector3 hitPoint = ray.GetPoint(enter);
-            dragOffset = hitPoint - gizmoCenter;
+            // Grazing ray — starting the drag would apply a stale offset and teleport the object.
+            isDragging = false;
+            return;
         }
+
+        isDragging = true;
+        currentAxis = axis;
+        dragStartHit = ray.GetPoint(enter);
+        dragStartPosition = transform.position;
     }
 
     void StartRotationDrag(Vector3 axis, Ray ray)
@@ -710,6 +957,14 @@ public class RuntimeEditor : MonoBehaviour
     void OnDisable()
     {
         ShowGizmo(false);
+        // Deselection can happen mid-drag (Escape, right-click, or another object being selected).
+        // A disabled component never sees the matching MouseButtonUp, so without this reset the
+        // stale isDragging/pendingBodyDrag flags resume a phantom drag the next time this object
+        // is selected and the object jumps to the cursor.
+        isDragging = false;
+        isBodyDragging = false;
+        pendingBodyDrag = false;
+        CommitKeyboardMove();
     }
 
     void OnDestroy()

@@ -30,6 +30,13 @@ namespace SessionReview
         public static string SelectedSceneName { get; private set; } = string.Empty;
         public static bool PendingTrialStart { get; private set; }
 
+        /// <summary>
+        /// Fired the moment a trial actually begins (from any Start Trial path:
+        /// key, button, or gamepad). Subscribe to kick off in-scene effects such
+        /// as the crosswalk countdown. Cleared on subsystem reset each play.
+        /// </summary>
+        public static event System.Action TrialStarted;
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void Reset()
         {
@@ -42,6 +49,7 @@ namespace SessionReview
             SelectedSceneIndex = -1;
             SelectedSceneName = string.Empty;
             PendingTrialStart = false;
+            TrialStarted = null;
         }
 
         public static void Apply(OnboardingPlayerMode playerMode,
@@ -100,6 +108,7 @@ namespace SessionReview
         public static void MarkTrialStarted()
         {
             PendingTrialStart = false;
+            TrialStarted?.Invoke();
         }
     }
 }

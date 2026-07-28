@@ -87,6 +87,10 @@ namespace SessionReview
         public List<VLMCaptureEvent> vlmCaptures = new List<VLMCaptureEvent>();
         public List<SignalAnnotation> signalAnnotations = new List<SignalAnnotation>();
 
+        // Absolute SessionLogs folder this trial was archived to this session. Not
+        // serialized: for a loaded record the folder is where it was loaded FROM.
+        [NonSerialized] public string archiveFolder;
+
         public float Duration => endTime - startTime;
     }
 
@@ -168,6 +172,7 @@ namespace SessionReview
 
             string trialFolder = CreateTrialFolder(record);
             latestTrialFolder = trialFolder;
+            record.archiveFolder = trialFolder;
             SaveTrialRecord(record, trialFolder);
 
             if (trajectoryRecorder != null)

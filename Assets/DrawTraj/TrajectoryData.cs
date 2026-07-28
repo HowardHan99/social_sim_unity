@@ -30,7 +30,16 @@ public class TrajectoryData
 [Serializable]
 public class TrajectoryCollection
 {
+    // Provenance label so a trajectory JSON found in a trial log is self-describing
+    // (hand-drawn on the review device, as opposed to recorded agent trajectories).
+    public string source = "hand_drawn";
+
     public List<TrajectoryData> trajectories = new List<TrajectoryData>();
+
+    // Stop markers placed with the ADD STOP tool. They belong to the drawing
+    // session as a whole (not a single stroke); Follow mode pauses the robot at
+    // each one. Files saved before this field existed load with an empty list.
+    public List<TrajectoryPoint> stopPoints = new List<TrajectoryPoint>();
 }
 
 // ── IO Utility ───────────────────────────────────────────────────────────────

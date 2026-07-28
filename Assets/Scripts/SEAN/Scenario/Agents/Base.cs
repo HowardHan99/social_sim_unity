@@ -62,8 +62,25 @@ namespace SEAN.Scenario.Agents
             collisionCapsule.center = Vector3.up * agentHeight / 2f;
 
             animator = GetComponent<Animator>();
-            animator.applyRootMotion = applyRootMotion;
-            animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+            if (animator == null)
+            {
+                // Some avatar prefabs (e.g. Wheelchair_female 1) keep the rig in a nested
+                // model instance, so the Animator sits one level down instead of on the
+                // agent root. Drive that one rather than throwing, and force root motion
+                // off so the rig can't walk itself away from the root we move by physics.
+                animator = GetComponentInChildren<Animator>(true);
+                if (animator != null)
+                    applyRootMotion = false;
+            }
+            if (animator != null)
+            {
+                animator.applyRootMotion = applyRootMotion;
+                animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+            }
+            else
+            {
+                Debug.LogWarning($"{name}: no Animator on the avatar prefab or its children; agent will move but not animate.", this);
+            }
             base.Start();
         }
 
@@ -120,6 +137,7 @@ namespace SEAN.Scenario.Agents
 
         public void StopAnimator()
         {
+            if (animator == null) { return; }
             //animator.SetBool("Idling", true);
             animator.SetFloat("Forward", 0);
             animator.SetFloat("Strafe", 0);
@@ -222,14 +240,17 @@ namespace SEAN.Scenario.Agents
             animParams *= animationScale;
             var idle = animParams.magnitude < idleSpeed && !applyRootMotion;
 
-            animator.SetBool("Idling", idle);
-            if (!GetType().Equals(typeof(PlayerAgent)))
+            if (animator != null)
             {
-                animator.speed = velocity.magnitude;
+                animator.SetBool("Idling", idle);
+                if (!GetType().Equals(typeof(PlayerAgent)))
+                {
+                    animator.speed = velocity.magnitude;
 
+                }
+                animator.SetFloat("Forward", animParams.z/ANIMATION_SMOOTHING);
+                animator.SetFloat("Strafe", animParams.x/ANIMATION_SMOOTHING);
             }
-            animator.SetFloat("Forward", animParams.z/ANIMATION_SMOOTHING);
-            animator.SetFloat("Strafe", animParams.x/ANIMATION_SMOOTHING);
 
             if (ShowDebug)
             {

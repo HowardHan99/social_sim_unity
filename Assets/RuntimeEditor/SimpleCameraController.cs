@@ -66,12 +66,18 @@ namespace UnityTemplateProjects
         private Vector3 m_LastMousePosition;
         private bool m_HasLastMousePosition;
 
+        // Wheel zoom eases toward this orthographic size instead of jumping a full step per
+        // notch. Negative means "no zoom in progress" so external orthographicSize writes
+        // (scene framing, pose restore) are adopted instead of fought.
+        private float m_TargetOrthoSize = -1f;
+        private float m_LastAppliedOrthoSize = -1f;
+
         [Header("Movement Settings")]
         [Tooltip("Middle-mouse pan as a multiple of exact cursor tracking (1 = the ground point stays under the cursor).")]
         public float panMultiplier = 1.0f;
 
         [Tooltip("Mouse-wheel zoom step as a fraction of the current view size per wheel notch.")]
-        [Range(0.01f, 0.5f)] public float zoomStepFraction = 0.12f;
+        [Range(0.01f, 0.5f)] public float zoomStepFraction = 0.07f;
 
         [Tooltip("Movement speed for keyboard navigation in free camera mode.")]
         public float moveSpeed = 8.0f;
@@ -170,9 +176,30 @@ namespace UnityTemplateProjects
             m_InterpolatingCameraState.SetFromTransform(transform);
         }
 
+        /// <summary>
+        /// While a world-building object is selected, WASD/QE move that object (RuntimeEditor's
+        /// keyboard move) instead of flying the camera. Hold Alt to fly anyway without losing
+        /// the selection.
+        /// </summary>
+        bool SelectedObjectOwnsMovementKeys()
+        {
+            var manager = RuntimeEditorManager.Instance;
+            if (manager == null || !manager.isEditorActive || manager.CurrentSelectedObject == null)
+                return false;
+
+            if (Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt))
+                return false;
+
+            return true;
+        }
+
         Vector3 GetInputTranslationDirection()
         {
             Vector3 direction = Vector3.zero;
+
+            if (SelectedObjectOwnsMovementKeys())
+                return direction;
+
 #if ENABLE_INPUT_SYSTEM
             var moveDelta = movementAction.ReadValue<Vector2>();
             direction.x = moveDelta.x;
@@ -314,7 +341,8 @@ namespace UnityTemplateProjects
                 float zoomFactor = Mathf.Pow(1f - zoomStepFraction, scrollDelta);
                 if (mainCamera != null && mainCamera.orthographic)
                 {
-                    mainCamera.orthographicSize = Mathf.Max(minTopDownSize, mainCamera.orthographicSize * zoomFactor);
+                    float baseSize = m_TargetOrthoSize > 0f ? m_TargetOrthoSize : mainCamera.orthographicSize;
+                    m_TargetOrthoSize = Mathf.Max(minTopDownSize, baseSize * zoomFactor);
                 }
                 else
                 {
@@ -333,6 +361,37 @@ namespace UnityTemplateProjects
             m_InterpolatingCameraState.LerpTowards(m_TargetCameraState, positionLerpPct, rotationLerpPct);
 
             m_InterpolatingCameraState.UpdateTransform(transform);
+
+            UpdateSmoothedOrthoZoom(positionLerpPct);
+        }
+
+        // Eases orthographicSize toward the wheel-zoom target with the same lerp as position,
+        // so top-down zoom feels smooth instead of stepping a full notch per frame. If any
+        // other system writes orthographicSize directly, adopt that value and stop easing.
+        private void UpdateSmoothedOrthoZoom(float positionLerpPct)
+        {
+            if (mainCamera == null || !mainCamera.orthographic)
+            {
+                m_TargetOrthoSize = -1f;
+                m_LastAppliedOrthoSize = -1f;
+                return;
+            }
+
+            if (m_LastAppliedOrthoSize > 0f && !Mathf.Approximately(mainCamera.orthographicSize, m_LastAppliedOrthoSize))
+                m_TargetOrthoSize = -1f;
+
+            if (m_TargetOrthoSize > 0f)
+            {
+                float smoothed = Mathf.Lerp(mainCamera.orthographicSize, m_TargetOrthoSize, positionLerpPct);
+                if (Mathf.Abs(smoothed - m_TargetOrthoSize) < 0.001f)
+                {
+                    smoothed = m_TargetOrthoSize;
+                    m_TargetOrthoSize = -1f;
+                }
+                mainCamera.orthographicSize = smoothed;
+            }
+
+            m_LastAppliedOrthoSize = mainCamera.orthographicSize;
         }
 
         public bool IsTopDownView()
@@ -358,6 +417,8 @@ namespace UnityTemplateProjects
                 mainCamera.orthographic = true;
                 mainCamera.orthographicSize = size;
             }
+            m_TargetOrthoSize = -1f;
+            m_LastAppliedOrthoSize = size;
 
             m_TargetCameraState.yaw = 0f;
             m_TargetCameraState.pitch = topDownPitch;

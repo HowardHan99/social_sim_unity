@@ -164,10 +164,8 @@ namespace SessionReview
                 var rotations = new List<Quaternion>();
                 var timestamps = new List<float>();
 
-                foreach (var state in timeline.states)
+                foreach (var state in CollectTrialStates(timeline, role, recStart, recEnd))
                 {
-                    if (state.timestamp < recStart || state.timestamp > recEnd)
-                        continue;
                     positions.Add(state.position);
                     rotations.Add(state.rotation);
                     timestamps.Add(state.timestamp);
@@ -273,6 +271,65 @@ namespace SessionReview
             }
 
             isShowing = true;
+        }
+
+        // Robot and PWD player are the "subjects" of a trial: they stop being sampled the
+        // instant they reach their goal (SessionTracker.UntrackAgent), so their recorded
+        // timeline ends naturally at the goal. Background pedestrians keep looping and must
+        // stay clipped to the trial window, so only subjects are extended past recEnd.
+        public static bool IsSubjectRole(AgentRole role)
+        {
+            return role == AgentRole.Robot || role == AgentRole.PWDPlayer;
+        }
+
+        // A subject that does NOT satisfy the strict arrival test keeps being sampled while it
+        // is still driving toward its goal. trial.endTime is frozen at the FIRST primary agent's
+        // arrival (SessionTracker.ArchiveTrial) and only extended once EVERY primary agent
+        // arrives, so a still-moving robot's tail gets clipped at recEnd -- the line stops short
+        // of the goal even though the robot kept going. For subject roles we keep appending
+        // samples past recEnd until the path discontinues (the next trial teleports the agent
+        // back to its start) or a hard cap, so the full path draws without bleeding into a later
+        // trial. Assumes states are in ascending-timestamp order (they always are).
+        private const float SubjectExtendTeleportDist = 3f;   // >3 m between ~0.1 s samples = reset
+        private const float SubjectExtendMaxGap = 2f;         // >2 s gap = sampling discontinuity
+        private const float SubjectExtendMaxSeconds = 120f;   // never extend more than this past recEnd
+
+        public static List<ObjectState> CollectTrialStates(ObjectStateTimeline timeline, AgentRole role,
+            float recStart, float recEnd)
+        {
+            var result = new List<ObjectState>();
+            if (timeline == null || timeline.states == null)
+                return result;
+
+            var states = timeline.states;
+            int i = 0;
+
+            // Base trial window [recStart, recEnd].
+            for (; i < states.Count; i++)
+            {
+                ObjectState s = states[i];
+                if (s.timestamp < recStart) continue;
+                if (s.timestamp > recEnd) break;
+                result.Add(s);
+            }
+
+            // Forward extension for subject agents only (robot / PWD player).
+            if (IsSubjectRole(role) && result.Count > 0)
+            {
+                float extendUntil = recEnd + SubjectExtendMaxSeconds;
+                ObjectState prev = result[result.Count - 1];
+                for (; i < states.Count; i++)
+                {
+                    ObjectState s = states[i];
+                    if (s.timestamp > extendUntil) break;
+                    if (s.timestamp - prev.timestamp > SubjectExtendMaxGap) break;
+                    if (Vector3.Distance(s.position, prev.position) > SubjectExtendTeleportDist) break;
+                    result.Add(s);
+                    prev = s;
+                }
+            }
+
+            return result;
         }
 
         private Gradient BuildControlModeGradient(string agentId, TrialRecord trial, ControlModeLog modeLog, AgentRole role)
@@ -933,8 +990,17 @@ namespace SessionReview
 
             for (int i = 0; i < legendEntries.Count; i++)
             {
-                if (legendEntries[i].key == key)
-                    return; // already registered (e.g. re-entering review)
+                if (legendEntries[i].key != key)
+                    continue;
+
+                // Already registered (e.g. re-entering review). The label can still differ per
+                // trial — "ROS Nav Plan" vs "(not recorded)" — so refresh it rather than keeping
+                // whatever the first reviewed trial happened to say.
+                LegendEntry existing = legendEntries[i];
+                existing.label = label;
+                existing.color = color;
+                legendEntries[i] = existing;
+                return;
             }
 
             legendEntries.Add(new LegendEntry

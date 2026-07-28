@@ -16,11 +16,16 @@ namespace SEAN.Input
     [DefaultExecutionOrder(5000)]
     public class GamepadCameraLook : MonoBehaviour
     {
-        public float yawSpeed = 150f;
-        public float pitchSpeed = 100f;
+        [Tooltip("Right-stick yaw speed (deg/s). Deliberately gentle: fast free-look while driving is a common motion-sickness trigger. Driven live by the joystick tuning panel's Look speed slider.")]
+        public float yawSpeed = 45f;
+        [Tooltip("Right-stick pitch speed (deg/s). Kept below the yaw speed; vertical swings are the most nauseating.")]
+        public float pitchSpeed = 28f;
         public float maxYawOffset = 160f;
-        public float maxPitchOffset = 55f;
-        public float recenterSpeed = 220f;
+        public float maxPitchOffset = 50f;
+        [Tooltip("Seconds for the stick input to ramp in/out, so the view never starts or stops abruptly.")]
+        public float inputSmoothTime = 0.18f;
+        [Tooltip("Seconds for the view to ease back to center after the stick is released. Higher = softer return. Camera motion the user did not ask for is a strong nausea trigger, so this is a slow drift rather than a spring-back.")]
+        public float recenterTime = 1.4f;
         public bool invertPitch = false;
 
         private Camera trackedCamera;
@@ -28,6 +33,8 @@ namespace SEAN.Input
         private bool bareOffsetApplied;
         private float yawOffset;
         private float pitchOffset;
+        private float smoothedLookX;
+        private float smoothedLookY;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Bootstrap()
@@ -42,12 +49,14 @@ namespace SEAN.Input
 
         private void LateUpdate()
         {
-            Camera cam = FindActiveCamera();
+            Camera cam = ResolveLookCamera();
             if (cam != trackedCamera)
             {
                 trackedCamera = cam;
                 yawOffset = 0f;
                 pitchOffset = 0f;
+                smoothedLookX = 0f;
+                smoothedLookY = 0f;
                 bareOffsetApplied = false;
                 baseLocalRotation = cam != null ? cam.transform.localRotation : Quaternion.identity;
             }
@@ -59,24 +68,37 @@ namespace SEAN.Input
             {
                 yawOffset = 0f;
                 pitchOffset = 0f;
+                smoothedLookX = 0f;
+                smoothedLookY = 0f;
                 bareOffsetApplied = false;
                 return;
             }
 
-            float lookX = JoystickProfiles.CameraLookX();
-            float lookY = JoystickProfiles.CameraLookY();
             float dt = Time.unscaledDeltaTime;
+            if (dt <= 0f)
+                return;
 
-            if (lookX != 0f || lookY != 0f)
+            // Ramp the stick input instead of using it raw: an instant start/stop of camera
+            // motion is what makes free-look while driving nauseating.
+            float inputK = 1f - Mathf.Exp(-dt / Mathf.Max(0.01f, inputSmoothTime));
+            smoothedLookX = Mathf.Lerp(smoothedLookX, JoystickProfiles.CameraLookX(), inputK);
+            smoothedLookY = Mathf.Lerp(smoothedLookY, JoystickProfiles.CameraLookY(), inputK);
+
+            if (Mathf.Abs(smoothedLookX) > 0.002f || Mathf.Abs(smoothedLookY) > 0.002f)
             {
                 float pitchSign = invertPitch ? -1f : 1f;
-                yawOffset = Mathf.Clamp(yawOffset + lookX * yawSpeed * dt, -maxYawOffset, maxYawOffset);
-                pitchOffset = Mathf.Clamp(pitchOffset + lookY * pitchSpeed * pitchSign * dt, -maxPitchOffset, maxPitchOffset);
+                yawOffset = Mathf.Clamp(yawOffset + smoothedLookX * yawSpeed * dt, -maxYawOffset, maxYawOffset);
+                pitchOffset = Mathf.Clamp(pitchOffset + smoothedLookY * pitchSpeed * pitchSign * dt, -maxPitchOffset, maxPitchOffset);
             }
             else
             {
-                yawOffset = Mathf.MoveTowards(yawOffset, 0f, recenterSpeed * dt);
-                pitchOffset = Mathf.MoveTowards(pitchOffset, 0f, recenterSpeed * dt);
+                // Exponential ease home rather than a constant-rate snap, so releasing the
+                // stick drifts the view back instead of yanking it.
+                float recenterK = 1f - Mathf.Exp(-dt / Mathf.Max(0.01f, recenterTime));
+                yawOffset = Mathf.Lerp(yawOffset, 0f, recenterK);
+                pitchOffset = Mathf.Lerp(pitchOffset, 0f, recenterK);
+                if (Mathf.Abs(yawOffset) < 0.05f) yawOffset = 0f;
+                if (Mathf.Abs(pitchOffset) < 0.05f) pitchOffset = 0f;
             }
 
             ApplyOffsets(cam);
@@ -133,14 +155,40 @@ namespace SEAN.Input
             }
         }
 
+        // Scanning for the view every frame is wasteful; it only changes when the player
+        // respawns or the first/third-person toggle fires.
+        private Camera cachedCamera;
+        private float nextCameraScanTime;
+
+        private Camera ResolveLookCamera()
+        {
+            if (cachedCamera != null && cachedCamera.isActiveAndEnabled && Time.unscaledTime < nextCameraScanTime)
+                return cachedCamera;
+
+            nextCameraScanTime = Time.unscaledTime + 0.5f;
+            cachedCamera = FindActiveCamera();
+            return cachedCamera;
+        }
+
+        /// <summary>
+        /// Right-stick look only ever moves the FIRST-PERSON view -- the small top-right
+        /// panel, or the main view once the first/third-person toggle swaps it in. Orbiting
+        /// the third-person camera swung the whole scene around the avatar, which is what
+        /// made looking around while driving nauseating; a head turn inside a small inset is
+        /// far easier to tolerate. Returns null when no first-person view exists, and the
+        /// stick then does nothing.
+        /// </summary>
         private static Camera FindActiveCamera()
         {
-            Camera main = Camera.main;
-            if (main != null && main.isActiveAndEnabled)
-                return main;
-
-            Camera[] cams = Camera.allCameras;
-            return cams.Length > 0 ? cams[0] : null;
+            foreach (var firstPerson in FindObjectsOfType<IVI.FirstPersonCameraLevel>())
+            {
+                if (firstPerson == null)
+                    continue;
+                var cam = firstPerson.GetComponent<Camera>();
+                if (cam != null && cam.isActiveAndEnabled)
+                    return cam;
+            }
+            return null;
         }
 
         private static bool IsLookBlocked(Camera cam)

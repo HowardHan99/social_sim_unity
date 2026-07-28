@@ -85,6 +85,10 @@ namespace SessionReview
         private MultiAgentTrajectoryRenderer trajectoryRenderer;
         private TrajectoryManager drawTrajectoryManager;
         private GhostRobotComparison ghostComparison;
+        private readonly ReplayPedestrianAnimator replayPedestrianAnimator = new ReplayPedestrianAnimator();
+        // Window over the recording used to finite-difference replayed velocities for
+        // the walk animation (recording samples at 10 Hz).
+        private const float AnimVelocitySampleWindow = 0.25f;
 
         [Header("Plan Path")]
         [SerializeField] private Color activePlanColor = new Color(0.2f, 1f, 0.3f, 0.9f);
@@ -165,16 +169,6 @@ namespace SessionReview
             currentRecording = recording;
             controlModeLog = modeLog;
             trajectoryRenderer = trajRenderer;
-            // Expose the live "active plan" line in the Review Legend so "Hide All"/"Show All"
-            // and its own row can toggle it (UpdateActivePlanPath rebuilds it every frame, so it
-            // can only be governed by a flag the renderer owns, not by disabling it directly).
-            // The plan starts out however the RosOverlayVisibility switch is currently set —
-            // review entry turns that switch on, so the snapshot is visible by default here and
-            // the legend row (or "Show All"/"Hide All") can still override it per-review.
-            if (trajectoryRenderer != null)
-                trajectoryRenderer.RegisterExternalLegendGroup(
-                    ActivePlanLegendKey, "ROS Nav Plan", activePlanColor,
-                    initiallyVisible: RosOverlayVisibility.PlanVisible);
             drawTrajectoryManager = FindObjectOfType<TrajectoryManager>();
             timeOffset = recordingTimeOffset;
             signalAnnotations = annotations ?? trial.signalAnnotations ?? new List<SignalAnnotation>();
@@ -183,6 +177,27 @@ namespace SessionReview
                 currentRecording.BuildCache();
 
             liveRecorder = FindObjectOfType<LiveTrajectoryRecorder>();
+
+            // Expose the live "active plan" line in the Review Legend so "Hide All"/"Show All"
+            // and its own row can toggle it (UpdateActivePlanPath rebuilds it every frame, so it
+            // can only be governed by a flag the renderer owns, not by disabling it directly).
+            // The plan starts out however the RosOverlayVisibility switch is currently set —
+            // review entry turns that switch on, so the snapshot is visible by default here and
+            // the legend row (or "Show All"/"Hide All") can still override it per-review.
+            //
+            // Registered AFTER liveRecorder is resolved so the row can say WHY it is blank when a
+            // trial captured no plan (run without the ROS backend). Hiding the plan during the
+            // trial is NOT such a case — PlanVisualizer records regardless of visibility — and a
+            // row that silently toggles nothing is indistinguishable from a broken toggle.
+            if (trajectoryRenderer != null)
+            {
+                bool planRecorded = liveRecorder != null && liveRecorder.HasAnyPlanSnapshots;
+                trajectoryRenderer.RegisterExternalLegendGroup(
+                    ActivePlanLegendKey,
+                    planRecorded ? "ROS Nav Plan" : "ROS Nav Plan  [none recorded]",
+                    activePlanColor,
+                    initiallyVisible: RosOverlayVisibility.PlanVisible);
+            }
             reviewSignalLightController = FindObjectOfType<RobotSignalLightController>();
             reviewTtsManager = FindObjectOfType<TTSManager>();
             activeVlmReplayLabel = string.Empty;
@@ -305,6 +320,7 @@ namespace SessionReview
 
             ClearTrails();
             ClearReplayBehaviors();
+            replayPedestrianAnimator.End();
             if (ghostComparison != null)
                 ghostComparison.End();
             transformCache.Clear();
@@ -339,6 +355,10 @@ namespace SessionReview
                 }
                 ApplyStateAtCurrentTime();
             }
+
+            // Every frame, not just while playing: a paused review must freeze the
+            // walk cycle (the captured animators run on unscaled time).
+            replayPedestrianAnimator.Tick(isPlaying, playbackSpeed);
 
             if (showTrails)
                 UpdateTrails();
@@ -552,6 +572,10 @@ namespace SessionReview
             string robotId = (sean != null && sean.robot != null && sean.robot.base_link != null)
                 ? SessionTracker.GetObjectId(sean.robot.base_link) : null;
 
+            // Velocity of the recorded motion (per recorded second) for the walk
+            // animation, finite-differenced against a slightly earlier sample.
+            var earlierStates = liveRecorder.GetStateAtTime(currentTime - AnimVelocitySampleWindow);
+
             foreach (var kvp in states)
             {
                 if (followOwnsRobot && robotId != null && kvp.Key == robotId)
@@ -560,6 +584,11 @@ namespace SessionReview
                 if (t == null) continue;
                 t.position = kvp.Value.position;
                 t.rotation = kvp.Value.rotation;
+
+                Vector3 recordedVelocity = Vector3.zero;
+                if (earlierStates != null && earlierStates.TryGetValue(kvp.Key, out ObjectState earlier))
+                    recordedVelocity = (kvp.Value.position - earlier.position) / AnimVelocitySampleWindow;
+                replayPedestrianAnimator.SetMotion(t, recordedVelocity);
             }
 
             ApplyDrawTrajectoryFollowState();
@@ -865,6 +894,22 @@ namespace SessionReview
                 }
             }
 
+            // World-Building walking pedestrians: the timeline is keyed by the root's unique
+            // WB_Pedestrian id, but the transform that was actually sampled is the avatar
+            // child's rigidbody (SessionTracker.ResolveTrackingTransform). Resolve to that
+            // same transform — the GameObject.Find fallback below would return the ROOT,
+            // and moving the root leaves the avatar sitting at its stale wander offset
+            // instead of on the replayed path.
+            foreach (var wander in FindObjectsOfType<WorldBuildingWanderPedestrian>())
+            {
+                if (wander != null && SessionTracker.GetObjectId(wander.gameObject) == objectId)
+                {
+                    Transform resolved = SessionTracker.ResolveTrackingTransform(wander.gameObject);
+                    transformCache[objectId] = resolved;
+                    return resolved;
+                }
+            }
+
             // Fallback: scan all INavigable instances
             foreach (var nav in FindObjectsOfType<IVI.INavigable>())
             {
@@ -931,6 +976,20 @@ namespace SessionReview
                     if (StripInstanceSuffix(SessionTracker.GetObjectId(agent.gameObject)) == stripped)
                         return agent.transform;
                 }
+            }
+
+            // World-Building pedestrians recorded in another run: their WB_Pedestrian_XXXXXXXX
+            // names use the same strippable instance suffix, so pair each recorded id with a
+            // not-yet-claimed wander pedestrian in the restored scene.
+            foreach (var wander in FindObjectsOfType<WorldBuildingWanderPedestrian>())
+            {
+                if (wander == null)
+                    continue;
+                Transform resolved = SessionTracker.ResolveTrackingTransform(wander.gameObject);
+                if (resolved == null || transformCache.ContainsValue(resolved))
+                    continue;
+                if (StripInstanceSuffix(SessionTracker.GetObjectId(wander.gameObject)) == stripped)
+                    return resolved;
             }
 
             foreach (var nav in FindObjectsOfType<IVI.INavigable>())

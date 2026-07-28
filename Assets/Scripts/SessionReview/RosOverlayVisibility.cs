@@ -38,7 +38,19 @@ namespace SessionReview
         private static readonly List<SEAN.Display.PlanVisualizer> planVisualizers =
             new List<SEAN.Display.PlanVisualizer>();
         private static readonly List<Renderer> goalRenderers = new List<Renderer>();
+        private static SEAN.Control.VelocityController robotVelocityController;
         private static float lastRediscoverTime = float.NegativeInfinity;
+
+        /// <summary>
+        /// The goal only gives the answer away while ROS is driving. When a HUMAN drives the
+        /// robot it is that driver's own task target — hiding it would leave them with nowhere
+        /// to go — so it is force-shown, exactly like the player goal is never covered at all.
+        /// </summary>
+        public static bool RobotIsManuallyDriven =>
+            robotVelocityController != null && robotVelocityController.ManualControlActive;
+
+        /// <summary>What the robot goal renderers are actually set to, switch plus the override.</summary>
+        private static bool EffectiveRobotGoalVisible => robotGoalVisible || RobotIsManuallyDriven;
 
         /// <summary>Is the ROS control trajectory (nav plan line) currently shown?</summary>
         public static bool PlanVisible => planVisible;
@@ -126,13 +138,14 @@ namespace SessionReview
         void OnGUI()
         {
             var manager = SessionReviewManager.Instance;
-            if (manager != null && (manager.IsOnboardingActive || manager.IsWorldBuildingModeActive))
+            if (manager != null && (manager.IsOnboardingActive
+                                    || manager.IsWorldBuildingModeActive
+                                    || manager.IsDrawTrajectoryModeActive))
                 return;
 
             ReviewUiScale.Apply();
 
-            const float x = 8f;
-            const float y = 44f;   // directly under the UiScaleController "Aa 100%" badge
+            const float margin = 8f;
             const float bw = 148f;
             const float bh = 28f;
             const float gap = 6f;
@@ -141,7 +154,18 @@ namespace SessionReview
 
             int buttons = HasControlTrajectory ? 2 : 1;
             float stripW = pad * 2f + buttons * bw + (buttons - 1) * gap;
-            Rect strip = new Rect(x, y, stripW, labelH + bh + pad * 2f);
+            float stripH = labelH + bh + pad * 2f;
+
+            // Bottom-left, lifted clear of the replay progress bar: the bar's scrubber is an
+            // IMGUI slider that eats clicks first, so a button overlapping it would scrub the
+            // timeline instead of toggling. The margin is the fallback for the frames where
+            // the bar has not drawn (outside review it is not there at all).
+            float stripY = ReviewUiScale.Height - stripH - margin;
+            var rewind = manager != null ? manager.GetComponent<RewindController>() : null;
+            if (rewind != null && rewind.TryGetProgressBarRect(out Rect bar) && stripY + stripH > bar.y)
+                stripY = bar.y - stripH - 12f;
+
+            Rect strip = new Rect(margin, stripY, stripW, stripH);
             GUI.Box(strip, GUIContent.none);
 
             GUI.Label(new Rect(strip.x + pad, strip.y + 2f, stripW - pad * 2f, labelH),
@@ -157,8 +181,15 @@ namespace SessionReview
                 bx += bw + gap;
             }
 
-            if (ToggleButton(new Rect(bx, by, bw, bh), "Robot Goal", robotGoalVisible))
+            // While a human drives the robot the goal is their own target, so it is not hideable
+            // and the button says so rather than claiming an OFF that is not in effect.
+            bool forced = RobotIsManuallyDriven;
+            GUI.enabled = !forced;
+            if (ToggleButton(new Rect(bx, by, bw, bh),
+                forced ? "Robot Goal (driving)" : "Robot Goal",
+                EffectiveRobotGoalVisible))
                 SetRobotGoalVisible(!robotGoalVisible);
+            GUI.enabled = true;
 
             controlRect = strip;
             controlFrame = Time.frameCount;
@@ -214,10 +245,11 @@ namespace SessionReview
 
         private static void ApplyGoalRenderers()
         {
+            bool show = EffectiveRobotGoalVisible;
             for (int i = 0; i < goalRenderers.Count; i++)
             {
                 if (goalRenderers[i] != null)
-                    goalRenderers[i].enabled = robotGoalVisible;
+                    goalRenderers[i].enabled = show;
             }
         }
 
@@ -259,6 +291,7 @@ namespace SessionReview
             SEAN.Tasks.Base task = FindRobotTask();
             if (task != null && task.robotGoal != null)
             {
+                // The runtime marker holds nothing but goal plumbing, so everything under it goes.
                 foreach (Renderer renderer in task.robotGoal.GetComponentsInChildren<Renderer>(true))
                 {
                     if (renderer != null && (boundObject == null || !renderer.transform.IsChildOf(boundObject)))
@@ -266,10 +299,49 @@ namespace SessionReview
                 }
             }
 
+            // A CustomStartGoal task drives the marker from a hand-placed scene node, and that
+            // node usually carries its OWN preview flag cube sitting at the same spot — hiding
+            // only the runtime marker leaves that duplicate on screen. Unlike the marker, the node
+            // may legitimately have scenery authored under it (a door placed under "Goal"), so
+            // only the flag visuals are taken, matched by the same names Base.SetTargetFlags uses.
+            var customTask = task as SEAN.Tasks.CustomStartGoal;
+            if (customTask != null && customTask.RobotGoalLocation != null)
+                AddTargetFlagRenderers(customTask.RobotGoalLocation.transform, boundObject);
+
             // The floating "ROBOT GOAL" text and the orange object highlight are goal UI too.
             // GoalUiRenderers deliberately excludes the bound object itself.
             if (RobotGoalObjectBinding.Instance != null)
                 goalRenderers.AddRange(RobotGoalObjectBinding.Instance.GoalUiRenderers);
+
+            // GoalBeacon's floating "Robot Goal" label sits OUTSIDE the marker's hierarchy (the
+            // marker's scale would distort it), so walking the marker's children misses it. It
+            // has no visibility rule of its own — this switch is the only thing that shows it.
+            goalRenderers.AddRange(GoalBeacon.RobotGoalUiRenderers);
+
+            robotVelocityController = FindObjectOfType<SEAN.Control.VelocityController>();
+        }
+
+        /// <summary>
+        /// Collects the goal FLAG visuals under a node that may also hold real scenery: every
+        /// renderer on (or under) a "TargetFlagCube"/"TargetFlagArrow", which are the exact names
+        /// SEAN.Tasks.Base.SetTargetFlags looks for. Anything else under the node is left alone.
+        /// </summary>
+        private static void AddTargetFlagRenderers(Transform root, Transform boundObject)
+        {
+            foreach (Transform child in root.GetComponentsInChildren<Transform>(true))
+            {
+                if (child.name != SEAN.Tasks.Base.TargetFlagCubeName &&
+                    child.name != SEAN.Tasks.Base.TargetFlagArrowName)
+                    continue;
+                if (boundObject != null && (child == boundObject || child.IsChildOf(boundObject)))
+                    continue;
+
+                foreach (Renderer renderer in child.GetComponentsInChildren<Renderer>(true))
+                {
+                    if (renderer != null && !goalRenderers.Contains(renderer))
+                        goalRenderers.Add(renderer);
+                }
+            }
         }
 
         private static SEAN.Tasks.Base FindRobotTask()

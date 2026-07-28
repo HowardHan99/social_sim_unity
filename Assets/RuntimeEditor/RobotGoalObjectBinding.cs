@@ -7,8 +7,8 @@ using UnityEngine;
 ///  - the goal marker's flag visuals (TargetFlagCube/TargetFlagArrow) are hidden — the marker
 ///    root itself stays, because its transform is what feeds ROS goal publishing, completion
 ///    checks and metrics,
-///  - a floating "ROBOT GOAL" text label hovers above the bound object and billboards to the
-///    active camera,
+///  - the SAME floating label the single-key goals use (SessionReview.GoalBeacon) is attached
+///    to the bound object, so a bound goal reads identically to every other goal,
 ///  - every LateUpdate the marker root (and CustomStartGoal.RobotGoalLocation, when the task
 ///    has one) is synced to the object's ground-anchored bounds position, so dragging the
 ///    object in world building moves the object, the label AND the actual goal as one unit.
@@ -19,8 +19,8 @@ public class RobotGoalObjectBinding : MonoBehaviour
 {
     public static RobotGoalObjectBinding Instance { get; private set; }
 
-    const string LabelText = "ROBOT GOAL";
-    const float LabelClearance = 0.2f;
+    // Same wording as the single-key goals, so the floating label reads identically everywhere.
+    const string LabelText = "Robot Goal";
     const string OverlayName = "RobotGoalOverlay";
     const float OverlayAlpha = 0.35f;
     // A real goal prop has a handful of renderers; an environment root has dozens/hundreds.
@@ -40,30 +40,28 @@ public class RobotGoalObjectBinding : MonoBehaviour
     }
 
     GameObject boundObject;
-    GameObject label;
-    TextMesh labelMesh;
-    GameObject labelBackground;
-    Material labelBackgroundMaterial;
+    SessionReview.GoalBeacon labelBeacon;
     readonly List<BoundsBoxFit> boundsBoxPieces = new List<BoundsBoxFit>();
     readonly List<GameObject> overlayPieces = new List<GameObject>();
     GameObject overlayOwner;
     Material overlayMaterial;
+    bool overlayShaderUnavailable;
     readonly List<GameObject> hiddenMarkerChildren = new List<GameObject>();
     GameObject markerWithHiddenChildren;
 
     public static GameObject BoundObject => Instance != null ? Instance.boundObject : null;
 
     /// <summary>
-    /// Renderers of the goal UI (floating text + goal outline), so screenshot/ROI exports can
-    /// hide them like the flag-cube marker. Deliberately excludes the bound object itself.
+    /// Renderers of the goal OUTLINE (the orange tint over the object), so screenshot/ROI
+    /// exports can hide them like the flag-cube marker. The floating label is owned by the
+    /// bound object's GoalBeacon and is collected separately (GoalBeacon.AllUiRenderers /
+    /// RobotGoalUiRenderers). Deliberately excludes the bound object itself.
     /// </summary>
     public Renderer[] GoalUiRenderers
     {
         get
         {
             var result = new List<Renderer>();
-            if (label != null)
-                result.AddRange(label.GetComponentsInChildren<Renderer>(true));
             foreach (GameObject piece in overlayPieces)
             {
                 if (piece != null)
@@ -238,8 +236,7 @@ public class RobotGoalObjectBinding : MonoBehaviour
 
         boundObject = target;
         HideMarkerVisuals();
-        EnsureLabel();
-        UpdateLabelBackground();
+        EnsureLabelBeacon();
         EnsureOverlay();
         SyncNow();
 
@@ -257,17 +254,11 @@ public class RobotGoalObjectBinding : MonoBehaviour
         boundObject = null;
 
         RestoreMarkerVisuals();
-        if (label != null)
+        if (labelBeacon != null)
         {
-            Destroy(label);
-            label = null;
-            labelMesh = null;
-            labelBackground = null;
-        }
-        if (labelBackgroundMaterial != null)
-        {
-            Destroy(labelBackgroundMaterial);
-            labelBackgroundMaterial = null;
+            // Destroys just the component; GoalBeacon.OnDestroy tears down its own label root.
+            Destroy(labelBeacon);
+            labelBeacon = null;
         }
         DestroyOverlay();
         if (released != null)
@@ -287,8 +278,9 @@ public class RobotGoalObjectBinding : MonoBehaviour
             return;
         }
 
-        // Self-heal: external cleanup may have destroyed the overlay pieces.
+        // Self-heal: external cleanup may have destroyed the overlay pieces or the label beacon.
         EnsureOverlay();
+        EnsureLabelBeacon();
         SyncNow();
     }
 
@@ -302,11 +294,20 @@ public class RobotGoalObjectBinding : MonoBehaviour
     {
         if (boundObject == null)
             return;
-        if (overlayOwner == boundObject && overlayPieces.Count > 0 && overlayPieces[0] != null)
+        // The material is checked alongside the pieces: every piece shares this ONE material, so
+        // if it dies while a piece survives, skipping the rebuild here leaves the bound object
+        // drawn with a destroyed material — i.e. covered in Unity's magenta error shader.
+        if (overlayOwner == boundObject && overlayMaterial != null &&
+            overlayPieces.Count > 0 && overlayPieces[0] != null)
             return;
 
         DestroyOverlay();
         overlayOwner = boundObject;
+
+        // Resolve the material up front: a piece without one draws magenta, so no shader means
+        // no overlay at all rather than a "broken" looking goal object.
+        if (GetOverlayMaterial() == null)
+            return;
 
         foreach (MeshRenderer source in boundObject.GetComponentsInChildren<MeshRenderer>())
         {
@@ -397,12 +398,26 @@ public class RobotGoalObjectBinding : MonoBehaviour
     {
         if (overlayMaterial != null)
             return overlayMaterial;
+        if (overlayShaderUnavailable)
+            return null;
 
         // Sprites/Default: unlit, transparent, double-sided, tintable — draws as a translucent
         // film over the object's opaque surfaces.
         Shader shader = Shader.Find("Sprites/Default");
         if (shader == null)
             shader = Shader.Find("Unlit/Color");
+        if (shader == null)
+            shader = Shader.Find("Standard");
+        if (shader == null)
+        {
+            // new Material(null) renders magenta, which reads as "the goal object is broken"
+            // rather than "the highlight is unavailable" — skip the overlay instead.
+            overlayShaderUnavailable = true;
+            Debug.LogWarning("[RobotGoal] No usable shader for the goal highlight " +
+                             "(Sprites/Default, Unlit/Color and Standard are all missing from this build); " +
+                             "the bound object will not be tinted.");
+            return null;
+        }
 
         overlayMaterial = new Material(shader);
         Color tint = GoalColor;
@@ -454,8 +469,6 @@ public class RobotGoalObjectBinding : MonoBehaviour
 
         for (int i = 0; i < boundsBoxPieces.Count; i++)
             FitBoundsBox(boundsBoxPieces[i].source, boundsBoxPieces[i].box);
-
-        UpdateLabel(hasBounds, bounds, goalPosition);
     }
 
     /// <summary>
@@ -522,113 +535,30 @@ public class RobotGoalObjectBinding : MonoBehaviour
         markerWithHiddenChildren = null;
     }
 
-    void EnsureLabel()
-    {
-        if (label != null)
-            return;
-
-        // Deliberately NOT parented under this component or the bound object: a child label
-        // would inflate the bound object's renderer bounds and push itself upward every frame.
-        label = new GameObject("RobotGoalLabel");
-
-        TextMesh text = label.AddComponent<TextMesh>();
-        labelMesh = text;
-        text.richText = true;
-        text.text = LabelText;
-        text.anchor = TextAnchor.LowerCenter;
-        text.alignment = TextAlignment.Center;
-        text.fontSize = 64;
-        text.characterSize = 0.03f;
-        text.color = GoalColor;
-
-        Font font = Resources.GetBuiltinResource<Font>("Arial.ttf");
-        if (font != null)
-        {
-            text.font = font;
-            MeshRenderer renderer = label.GetComponent<MeshRenderer>();
-            if (renderer != null)
-                renderer.material = font.material;
-        }
-    }
-
     /// <summary>
-    /// Puts a white backdrop panel behind the label text so it stays readable against any
-    /// scenery. Child of the label, so it follows position and billboarding automatically;
-    /// sized from the rendered text measured with the label held upright.
+    /// Attaches the shared floating label (SessionReview.GoalBeacon) to the bound object, so a
+    /// bound goal looks exactly like every single-key goal. Put on the OBJECT rather than the
+    /// goal marker on purpose: the beacon drops its label to the ground beneath its own host and
+    /// skips that host's colliders, so hosting it on the object floats the label cleanly above
+    /// it (a marker host would stop the ground ray on the object and sit the label too high),
+    /// and it tracks the object when world building drags it. Its renderers are collected by
+    /// GoalBeacon for RosOverlayVisibility, so the label shows only while the robot is driven.
     /// </summary>
-    void UpdateLabelBackground()
+    void EnsureLabelBeacon()
     {
-        if (label == null || labelMesh == null)
+        if (boundObject == null)
+            return;
+        if (labelBeacon != null && labelBeacon.gameObject == boundObject)
             return;
 
-        MeshRenderer textRenderer = label.GetComponent<MeshRenderer>();
-        if (textRenderer == null)
-            return;
-
-        if (labelBackground == null)
-        {
-            labelBackground = new GameObject("RobotGoalLabelBackground");
-            labelBackground.hideFlags = HideFlags.DontSave;
-            labelBackground.transform.SetParent(label.transform, false);
-            labelBackground.AddComponent<MeshFilter>().sharedMesh = Resources.GetBuiltinResource<Mesh>("Cube.fbx");
-
-            MeshRenderer renderer = labelBackground.AddComponent<MeshRenderer>();
-            renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-            renderer.receiveShadows = false;
-
-            Shader shader = Shader.Find("Sprites/Default");
-            if (shader == null)
-                shader = Shader.Find("Unlit/Color");
-            labelBackgroundMaterial = new Material(shader);
-            labelBackgroundMaterial.color = new Color(1f, 1f, 1f, 0.9f);
-            renderer.sharedMaterial = labelBackgroundMaterial;
-        }
-
-        Quaternion previousRotation = label.transform.rotation;
-        label.transform.rotation = Quaternion.identity;
-        Bounds textBounds = textRenderer.bounds;
-        label.transform.rotation = previousRotation;
-
-        float width = textBounds.size.x;
-        float height = textBounds.size.y;
-        // Anchor is LowerCenter, so the text rises from the label origin; +Z puts the panel
-        // just behind the glyphs from the viewing camera's side.
-        labelBackground.transform.localPosition = new Vector3(0f, height * 0.5f, 0.02f);
-        labelBackground.transform.localScale = new Vector3(width + 0.12f, height + 0.06f, 0.004f);
-    }
-
-    void UpdateLabel(bool hasBounds, Bounds bounds, Vector3 goalPosition)
-    {
-        if (label == null)
-            return;
-
-        Vector3 top = hasBounds
-            ? new Vector3(bounds.center.x, bounds.max.y, bounds.center.z)
-            : goalPosition + Vector3.up * 1.5f;
-        label.transform.position = top + Vector3.up * LabelClearance;
-
-        Camera cam = FindLabelCamera();
-        if (cam != null)
-            label.transform.rotation = cam.transform.rotation;
-    }
-
-    static Camera FindLabelCamera()
-    {
-        RuntimeEditorManager editor = RuntimeEditorManager.Instance;
-        if (editor != null && editor.isEditorActive &&
-            editor.ActiveRaycastCamera != null && editor.ActiveRaycastCamera.isActiveAndEnabled)
-            return editor.ActiveRaycastCamera;
-
-        Camera main = Camera.main;
-        if (main != null && main.isActiveAndEnabled)
-            return main;
-
-        foreach (Camera cam in Camera.allCameras)
-        {
-            if (cam != null && cam.isActiveAndEnabled)
-                return cam;
-        }
-        return null;
+        labelBeacon = boundObject.GetComponent<SessionReview.GoalBeacon>();
+        if (labelBeacon == null)
+            labelBeacon = boundObject.AddComponent<SessionReview.GoalBeacon>();
+        labelBeacon.label = LabelText;
+        labelBeacon.color = GoalColor;
+        labelBeacon.audience = SessionReview.GoalBeacon.Audience.Robot;
+        labelBeacon.followsRobotGoalVisibility = true; // shown only while driving the robot
+        labelBeacon.hideMarkerLabel = false;           // the object has no baked label to hide
     }
 
     static SEAN.Tasks.Base FindRobotTask()
@@ -659,14 +589,13 @@ public class RobotGoalObjectBinding : MonoBehaviour
         foreach (Renderer renderer in root.GetComponentsInChildren<Renderer>())
         {
             // LineRenderers are selection outlines/trails, not the object's real shape; the
-            // floating label and the overlay pieces must never feed back into the bounds that
-            // position them. Renderer.bounds is used as-is: it stays object-accurate even for
-            // statically batched renderers (whose sharedMesh becomes the whole combined batch).
+            // overlay pieces must never feed back into the bounds that position them. Renderer.
+            // bounds is used as-is: it stays object-accurate even for statically batched
+            // renderers (whose sharedMesh becomes the whole combined batch). The GoalBeacon label
+            // lives on its own root object, not under the bound object, so it never appears here.
             if (renderer == null || renderer is LineRenderer)
                 continue;
             if (renderer.gameObject.name == OverlayName)
-                continue;
-            if (label != null && renderer.transform.IsChildOf(label.transform))
                 continue;
 
             if (!hasBounds)

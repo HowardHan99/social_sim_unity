@@ -9,7 +9,16 @@ using UnityEngine.UI;
 
 public class CamCapture : MonoBehaviour
 {
-    private const string GeminiVisionModel = "gemini-2.0-flash";
+    // Google retires Gemini models over time (gemini-2.0-flash now returns 404 NOT_FOUND),
+    // so keep an ordered candidate list and fall through on 404 until one answers.
+    private static readonly string[] GeminiVisionModelCandidates =
+    {
+        "gemini-2.5-flash",
+        "gemini-flash-latest",
+        "gemini-2.5-flash-lite"
+    };
+    private static int preferredVisionModelIndex;
+
     private const string GeminiApiBaseUrl = "https://generativelanguage.googleapis.com/v1beta/models/";
 
     public Camera cam;
@@ -177,33 +186,55 @@ public class CamCapture : MonoBehaviour
         string mimeType = GetMimeType(filePath);
         string requestJson = BuildGeminiVisionRequest(customPrompt, movementStatus, imageBytes, mimeType);
         string imageName = Path.GetFileName(filePath);
-        string url = GeminiApiBaseUrl + GeminiVisionModel + ":generateContent?key=" + geminiApiKey;
 
-        using (UnityWebRequest request = new UnityWebRequest(url, UnityWebRequest.kHttpVerbPOST))
+        for (int modelIndex = preferredVisionModelIndex; modelIndex < GeminiVisionModelCandidates.Length; modelIndex++)
         {
-            byte[] bodyRaw = Encoding.UTF8.GetBytes(requestJson);
-            request.uploadHandler = new UploadHandlerRaw(bodyRaw);
-            request.downloadHandler = new DownloadHandlerBuffer();
-            request.SetRequestHeader("Content-Type", "application/json");
+            string model = GeminiVisionModelCandidates[modelIndex];
+            string url = GeminiApiBaseUrl + model + ":generateContent?key=" + geminiApiKey;
 
-            yield return request.SendWebRequest();
-
-            string rawResponse = request.downloadHandler != null ? request.downloadHandler.text : string.Empty;
-            if (request.result != UnityWebRequest.Result.Success)
+            using (UnityWebRequest request = new UnityWebRequest(url, UnityWebRequest.kHttpVerbPOST))
             {
-                Debug.LogError("[CamCapture] Gemini VLM request failed: " + request.error + "\nResponse: " + rawResponse);
-                SaveResponseToLog(rawResponse, string.Empty, imageName, movementStatus, false);
-                isVlmRequestInFlight = false;
-                yield break;
+                byte[] bodyRaw = Encoding.UTF8.GetBytes(requestJson);
+                request.uploadHandler = new UploadHandlerRaw(bodyRaw);
+                request.downloadHandler = new DownloadHandlerBuffer();
+                request.SetRequestHeader("Content-Type", "application/json");
+
+                yield return request.SendWebRequest();
+
+                string rawResponse = request.downloadHandler != null ? request.downloadHandler.text : string.Empty;
+                if (request.result != UnityWebRequest.Result.Success)
+                {
+                    bool canTryNextModel = request.responseCode == 404 &&
+                        modelIndex + 1 < GeminiVisionModelCandidates.Length;
+                    if (canTryNextModel)
+                    {
+                        Debug.LogWarning("[CamCapture] Gemini model " + model + " is unavailable (404). Retrying with " +
+                            GeminiVisionModelCandidates[modelIndex + 1] + ".");
+                        continue;
+                    }
+
+                    Debug.LogError("[CamCapture] Gemini VLM request failed: " + request.error + "\nResponse: " + rawResponse);
+                    SaveResponseToLog(rawResponse, string.Empty, imageName, movementStatus, false, model);
+
+                    // Unlock the response window so the user can still type a message and speak it.
+                    if (uiManager != null)
+                        uiManager.DisplayLLMResponse(string.Empty);
+
+                    isVlmRequestInFlight = false;
+                    yield break;
+                }
+
+                preferredVisionModelIndex = modelIndex;
+
+                string parsedResponse = ParseGeminiResponse(rawResponse);
+                Debug.Log("[CamCapture] Gemini VLM response (" + model + "): " + parsedResponse);
+
+                if (uiManager != null)
+                    uiManager.DisplayLLMResponse(parsedResponse);
+
+                SaveResponseToLog(rawResponse, parsedResponse, imageName, movementStatus, true, model);
+                break;
             }
-
-            string parsedResponse = ParseGeminiResponse(rawResponse);
-            Debug.Log("[CamCapture] Gemini VLM response: " + parsedResponse);
-
-            if (uiManager != null)
-                uiManager.DisplayLLMResponse(parsedResponse);
-
-            SaveResponseToLog(rawResponse, parsedResponse, imageName, movementStatus, true);
         }
 
         isVlmRequestInFlight = false;
@@ -418,7 +449,7 @@ public class CamCapture : MonoBehaviour
         return builder.ToString().Trim();
     }
 
-    private void SaveResponseToLog(string rawResponse, string parsedResponse, string imageName, string movementStatus, bool isSuccess)
+    private void SaveResponseToLog(string rawResponse, string parsedResponse, string imageName, string movementStatus, bool isSuccess, string model)
     {
         string logFilePath = Path.Combine(Application.persistentDataPath, "ResponseLog.txt");
 
@@ -426,7 +457,7 @@ public class CamCapture : MonoBehaviour
         {
             writer.WriteLine("Timestamp: " + DateTime.Now.ToString("o"));
             writer.WriteLine("Provider: Google Gemini");
-            writer.WriteLine("Model: " + GeminiVisionModel);
+            writer.WriteLine("Model: " + model);
             writer.WriteLine("Success: " + isSuccess);
             writer.WriteLine("Image Name: " + imageName);
             writer.WriteLine("Movement Status: " + movementStatus);

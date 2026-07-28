@@ -298,7 +298,13 @@ namespace SEAN.Control
 
             bool sessionBlocked = IsSessionInputBlocked();
 
-            if (!sessionBlocked && UnityEngine.Input.GetKeyDown(KeyCode.LeftShift))
+            // While the Agent Speed panel is open, Shift is a modifier for its speed
+            // hotkeys (Shift+-/=/0), so a Shift press must not flip manual control.
+            // While the Agent Control panel is picking/driving another agent, Shift is
+            // its run/boost key, so it must not flip manual control either.
+            if (!sessionBlocked && !AgentSpeedOverlay.HudVisible &&
+                !AgentPossessOverlay.KeyboardCaptured &&
+                UnityEngine.Input.GetKeyDown(KeyCode.LeftShift))
             {
                 SetManualControlActive(!manualControlActive);
             }
@@ -887,12 +893,50 @@ namespace SEAN.Control
         // the human's active role (so a robot + PWD both in manual don't move together).
         private bool ManualKeyHeld(KeyCode wasdKey, KeyCode arrowKey)
         {
-            return UnityEngine.Input.GetKey(manualUseArrowKeys ? arrowKey : wasdKey);
+            // Keyboard belongs to the Agent Control panel while it picks/drives another
+            // agent; the D-pad (participant's gamepad) keeps working.
+            if (AgentPossessOverlay.KeyboardCaptured)
+                return DpadHeld(wasdKey);
+            return UnityEngine.Input.GetKey(manualUseArrowKeys ? arrowKey : wasdKey) || DpadHeld(wasdKey);
         }
 
         private bool ManualKeyDown(KeyCode wasdKey, KeyCode arrowKey)
         {
-            return UnityEngine.Input.GetKeyDown(manualUseArrowKeys ? arrowKey : wasdKey);
+            if (AgentPossessOverlay.KeyboardCaptured)
+                return DpadPressed(wasdKey);
+            return UnityEngine.Input.GetKeyDown(manualUseArrowKeys ? arrowKey : wasdKey) || DpadPressed(wasdKey);
+        }
+
+        // The gamepad D-pad is a second set of WASD keys. It follows the same ownership rule
+        // as the stick, so the agent that is not the human's active role never moves with it.
+        private bool DpadHeld(KeyCode wasdKey)
+        {
+            if (!ManualUsesJoystick)
+                return false;
+
+            switch (wasdKey)
+            {
+                case KeyCode.W: return global::SEAN.Input.GamepadHotkeys.DpadUpHeld;
+                case KeyCode.S: return global::SEAN.Input.GamepadHotkeys.DpadDownHeld;
+                case KeyCode.A: return global::SEAN.Input.GamepadHotkeys.DpadLeftHeld;
+                case KeyCode.D: return global::SEAN.Input.GamepadHotkeys.DpadRightHeld;
+                default: return false;
+            }
+        }
+
+        private bool DpadPressed(KeyCode wasdKey)
+        {
+            if (!ManualUsesJoystick)
+                return false;
+
+            switch (wasdKey)
+            {
+                case KeyCode.W: return global::SEAN.Input.GamepadHotkeys.DpadUpPressed;
+                case KeyCode.S: return global::SEAN.Input.GamepadHotkeys.DpadDownPressed;
+                case KeyCode.A: return global::SEAN.Input.GamepadHotkeys.DpadLeftPressed;
+                case KeyCode.D: return global::SEAN.Input.GamepadHotkeys.DpadRightPressed;
+                default: return false;
+            }
         }
 
         private float GetAxisSafely(string axisName)

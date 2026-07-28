@@ -27,7 +27,12 @@ namespace SessionReview
         Robot,
         PWDPlayer,
         BackgroundPed,
-        BackgroundPWD
+        BackgroundPWD,
+        // Pedestrian placed via World Building — kept distinct from BackgroundPed so the
+        // trial log (trial_info.json roles, trajectory_*_worldbuildingped.json filenames)
+        // shows which trajectories came out of world building. Append-only: serialized as
+        // its int value, so new members must stay at the end.
+        WorldBuildingPed
     }
 
     public class TrialEndInfo
@@ -67,6 +72,7 @@ namespace SessionReview
         private Dictionary<string, AgentRole> agentRoles = new Dictionary<string, AgentRole>();
 
         private List<SEAN.Scenario.Trajectory.TrackedAgent> trackedPedestrians = new List<SEAN.Scenario.Trajectory.TrackedAgent>();
+        private List<WorldBuildingWanderPedestrian> wanderPedestrians = new List<WorldBuildingWanderPedestrian>();
         private ManualWheelchairController pwdController;
         private LiveTrajectoryRecorder trajectoryRecorder;
         private IVI.INavigable pwdNavigable;
@@ -139,6 +145,7 @@ namespace SessionReview
             agentArrivals.Clear();
             agentRoles.Clear();
             trackedPedestrians.Clear();
+            wanderPedestrians.Clear();
 
             string robotId = GetRobotObjectId();
             if (!string.IsNullOrEmpty(robotId))
@@ -199,11 +206,62 @@ namespace SessionReview
                 }
             }
 
+            RegisterWorldBuildingPedestrians();
+
             tracking = true;
             trialArchived = false;
             RegisterAllWithRecorder();
             pendingRosterRefresh = true;
             rosterRefreshUntilTime = Time.time + 1.0f;
+        }
+
+        /// <summary>
+        /// World-Building-placed walking pedestrians wander outside
+        /// sean.pedestrianBehavior.agents, so they are discovered separately here and
+        /// their walked paths land in the trial trajectory log like any background
+        /// pedestrian's. They never truly "arrive" (perpetual wander), so they stay out
+        /// of trackedPedestrians and are recorded for the whole trial.
+        /// </summary>
+        private bool RegisterWorldBuildingPedestrians()
+        {
+            bool addedAny = false;
+            foreach (var wander in FindObjectsOfType<WorldBuildingWanderPedestrian>())
+            {
+                if (wander == null) continue;
+                string id = GetObjectId(wander.gameObject);
+                if (string.IsNullOrEmpty(id) || agentRoles.ContainsKey(id))
+                    continue;
+
+                wanderPedestrians.Add(wander);
+                agentRoles[id] = AgentRole.WorldBuildingPed;
+                agentArrivals[id] = new AgentArrivalInfo
+                {
+                    objectId = id,
+                    agentName = wander.gameObject.name,
+                    role = AgentRole.WorldBuildingPed,
+                    arrived = false,
+                    arrivalTime = -1f
+                };
+                addedAny = true;
+            }
+            return addedAny;
+        }
+
+        /// <summary>
+        /// Late entry point for World-Building pedestrians placed while a trial is already
+        /// being tracked (mid-session World Building). BeginTracking and its 1-second roster
+        /// refresh both ran long before the spawn, so without this call the pedestrian gets
+        /// no trajectory timeline and stands frozen during review playback. Recording simply
+        /// starts at the moment of placement. No-op outside a tracked trial or for
+        /// already-registered agents.
+        /// </summary>
+        public void RegisterLateWorldBuildingPedestrian()
+        {
+            if (!tracking)
+                return;
+
+            if (RegisterWorldBuildingPedestrians())
+                RegisterAllWithRecorder();
         }
 
         private void RegisterAllWithRecorder()
@@ -233,6 +291,15 @@ namespace SessionReview
                 string id = GetObjectId(agent.gameObject);
                 if (!string.IsNullOrEmpty(id))
                     trajectoryRecorder.TrackAgent(id, agent.transform);
+            }
+
+            // World-Building walking pedestrians (motion lives on a child rigidbody)
+            foreach (var wander in wanderPedestrians)
+            {
+                if (wander == null) continue;
+                string id = GetObjectId(wander.gameObject);
+                if (!string.IsNullOrEmpty(id))
+                    trajectoryRecorder.TrackAgent(id, ResolveTrackingTransform(wander.gameObject));
             }
 
             SessionReview.SessionReviewLog.Log($"[SessionReview] Registered {agentRoles.Count} agents with trajectory recorder.");
@@ -375,6 +442,9 @@ namespace SessionReview
                 }
             }
 
+            if (RegisterWorldBuildingPedestrians())
+                addedAny = true;
+
             if (addedAny)
                 RegisterAllWithRecorder();
         }
@@ -450,8 +520,12 @@ namespace SessionReview
             if (string.IsNullOrEmpty(robotId) || !agentArrivals.ContainsKey(robotId) || agentArrivals[robotId].arrived)
                 return;
 
-            float dist = SEAN.Util.Geometry.GroundPlaneDist(
-                sean.robot.base_link.transform.position, robotGoal.transform.position);
+            // A scene object bound as the robot goal has physical size (its collider keeps
+            // the robot ~0.4m from the pivot, outside the 0.3m completion radius): measure
+            // to its footprint edge, same rule as Tasks.Base.debounceCompletion().
+            Vector3 robotPos = sean.robot.base_link.transform.position;
+            float dist = SEAN.Util.Geometry.GroundPlaneDist(robotPos, robotGoal.transform.position);
+            dist = RobotGoalObjectBinding.GroundDistanceToGoal(robotPos, dist);
             if (dist <= sean.robotTask.completionDistance)
                 MarkArrived(robotId);
         }

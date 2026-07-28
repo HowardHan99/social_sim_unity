@@ -17,9 +17,10 @@ using UnityEngine;
 ///   Apple Pencil              — draw / erase (tap DRAW or ERASE to toggle; fingers navigate)
 ///   One-finger drag           — pan
 ///   Two-finger pinch / drag   — zoom + pan
-///   On-screen buttons         — DRAW · ERASE · Undo · Clear · Zoom · Finish · Cancel
+///   On-screen buttons         — DRAW · ADD STOP · ERASE · Undo · Clear · Zoom · Finish · Cancel
+///   ADD STOP tool             — tap = place / remove · press-drag = move (snaps onto the line)
 /// DRAW MODE CONTROLS (desktop):
-///   Mouse left-drag           — draw / erase (while DRAW or ERASE is toggled on)
+///   Mouse left-drag           — draw / erase / move stops (while the matching tool is toggled on)
 ///   Mouse wheel / MMB drag    — zoom / pan (standalone scene only; review supplies its own)
 ///   ESC                       — finish & save
 /// </summary>
@@ -81,10 +82,10 @@ public class TrajectoryManager : MonoBehaviour
     [Min(0f)] public float outlierJumpMultiplier = 4f;
 
     [Tooltip("Moving-average window size for smoothing (odd numbers recommended). <=1 to disable.")]
-    [Min(1)] public int smoothingWindow = 7;
+    [Min(1)] public int smoothingWindow = 3;
 
     [Tooltip("Number of smoothing passes. 0 to disable.")]
-    [Min(0)] public int smoothingPasses = 2;
+    [Min(0)] public int smoothingPasses = 1;
 
     [Tooltip("Strokes whose endpoints are closer than this (meters) are connected into one " +
              "trajectory on save/load, so a briefly lifted pen doesn't split the path in review.")]
@@ -93,6 +94,19 @@ public class TrajectoryManager : MonoBehaviour
     [Header("Eraser")]
     [Tooltip("Eraser brush radius in screen pixels (world size follows the current zoom).")]
     [Min(1f)] public float eraserRadiusPixels = 28f;
+
+    [Header("Stop Points")]
+    [Tooltip("Marker color for stop points placed with the ADD STOP tool.")]
+    public Color stopPointColor = new Color(0.9f, 0.15f, 0.15f, 0.95f);
+
+    [Tooltip("Stop-marker disc radius in world meters.")]
+    [Min(0.05f)] public float stopPointRadius = 0.4f;
+
+    [Tooltip("Seconds the robot pauses at each stop point while following the drawn trajectory.")]
+    [Min(0f)] public float stopPointPauseSeconds = 3f;
+
+    [Tooltip("A stop point placed within this distance (m) of the drawn line snaps onto it. 0 disables snapping.")]
+    [Min(0f)] public float stopPointSnapDistance = 1.5f;
 
     [Header("Follow Trajectory")]
     [Tooltip("Base speed (m/s) the robot uses when following the drawn trajectory.")]
@@ -130,7 +144,7 @@ public class TrajectoryManager : MonoBehaviour
     [Min(1f)] public float maxZoomOrthoSize = 120f;
 
     [Tooltip("Mouse-wheel / Zoom-button step as a fraction of the current zoom (desktop & on-screen buttons).")]
-    [Range(0.01f, 0.9f)] public float zoomStepFraction = 0.15f;
+    [Range(0.01f, 0.9f)] public float zoomStepFraction = 0.09f;
 
     // ── Public state (read by TrajectoryUI) ──────────────────────────────────
     public bool IsDrawMode { get; private set; }
@@ -154,8 +168,11 @@ public class TrajectoryManager : MonoBehaviour
     /// <summary>True once a contact classified as a pencil has been seen this run.</summary>
     public bool StylusDetected { get; private set; }
 
-    /// <summary>True when there is at least one stroke (finished or in-progress) to undo.</summary>
-    public bool CanUndo => _activeRenderer != null || _sessionRenderers.Count > 0;
+    /// <summary>True when there is at least one stroke (finished or in-progress) or stop point to undo.</summary>
+    public bool CanUndo => _activeRenderer != null || _sessionRenderers.Count > 0 || _sessionStopPoints.Count > 0;
+
+    /// <summary>Stop points placed so far this draw session (read by TrajectoryUI).</summary>
+    public int SessionStopPointCount => _sessionStopPoints.Count;
 
     public PencilDetectionMode PencilDetection
     {
@@ -194,6 +211,16 @@ public class TrajectoryManager : MonoBehaviour
     // or delete strokes mid-session, so no incremental collection is kept).
     private readonly List<TrajectoryRenderer> _sessionRenderers = new List<TrajectoryRenderer>();
 
+    // Stop points placed with the ADD STOP tool this draw session, and their markers
+    // (index-aligned). Displayed markers are the ones respawned from the saved file.
+    private readonly List<Vector3> _sessionStopPoints = new List<Vector3>();
+    private readonly List<GameObject> _sessionStopMarkers = new List<GameObject>();
+    private readonly List<GameObject> _displayedStopMarkers = new List<GameObject>();
+    // Stop points loaded from the newest saved session. They are imported into the
+    // session on EnterDrawMode so existing stops can be moved / deleted like fresh ones.
+    private readonly List<Vector3> _loadedStopPoints = new List<Vector3>();
+    private bool _stopsEdited;           // session changed the stop set (place/move/delete/clear)
+
     // Legend row for the drawn trajectory in the review Legend panel (bottom-right).
     private const string DrawnLegendKey = "drawn_trajectory";
 
@@ -208,10 +235,23 @@ public class TrajectoryManager : MonoBehaviour
     private float _followDistance;      // arc-length already traversed
     private float _followLastElapsed;   // last elapsedSeconds we saw
     private bool _followSessionActive;  // accumulator initialised?
+    // Arc-length positions of the saved stop points along the follow polyline (sorted),
+    // the next one ahead of the robot, and the pause time left at the current stop.
+    private readonly List<float> _followStopDistances = new List<float>();
+    private int _followNextStopIndex;
+    private float _followPauseRemaining;
 
     // Touch navigation / stroke edge-detection
     private TrajectoryUI _ui;
     private bool _strokeDown;            // a drawing contact is currently pressed
+    private bool _stopTapDown;           // a stop-tool contact is currently pressed
+    // Stop-tool gesture: the stop grabbed at press (-1 = none), whether the contact
+    // travelled far enough to count as a drag, and whether the press placed the stop.
+    private int _stopDragIndex = -1;
+    private bool _stopDragMoved;
+    private bool _stopJustPlaced;
+    private Vector2 _stopPressScreen;
+    private const float StopDragThresholdPx = 14f; // pixels before a tap becomes a drag
     private bool _navActive;            // a finger pan/zoom gesture is in progress
     private int _navFingerCount;        // fingers used by the active nav gesture
     private Vector2 _lastNavCentroid;
@@ -276,9 +316,21 @@ public class TrajectoryManager : MonoBehaviour
         IsDrawMode = true;
         _cameraReady = false;
         _strokeDown = false;
+        _stopTapDown = false;
         _navActive = false;
         _mousePanning = false;
         _lmbPanning = false;
+        ClearSessionStopPoints();
+
+        // The saved stop points join the session so they can be moved / deleted like
+        // fresh ones; their display markers are replaced by editable session markers.
+        foreach (var p in _loadedStopPoints)
+        {
+            _sessionStopPoints.Add(p);
+            _sessionStopMarkers.Add(CreateStopMarker(p));
+        }
+        ClearDisplayedStopMarkers();
+        _stopsEdited = false;
 
         SetVisibility(true);
         SwitchCamera(topDown: true);
@@ -314,6 +366,22 @@ public class TrajectoryManager : MonoBehaviour
     {
         if (!IsDrawMode) return;
 
+        // With the STOP tool armed, Undo removes the most recent stop point instead.
+        if (_ui != null && _ui.StopInputArmed && _sessionStopPoints.Count > 0)
+        {
+            CancelStopGesture();
+            int lastStop = _sessionStopPoints.Count - 1;
+            _sessionStopPoints.RemoveAt(lastStop);
+            if (lastStop < _sessionStopMarkers.Count)
+            {
+                if (_sessionStopMarkers[lastStop] != null)
+                    Destroy(_sessionStopMarkers[lastStop]);
+                _sessionStopMarkers.RemoveAt(lastStop);
+            }
+            _stopsEdited = true;
+            return;
+        }
+
         // An in-progress stroke is discarded first.
         if (_activeRenderer != null)
         {
@@ -345,6 +413,9 @@ public class TrajectoryManager : MonoBehaviour
         foreach (var r in _sessionRenderers)
             if (r != null) Destroy(r.gameObject);
         _sessionRenderers.Clear();
+        if (_sessionStopPoints.Count > 0)
+            _stopsEdited = true;
+        ClearSessionStopPoints();
     }
 
     /// <summary>Leave draw mode WITHOUT saving — discards everything drawn this session.</summary>
@@ -365,6 +436,7 @@ public class TrajectoryManager : MonoBehaviour
         foreach (var r in _sessionRenderers)
             if (r != null) Destroy(r.gameObject);
         _sessionRenderers.Clear();
+        ClearSessionStopPoints();
 
         SwitchCamera(topDown: false);
         RefreshDisplay();
@@ -552,6 +624,8 @@ public class TrajectoryManager : MonoBehaviour
             _followSessionActive = true;
             _followDistance = 0f;
             _followLastElapsed = Mathf.Max(0f, elapsedSeconds);
+            _followNextStopIndex = 0;
+            _followPauseRemaining = 0f;
         }
         else
         {
@@ -560,10 +634,40 @@ public class TrajectoryManager : MonoBehaviour
             if (dt < 0f) // review scrubbed backwards — reset
             {
                 _followDistance = 0f;
+                _followNextStopIndex = 0;
+                _followPauseRemaining = 0f;
             }
             else
             {
-                _followDistance += dt * EffectiveFollowSpeed;
+                // A stop point currently holds the robot: consume the pause first,
+                // then spend whatever time is left moving again.
+                if (_followPauseRemaining > 0f)
+                {
+                    float paused = Mathf.Min(dt, _followPauseRemaining);
+                    _followPauseRemaining -= paused;
+                    dt -= paused;
+                }
+
+                if (dt > 0f)
+                {
+                    float target = _followDistance + dt * EffectiveFollowSpeed;
+
+                    // Skip stops at or behind the current position so a stop is
+                    // honoured exactly once per pass.
+                    while (_followNextStopIndex < _followStopDistances.Count &&
+                           _followStopDistances[_followNextStopIndex] <= _followDistance)
+                        _followNextStopIndex++;
+
+                    if (_followNextStopIndex < _followStopDistances.Count &&
+                        target >= _followStopDistances[_followNextStopIndex])
+                    {
+                        target = _followStopDistances[_followNextStopIndex];
+                        _followNextStopIndex++;
+                        _followPauseRemaining = stopPointPauseSeconds;
+                    }
+
+                    _followDistance = target;
+                }
             }
         }
         _followDistance = Mathf.Clamp(_followDistance, 0f, _followTrajectoryLength);
@@ -597,6 +701,8 @@ public class TrajectoryManager : MonoBehaviour
         _trajectoriesVisible = visible;
         foreach (var r in _displayedRenderers)
             if (r != null) r.gameObject.SetActive(_trajectoriesVisible);
+        foreach (var m in _displayedStopMarkers)
+            if (m != null) m.SetActive(_trajectoriesVisible);
     }
 
     // ── Camera Fly ───────────────────────────────────────────────────────────
@@ -718,18 +824,42 @@ public class TrajectoryManager : MonoBehaviour
             drawPos = Input.mousePosition;
         }
 
-        // ── DRAW / ERASE gate ─────────────────────────────────────────────────
-        // Strokes only land while the bottom-left DRAW toggle is on; with ERASE
-        // on the same contact erases instead. Disarmed contacts navigate only,
+        // ── DRAW / STOP / ERASE gate ──────────────────────────────────────────
+        // Strokes only land while the bottom-left DRAW toggle is on; with ADD STOP
+        // on, a tap places / removes a stop marker and a press-drag moves one, and
+        // with ERASE on the same contact erases. Disarmed contacts navigate only,
         // so panning around never scribbles by accident.
-        bool drawArmed = _ui == null || _ui.DrawInputArmed;
-        bool eraseArmed = _ui != null && _ui.EraseInputArmed;
-        bool armed = drawArmed || eraseArmed;
+        bool stopArmed = _ui != null && _ui.StopInputArmed;
+        bool drawArmed = !stopArmed && (_ui == null || _ui.DrawInputArmed);
+        bool eraseArmed = !stopArmed && _ui != null && _ui.EraseInputArmed;
+        bool armed = drawArmed || eraseArmed || stopArmed;
         if (!armed)
             drawDown = false;
 
+        // A tool switch mid-contact abandons the stop gesture so lifting the contact
+        // later can never delete the stop that was grabbed under the old tool.
+        if (!stopArmed)
+            CancelStopGesture();
+
         // ── Stroke begin / continue / end (rising & falling edges) ────────────
-        if (drawDown && eraseArmed)
+        if (drawDown && stopArmed)
+        {
+            if (_strokeDown)
+            {
+                _strokeDown = false;
+                EndStroke();
+            }
+            if (!_stopTapDown)
+            {
+                _stopTapDown = true;
+                StopToolPress(drawPos);
+            }
+            else
+            {
+                StopToolDrag(drawPos);
+            }
+        }
+        else if (drawDown && eraseArmed)
         {
             if (_strokeDown)
             {
@@ -751,6 +881,13 @@ public class TrajectoryManager : MonoBehaviour
         {
             _strokeDown = false;
             EndStroke();
+        }
+
+        if (!drawDown)
+        {
+            if (_stopTapDown)
+                StopToolRelease();
+            _stopTapDown = false;
         }
 
         // ── Finger pan / pinch-zoom (never while the pencil is drawing) ───────
@@ -1085,6 +1222,240 @@ public class TrajectoryManager : MonoBehaviour
         }
     }
 
+    // ── Stop Points ──────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// ADD STOP press: grab the stop under the contact (a later drag moves it, a plain
+    /// tap removes it on release), or place a new one (snapped onto the drawn line).
+    /// A just-placed stop is grabbed too, so the same gesture can fine-tune its position.
+    /// </summary>
+    private void StopToolPress(Vector2 screenPos)
+    {
+        CancelStopGesture();
+        _stopPressScreen = screenPos;
+
+        if (!TryGetDrawSurfacePoint(screenPos, out Vector3 point))
+            return;
+
+        float grabRadius = Mathf.Max(stopPointRadius * 1.5f, 0.5f);
+        float grabSqr = grabRadius * grabRadius;
+        for (int i = _sessionStopPoints.Count - 1; i >= 0; i--)
+        {
+            Vector3 d = _sessionStopPoints[i] - point;
+            d.y = 0f;
+            if (d.sqrMagnitude <= grabSqr)
+            {
+                _stopDragIndex = i;
+                return;
+            }
+        }
+
+        point = SnapToDrawnLine(point);
+        _sessionStopPoints.Add(point);
+        _sessionStopMarkers.Add(CreateStopMarker(point));
+        _stopDragIndex = _sessionStopPoints.Count - 1;
+        _stopJustPlaced = true; // releasing without moving must not delete it
+        _stopsEdited = true;
+    }
+
+    /// <summary>Drag the grabbed stop point along under the contact (snapping onto the line).</summary>
+    private void StopToolDrag(Vector2 screenPos)
+    {
+        if (_stopDragIndex < 0 || _stopDragIndex >= _sessionStopPoints.Count)
+        {
+            _stopDragIndex = -1;
+            return;
+        }
+
+        // A tap only becomes a drag past a small threshold so removal taps don't jitter the marker.
+        if (!_stopDragMoved && (screenPos - _stopPressScreen).magnitude < StopDragThresholdPx)
+            return;
+
+        if (!TryGetDrawSurfacePoint(screenPos, out Vector3 point))
+            return;
+
+        _stopDragMoved = true;
+        _stopsEdited = true;
+        point = SnapToDrawnLine(point);
+        _sessionStopPoints[_stopDragIndex] = point;
+        if (_stopDragIndex < _sessionStopMarkers.Count && _sessionStopMarkers[_stopDragIndex] != null)
+            _sessionStopMarkers[_stopDragIndex].transform.position = point + Vector3.up * 0.02f;
+    }
+
+    /// <summary>Contact lifted: a plain tap on an existing stop (no drag, not just placed) removes it.</summary>
+    private void StopToolRelease()
+    {
+        int index = _stopDragIndex;
+        bool moved = _stopDragMoved;
+        bool placed = _stopJustPlaced;
+        CancelStopGesture();
+
+        if (index < 0 || moved || placed || index >= _sessionStopPoints.Count)
+            return;
+
+        _sessionStopPoints.RemoveAt(index);
+        if (index < _sessionStopMarkers.Count)
+        {
+            if (_sessionStopMarkers[index] != null)
+                Destroy(_sessionStopMarkers[index]);
+            _sessionStopMarkers.RemoveAt(index);
+        }
+        _stopsEdited = true;
+    }
+
+    private void CancelStopGesture()
+    {
+        _stopDragIndex = -1;
+        _stopDragMoved = false;
+        _stopJustPlaced = false;
+    }
+
+    /// <summary>
+    /// Snaps a tapped point onto the nearest drawn line point — this session's strokes
+    /// first, else the displayed saved trajectory (so stops can be added to an existing
+    /// drawing in a later session) — when within stopPointSnapDistance.
+    /// </summary>
+    private Vector3 SnapToDrawnLine(Vector3 point)
+    {
+        if (stopPointSnapDistance <= 0f)
+            return point;
+
+        float bestSqr = stopPointSnapDistance * stopPointSnapDistance;
+        Vector3 best = point;
+        bool found = false;
+
+        void Consider(List<Vector3> pts)
+        {
+            if (pts == null) return;
+            foreach (var p in pts)
+            {
+                Vector3 d = p - point;
+                d.y = 0f;
+                if (d.sqrMagnitude < bestSqr)
+                {
+                    bestSqr = d.sqrMagnitude;
+                    best = p;
+                    found = true;
+                }
+            }
+        }
+
+        foreach (var r in _sessionRenderers)
+            if (r != null) Consider(r.Points);
+        if (_activeRenderer != null)
+            Consider(_activeRenderer.Points);
+        if (!found)
+            foreach (var r in _displayedRenderers)
+                if (r != null) Consider(r.Points);
+
+        return found ? best : point;
+    }
+
+    /// <summary>Red STOP disc + label, readable from the top-down draw camera.</summary>
+    private GameObject CreateStopMarker(Vector3 point)
+    {
+        var root = new GameObject("StopPoint_Marker");
+        root.transform.SetParent(transform);
+        root.transform.position = point + Vector3.up * 0.02f;
+
+        var disc = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        Destroy(disc.GetComponent<Collider>()); // must never block the ground raycasts
+        disc.name = "Disc";
+        disc.transform.SetParent(root.transform, false);
+        disc.transform.localScale = new Vector3(stopPointRadius * 2f, 0.02f, stopPointRadius * 2f);
+        var rend = disc.GetComponent<Renderer>();
+        rend.material = new Material(Shader.Find("Sprites/Default")) { color = stopPointColor };
+        rend.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        rend.receiveShadows = false;
+
+        var labelGo = new GameObject("Label");
+        labelGo.transform.SetParent(root.transform, false);
+        labelGo.transform.localPosition = new Vector3(0f, 0.06f, 0f);
+        // Lies flat on the ground with its readable face up and text-up along +Z,
+        // matching the top-down draw camera (screen up = world +Z).
+        labelGo.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+        var label = labelGo.AddComponent<TextMesh>();
+        label.text = "STOP";
+        label.anchor = TextAnchor.MiddleCenter;
+        label.alignment = TextAlignment.Center;
+        label.fontSize = 64;
+        label.characterSize = stopPointRadius * 0.1f;
+        label.fontStyle = FontStyle.Bold;
+        label.color = Color.white;
+        // A runtime-created TextMesh has no font assigned and renders nothing without one.
+        Font font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+        if (font != null)
+        {
+            label.font = font;
+            labelGo.GetComponent<MeshRenderer>().material = font.material;
+        }
+
+        return root;
+    }
+
+    private void ClearSessionStopPoints()
+    {
+        CancelStopGesture();
+        _sessionStopPoints.Clear();
+        foreach (var m in _sessionStopMarkers)
+            if (m != null) Destroy(m);
+        _sessionStopMarkers.Clear();
+    }
+
+    private void ClearDisplayedStopMarkers()
+    {
+        foreach (var m in _displayedStopMarkers)
+            if (m != null) Destroy(m);
+        _displayedStopMarkers.Clear();
+    }
+
+    /// <summary>
+    /// Projects each saved stop point onto the follow polyline and stores its
+    /// arc-length position (sorted) so Follow mode can pause the robot there.
+    /// </summary>
+    private void CaptureFollowStopDistances(List<Vector3> stopPoints)
+    {
+        _followStopDistances.Clear();
+        _followNextStopIndex = 0;
+        _followPauseRemaining = 0f;
+        if (stopPoints == null || stopPoints.Count == 0 || !HasFollowTrajectory)
+            return;
+
+        foreach (var stop in stopPoints)
+        {
+            float traversed = 0f;
+            float bestSqr = float.MaxValue;
+            float bestDistance = 0f;
+            for (int i = 1; i < _followTrajectoryPoints.Count; i++)
+            {
+                Vector3 from = _followTrajectoryPoints[i - 1];
+                Vector3 to = _followTrajectoryPoints[i];
+                Vector3 seg = to - from;
+                seg.y = 0f;
+                Vector3 rel = stop - from;
+                rel.y = 0f;
+                float segLenSqr = seg.sqrMagnitude;
+                float t = segLenSqr > 0.0001f ? Mathf.Clamp01(Vector3.Dot(rel, seg) / segLenSqr) : 0f;
+                Vector3 closest = Vector3.Lerp(from, to, t);
+                Vector3 d = stop - closest;
+                d.y = 0f;
+                if (d.sqrMagnitude < bestSqr)
+                {
+                    bestSqr = d.sqrMagnitude;
+                    bestDistance = traversed + Vector3.Distance(from, to) * t;
+                }
+                traversed += Vector3.Distance(from, to);
+            }
+            _followStopDistances.Add(bestDistance);
+        }
+
+        _followStopDistances.Sort();
+        // Merge stops that landed on (nearly) the same spot along the line.
+        for (int i = _followStopDistances.Count - 1; i > 0; i--)
+            if (_followStopDistances[i] - _followStopDistances[i - 1] < 0.05f)
+                _followStopDistances.RemoveAt(i);
+    }
+
     private TrajectoryRenderer CreateSessionStroke(List<Vector3> points)
     {
         var go = new GameObject("Stroke_Session");
@@ -1217,7 +1588,9 @@ public class TrajectoryManager : MonoBehaviour
 
         polylines = ConnectNearbyPolylines(polylines, strokeConnectDistance);
 
-        if (polylines.Count == 0)
+        // No new strokes and an untouched stop set — nothing worth a new file.
+        // Deleting every stop IS an edit: that save persists the empty stop set.
+        if (polylines.Count == 0 && !_stopsEdited)
         {
             Debug.Log("[Trajectory] Session empty — nothing saved.");
             return;
@@ -1232,8 +1605,44 @@ public class TrajectoryManager : MonoBehaviour
             collection.trajectories.Add(data);
         }
 
+        // A stops-only session annotates the previously saved drawing: carry that
+        // drawing's strokes forward so the new session file stays self-contained.
+        if (collection.trajectories.Count == 0)
+        {
+            string[] previous = TrajectoryIO.GetAllSessionFiles();
+            if (previous.Length > 0)
+                collection.trajectories = TrajectoryIO.LoadFromPath(previous[0]).trajectories;
+        }
+
+        foreach (var p in _sessionStopPoints)
+            collection.stopPoints.Add(new TrajectoryPoint(p));
+
         TrajectoryIO.SaveNewSession(collection);
-        Debug.Log($"[Trajectory] Session saved ({collection.trajectories.Count} trajectory(ies) after connecting nearby strokes).");
+        SaveIntoReviewedTrialFolder(collection);
+        Debug.Log($"[Trajectory] Session saved ({collection.trajectories.Count} trajectory(ies), {collection.stopPoints.Count} stop point(s)).");
+    }
+
+    /// <summary>
+    /// Mirror the drawn strokes into the reviewed trial's SessionLogs folder
+    /// (drawn_trajectory_*.json next to trial_info.json). persistentDataPath saves
+    /// stay on the review device; this copy travels with the trial data.
+    /// </summary>
+    private static void SaveIntoReviewedTrialFolder(TrajectoryCollection collection)
+    {
+        string folder = SessionReview.SessionReviewManager.CurrentReviewTrialFolder;
+        if (string.IsNullOrEmpty(folder) || !System.IO.Directory.Exists(folder))
+            return;
+        try
+        {
+            string stamp = System.DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            string path = System.IO.Path.Combine(folder, $"drawn_trajectory_{stamp}.json");
+            System.IO.File.WriteAllText(path, JsonUtility.ToJson(collection, prettyPrint: true));
+            Debug.Log($"[Trajectory] Drawn trajectory also saved to trial folder: {path}");
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogWarning($"[Trajectory] Could not save drawn trajectory into trial folder: {ex.Message}");
+        }
     }
 
     /// <summary>
@@ -1294,18 +1703,24 @@ public class TrajectoryManager : MonoBehaviour
         foreach (var r in _displayedRenderers)
             if (r != null) Destroy(r.gameObject);
         _displayedRenderers.Clear();
+        ClearDisplayedStopMarkers();
         _followTrajectoryPoints.Clear();
         _followTrajectoryLength = 0f;
+        _followStopDistances.Clear();
+        _followNextStopIndex = 0;
+        _followPauseRemaining = 0f;
         _followSessionActive = false;
 
         foreach (var r in _sessionRenderers)
             if (r != null) Destroy(r.gameObject);
         _sessionRenderers.Clear();
+        ClearSessionStopPoints();
 
         string[] files = TrajectoryIO.GetAllSessionFiles();
         int count = (visibleSessionCount <= 0) ? files.Length
                                                 : Mathf.Min(visibleSessionCount, files.Length);
 
+        _loadedStopPoints.Clear();
         for (int i = 0; i < count; i++)
         {
             TrajectoryCollection col = TrajectoryIO.LoadFromPath(files[i]);
@@ -1327,7 +1742,21 @@ public class TrajectoryManager : MonoBehaviour
                 CaptureFollowTrajectory(line);
                 StartCoroutine(SpawnDisplayRenderer(line));
             }
+
+            // Stop points come only from the newest session so stale markers from
+            // older files can't stack up under the current drawing.
+            if (i == 0 && col.stopPoints != null)
+                foreach (var pt in col.stopPoints)
+                    _loadedStopPoints.Add(pt.ToVector3());
         }
+
+        foreach (var p in _loadedStopPoints)
+        {
+            var marker = CreateStopMarker(p);
+            marker.SetActive(IsReviewActive());
+            _displayedStopMarkers.Add(marker);
+        }
+        CaptureFollowStopDistances(_loadedStopPoints);
 
         if (!HasFollowTrajectory)
             IsFollowMode = false;

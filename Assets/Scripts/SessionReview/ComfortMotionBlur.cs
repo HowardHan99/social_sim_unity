@@ -23,10 +23,12 @@ public class ComfortMotionBlur : MonoBehaviour
     [SerializeField] private float angularSpeedSmoothTime = 0.10f;
 
     [Header("Comfort Vignette")]
-    [Tooltip("How dark the peripheral vignette gets at peak blur (0 = off). "
-           + "Keep at 0 if the scene has auto-exposure or if users report brightness flickering — "
-           + "peripheral darkening is perceived as whole-scene brightness change.")]
-    [SerializeField] [Range(0f, 1f)] private float vignetteStrength = 0f;
+    [Tooltip("How dark the peripheral vignette gets at peak blur (0 = off). Narrowing the "
+           + "field of view while the camera rotates is the standard fix for rotation-induced "
+           + "motion sickness: it removes the fast-moving peripheral flow the inner ear "
+           + "disagrees with. Lower it toward 0 if the scene has auto-exposure or users report "
+           + "brightness flickering — peripheral darkening reads as a whole-scene brightness change.")]
+    [Range(0f, 1f)] public float vignetteStrength = 0.3f;
     [Tooltip("How far from center the vignette starts — smaller value = more tunnel-vision")]
     [SerializeField] [Range(0.1f, 1f)] private float vignetteRadius = 0.55f;
     [Tooltip("How soft the vignette falloff edge is")]

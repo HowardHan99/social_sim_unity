@@ -28,7 +28,8 @@ padding/offset exports and writes to `SessionLogs/ReviewExports/` as before.
 2. Enter review mode.
 3. Press `E` or click `Export ROI`.
 4. Start from the trajectory envelope.
-5. Adjust:
+5. Adjust (padding defaults to 12 m per side; sliders go up to 60 m so the ROI
+   can cover surrounding context, not just the swept trajectory):
    - `Pad X`
    - `Pad Z`
    - `Offset X`
@@ -61,8 +62,20 @@ Each export gets its own timestamped folder.
 
 `roi_topdown.png` (optional)
 
-- top-down image aligned to the exported ROI bounds
-- intended for later overlay with trajectory data
+- clean top-down image aligned to the exported ROI bounds
+- dynamic actors (robot, player, pedestrians, goal UI) are hidden, so it is scene
+  geometry only
+
+`roi_topdown_trajectory.png` (optional)
+
+- the same plate with every agent's trajectory drawn on top
+- rendered once and shared with `roi_topdown.png`, so the two are pixel-aligned
+- per agent: polyline, filled circle at start, filled square at end, and an `X`
+  at the goal when the goal is a real task goal rather than an inferred one
+- agent colours follow the same palette/order as `review_roi_viewer.py`, so the
+  baked image and the viewer agree on which colour is which agent
+- both PNGs are written whenever `Export top-down PNGs` is enabled, and both are
+  described in the JSON (`image` and `trajectoryImage`)
 
 ## Current Goal Semantics
 

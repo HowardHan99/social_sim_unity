@@ -6,8 +6,6 @@ namespace SessionReview
     {
         [Header("Display Settings")]
         [SerializeField] private float panelWidth = 420f;
-        [SerializeField] private float panelRightMargin = 16f;
-        [SerializeField] private float panelY = 80f;
         [SerializeField] private float defaultPanelHeight = 540f;
         [SerializeField] private bool showTrajectoryDebug = false;
 
@@ -25,6 +23,11 @@ namespace SessionReview
         {
             currentTrial = trial;
             visible = true;
+            // Starts closed every review: the right edge is already crowded with the
+            // rewind header, top-down controls and Legend. The reviewer re-opens it from
+            // the panel toggle bar, and it then appears centered (see OnGUI).
+            panel.hidden = true;
+            panel.collapsed = false;
         }
 
         public void Hide()
@@ -49,10 +52,14 @@ namespace SessionReview
 
             ReviewUiScale.Apply();
 
-            // Docked on the right by default so it never covers the draw-mode panel on the left.
+            // Centered: this panel is opened on demand and read, not kept alongside the
+            // other overlays, and the right edge it used to dock to is already full.
+            float w = Mathf.Min(panelWidth, Mathf.Max(ReviewPanels.MinW, ReviewUiScale.Width - 40f));
+            float h = Mathf.Min(defaultPanelHeight, Mathf.Max(160f, ReviewUiScale.Height - 120f));
             Rect defaultRect = new Rect(
-                Mathf.Max(10f, ReviewUiScale.Width - panelWidth - panelRightMargin), panelY, panelWidth,
-                Mathf.Min(defaultPanelHeight, ReviewUiScale.Height - panelY - 20f));
+                (ReviewUiScale.Width - w) * 0.5f,
+                Mathf.Max(10f, (ReviewUiScale.Height - h) * 0.5f),
+                w, h);
 
             if (ReviewPanels.Begin(panel, this, "Metrics", defaultRect, out Rect content))
             {

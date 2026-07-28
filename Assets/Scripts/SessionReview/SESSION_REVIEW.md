@@ -6,13 +6,14 @@ A self-contained post-trial review system for the social simulation. Records age
 
 1. **Add to scene**: Create an empty GameObject, add `SessionReviewManager` component. It auto-creates all other components on the same object.
 2. **Run a trial**: The system auto-detects trial start/end via `Tasks.Base.onNewTask`. All agents (robot, PWD player, pedestrians) are tracked automatically.
-3. **Review**: After a trial ends, press **Tab** to enter review mode. Press **Tab** or **Esc** to exit.
+3. **Review**: After a trial ends, press **T** to enter review mode. Press **T** or **Esc** to exit.
 
 ## Controls
 
 | Key | Action |
 |-----|--------|
-| **Tab** | Enter/exit review mode (after trial ends) |
+| **Tab** | Switch the driven agent's view between first and third person (gameplay, all agents) |
+| **T** | Enter/exit review mode (after trial ends) |
 | **Space** | Play/pause rewind |
 | **Left/Right Arrow** | Step backward/forward (0.1s) |
 | **Home / End** | Jump to trial start/end |
@@ -45,25 +46,59 @@ headed: the **control trajectory** (the ROS nav-plan line `PlanVisualizer` draws
 plan) and the **robot goal marker** (its flag cube/arrow, plus the "ROBOT GOAL" label and orange
 highlight `RobotGoalObjectBinding` adds). Both are **hidden at every trial start** so a
 participant never sees the robot's preset path, **[V]** flips them mid-run, and **entering review
-turns them back on** — review is where they are wanted. The button strip sits under the "Aa NN%"
-badge in the top-left; the Control Traj button only appears when the scene actually has a
-`PlanVisualizer` (i.e. ROS is in the loop).
+turns them back on** — review is where they are wanted. The button strip sits in the bottom-left,
+lifted above the replay progress bar; the Control Traj button only appears when the scene actually
+has a `PlanVisualizer` (i.e. ROS is in the loop). It hides itself for the whole draw-trajectory
+session (`IsDrawTrajectoryModeActive`), which is also what keeps it clear of the DRAW/ERASE gates
+that occupy the same corner.
 
-The **player** goal is deliberately not covered — the human participant needs it to know where to
-walk. Nothing is disconnected, only hidden: `PlanVisualizer` keeps computing the plan while
+Two things are never hidden. The **player** goal is not covered at all — the human participant
+needs it to know where to walk. And the **robot** goal is force-shown whenever
+`VelocityController.ManualControlActive` is on: with a human driving the robot the goal is that
+driver's own target, not a leaked answer, so the button greys out and reads "Robot Goal (driving)".
+The control trajectory needs no such exception — `VelocityController` already suppresses the plan
+line under `SuppressionReason.ManualControl`.
+
+Discovery covers three roots, because the goal is drawn from more than one place: the runtime
+`robotGoal` marker (everything under it is goal plumbing), a `CustomStartGoal.RobotGoalLocation`
+scene node's own preview flags (matched by the `TargetFlagCube`/`TargetFlagArrow` names
+`Base.SetTargetFlags` uses, since real scenery may be authored under that node), and
+`RobotGoalObjectBinding.GoalUiRenderers`. A bound goal object is skipped everywhere — it is a door
+or a bench, not goal UI.
+
+Nothing is disconnected, only hidden: `PlanVisualizer` keeps computing the plan while
 suppressed (so `LiveTrajectoryRecorder` still records it and the trial-start readiness check still
 sees it), and only the goal marker's *renderers* are touched, never its transform — that is what
 feeds ROS goal publishing, completion checks and metrics.
 
 In review the live plan line is force-suppressed for the whole session and the plan is shown as a
 recorded snapshot instead, so there the switch drives the Legend's **"ROS Nav Plan"** row; that row
-(and "Show All"/"Hide All") can still override it per-review.
+(and "Show All"/"Hide All") can still override it per-review. Review entry turns the overlays back
+on with one exception: for a trial where a human drove the robot, the recorded plan is only what
+ROS *would have done*, so its row starts hidden and a reviewer opts in via the Legend row or the
+Control Traj button.
+
+**Hiding the plan during a trial does not cost you the review.** `PlanVisualizer.ProcessMessage`
+assigns `renderPathPositions` and only then consults its suppression flags, and
+`LiveTrajectoryRecorder.SamplePlanPath` reads exactly that — so a plan hidden all trial is still
+recorded in full. This holds while a human drives the robot, too: the ROS backend keeps replanning
+from the driven robot's actual pose and the recorder keeps sampling those snapshots
+(`recordPlanDuringRobotManual`, on by default), so review can show what ROS would have done at any
+replay moment — hidden by default there, as above. The one case review genuinely cannot recover is a trial where no plan ever
+arrived (started via `allowStartWithoutRosBackend`, so ROS never published one). The two look
+identical from the Legend, so the row reports which it is: **"ROS Nav Plan  [none recorded]"**
+when `LiveTrajectoryRecorder.HasAnyPlanSnapshots` is false. `PlanVisualizer` itself is never the
+missing piece — it ships inside `SEAN.prefab` → `Display.prefab` → `GlobalPlanVisualizer`, loaded
+from Resources into every scene and active by default.
 
 ### Player Character Selection (wheelchair + walking avatars)
 
 The onboarding panel's "PWD Player Character" card grid offers the built-in wheelchair
-pair plus every prefab found in `Resources/PlayerCharacters` (`PlayerCharacterLibrary`;
-thumbnails matched by name from `Resources/PlayerCharactersUI`, optional). Walking
+pair plus the `Resources/PlayerCharacters` prefabs that have preview art
+(`PlayerCharacterLibrary.OptionsWithPreview`; thumbnails matched by name — separators
+ignored, so `dogwalker.png` fits `Dog_Walker` — from `Resources/PlayerCharactersUI`).
+A prefab without a thumbnail is hidden from the select pages until its art is dropped
+into that folder, but stays in `Options` for World Building and `FindPrefab`. Walking
 characters reuse the exact wheelchair player pipeline — spawned by
 `RandomAvatar.SpawnPwdPlayer()` as `"PWDPlayer"` with `SFPWDAgent` +
 `ManualWheelchairController` — so task sync, tracking, review, and overlays all work
@@ -75,14 +110,41 @@ different character in the current scene reloads it so the player respawns.
 
 ### Joystick Tuning Overlay ([U])
 
-`JoystickTuningOverlay` (self-bootstraps, **U** toggles; the TestScene shows it
-automatically once driving starts) has an input-device row plus sliders for linear/turn
-sensitivity, full-throw (stick travel that already commands max speed), deadzone and max
-speed. ONE set of values is applied to BOTH the player's `ManualWheelchairController` and
-the robot's `VelocityController`. Nothing is overridden until a slider is first moved;
-after that the values are re-applied to every live controller once per second (this
-survives `ApplyJoystickResponseDefaults()` in the controllers' `Start()`, scene loads,
-and respawns). "Reset Defaults" hands the fields back to the Inspector values.
+`JoystickTuningOverlay` self-bootstraps and **only appears in the practice scene** (any
+scene with a `TestSceneFlowManager`): it opens automatically once driving starts and **U**
+toggles it. In the study scene the panel never shows and the hotkey does nothing, so a
+participant cannot open it mid-trial — but the tuned values keep being applied there, which
+is the point of the per-session config. It has an input-device row plus **five** sliders,
+kept deliberately small so a participant can adjust it themselves:
+
+| Slider (panel label) | Meaning |
+|---|---|
+| **How fast it starts** | Drive sensitivity — how far the stick travels before full speed. Readout is the push fraction (`55% push`); lower = twitchier. |
+| **How fast it turns** | Turn sensitivity, same readout. Separate from drive: the two rarely feel right at one setting. |
+| **Top speed** | Top manual speed (m/s) for the character and the robot. |
+| **Ignore small moves** | Deadzone — stick movement ignored around center, so a drifting stick doesn't make the character creep. |
+| **Look-around speed** | Gamepad right-stick camera yaw (deg/s); pitch follows at ~60%. |
+
+Both sensitivities mean "how far do I push for the full effect", so the panel also forces
+the controllers to **position control** (`manualInertiaDrive = false`,
+`angularDirectDrive = true`). Under the original acceleration model the stick only set how
+*quickly* you reached top speed — holding it always ended at the same speed, which made the
+sensitivity sliders feel inert.
+
+One set of values applies to BOTH the player's `ManualWheelchairController` and the
+robot's `VelocityController`, plus `GamepadCameraLook`. Nothing is overridden until a
+slider is first moved; after that the values are re-applied to every live controller once
+per second (this survives `ApplyJoystickResponseDefaults()` in the controllers' `Start()`,
+scene loads, and respawns). "Reset Defaults" restores the defaults.
+
+Camera look is intentionally gentle — fast free-look while driving is a motion-sickness
+trigger. `GamepadCameraLook` rotates **only the first-person view** (the small top-right
+panel, or the main view after the Tab first/third-person toggle); it never orbits the
+third-person camera, because swinging the whole scene around the avatar is what caused
+nausea. The stick input ramps in/out (`inputSmoothTime`) and the view eases home
+exponentially (`recenterTime` — a slow drift, not a spring-back, since camera motion the
+user did not ask for is itself a trigger). `ComfortMotionBlur`'s rotation-linked vignette
+is on (`vignetteStrength = 0.3`) to cut the peripheral flow while turning.
 
 **Per-session config**: the tuning is saved as
 `SessionLogs/<sessionId>/joystick_config.json`, not global PlayerPrefs. Switching the
@@ -90,12 +152,48 @@ session id (onboarding page) hot-loads that session's saved tuning; a fresh sess
 inherits the current live values and gets its own file on the first change. So a
 participant tunes the feel in the TestScene and it carries into their real study scene.
 
-**Input-device profile**: the top row (Auto / Stick / Gamepad) picks the `JoystickProfiles`
-mapping and is stored in the same per-session file. **Auto** (the default, and forced for
-any fresh session) follows the connected controller by name, so the profile matches
-whatever device the participant is actually using — which is also the device they use in
-the real session. An explicit pick is remembered and re-applied when the study scene
-loads. The "Detected: ..." line shows the connected controller name.
+**Input device (two controllers at once)**: the top row (Auto / Gamepad / Stick) picks
+which physical device drives, and is stored in the same per-session file. A gamepad and
+the Logitech flight stick can stay plugged in together: **Auto** prefers the gamepad (the
+primary study controller) and falls back to the stick, and the "Driving with: ..." line
+names the device actually being read.
+
+This works because `InputManager.asset` defines **per-slot axes `JoyNAxisK`** (N = joystick
+slot 1..4, K = physical axis 0..4) alongside the original shared axes. The original axes
+are all `joyNum: 0` ("any joystick"), so with two devices connected their inputs collide —
+a resting flight-stick throttle would spin the camera while its stick tilt steered the
+agent. `JoystickProfiles` now resolves every request to a *role* (steer / throttle / look)
+and then to that role's axis **on the active device's slot only**; the other controller is
+never read. Axis roles per device: gamepad steer = left stick X (0), throttle = left stick
+Y (1), look = right stick (3/4); flight stick steer = twist (2), throttle = stick Y (1).
+Look axes are also rest-calibrated, so a controller idling off-center can never drive the
+camera by itself.
+
+### Gamepad D-pad = W/A/S/D, RB = view swap
+
+`GamepadHotkeys` exposes the **active** gamepad's D-pad as a second set of WASD keys — same
+roles as the keyboard, nothing new to learn — plus one shoulder button for the view swap:
+
+| Button | Same as | Action |
+|---|---|---|
+| D-pad Up | `W` | Forward |
+| D-pad Down | `S` | Brake, then reverse (the double-tap arming works too) |
+| D-pad Left | `A` | Turn left |
+| D-pad Right | `D` | Turn right |
+| **RB** | `Tab` | Swap the main view between with-avatar (third person) and without-avatar (first person); the other one drops to the mini panel |
+
+Buttons are KeyCodes rather than axes, so the active device's are read as
+`Joystick1Button0 + (slot-1)*20 + index`; `viewToggleButtonIndex` picks which (XInput:
+4 = LB, 5 = RB, 0 = A, 1 = B).
+
+Unity's legacy Input cannot synthesize key events, so `ManualWheelchairController` and
+`VelocityController` OR these flags into their `ManualKeyHeld`/`ManualKeyDown` helpers. The
+D-pad obeys the same ownership rule as the stick (`ManualUsesJoystick`), so the agent that
+is *not* the human's active role never moves with it — the arrow-key remap stays intact.
+Edge state is computed once per frame in the component, so several consumers can read the
+same press. The D-pad arrives as physical axes 5/6, exposed per joystick slot in
+`InputManager.asset` as `JoyNAxis5/6`; flip `invertDpadY` / `invertDpadX` if a pad reports
+a direction with the opposite sign.
 
 ### TestScene Practice Flow
 
@@ -122,10 +220,108 @@ SessionLogs/
         trajectory_base_link_robot.json            <- robot only
         trajectory_PWDAgent_pwdplayer.json         <- PWD player only
         trajectory_Pedestrian01_backgroundped.json <- individual pedestrian
-        control_modes.ctrlmode                     <- timestamped control transitions
+        control_modes.ctrlmode                     <- timestamped control transitions (each agent's
+                                                      mode at the trial start is included as an entry)
 ```
 
 Trial folder naming and every file inside are unchanged; only the grouping folders are new. Legacy flat `SessionLogs/trial_xxx/` folders still load (the F12 panel scans recursively). ROI exports nest the same way under `SessionLogs/ReviewExports/<session>/<scene>/`.
+
+## Saved World Building Scenarios
+
+The whole built world can be saved as a reusable "scenario" — a self-contained folder with a
+scene file plus an asset library — and rebuilt later. A real `.unity` file cannot be written
+at runtime, so the scene file records the base scene plus the full delta on top of it:
+
+- runtime-**placed** objects (palette spawns and Meshy GLB imports; they carry a
+  `WorldBuildingPlacedObject` marker with their source),
+- **moved/rescaled pre-existing** scene objects (furniture, task/goal markers, the robot —
+  anything touched in World Building gets a `WorldBuildingSceneObjectBaseline` snapshot of
+  its pristine pose; only actually-changed objects are recorded),
+- **deleted** scene objects (World Building's delete deactivates; recorded as `deleted`).
+
+Flow:
+
+- **Save, any time**: the World Building overlay's **"Save World..."** button opens the
+  "Save This Scene?" modal (camera snapshot + name) and returns to editing afterwards. This
+  is the reliable way to save — it does not depend on switching scene or character.
+- **Save, on switch or restart**: a built world is an *option*, never sticky state — anything
+  that starts the next trial goes back to the **original** scene, and the edits come back only
+  when their card is picked. So both **"Apply and Reload"** and **"Run Again"** reload the base
+  scene when World Building changed the world, and the modal appears first so the work is not
+  lost. *Save & Continue* writes the scenario then reloads; *Continue Without Saving* reloads
+  and discards; *Cancel* goes back to editing without reloading. A world just saved or restored
+  and left unmodified is not re-prompted (`WorldBuildingScenarioStore.RestoredSignature`) — it
+  reloads straight away, since it is already a card. Scenes not in Build Settings cannot be
+  reloaded, so they restart in place with the edits still standing (Console warning).
+- **Load**: saved scenarios show up on the onboarding page as thumbnail cards under "Saved
+  World Building Scenes", directly below the preset scene list and **scoped to the scene
+  selected there** — a saved world is a variant of its base scene, so listing worlds from other
+  scenes would offer a pick that silently changes the scene selection. Picking a different
+  scene re-filters the cards and clears the selection. The list is deliberately *not* filtered
+  by session id — a world built before the operator typed their id belongs to the previous one
+  and hiding it would look like the save was lost; the owning session is shown on the card
+  instead. The preset scene stays the default; picking a card loads the
+  scenario's base scene, respawns the placed objects and replays the scene deltas, then syncs
+  a restored robot goal/start back into the `CustomStartGoal` Locations so ROS navigates the
+  restored layout. Clicking the selected card again deselects it.
+
+Restoring is driven by `WorldBuildingScenarioRestorer`, a static `SceneManager.sceneLoaded`
+hook that spawns a one-shot runner — deliberately NOT `SessionReviewManager.Start()`, so a
+scene whose review manager is missing, inactive, or ordered differently still rebuilds the
+world. Every step logs to the Console (`[WorldBuildingScenario]`), so a save/load that does
+nothing says why.
+
+Storage, one folder per scenario (`WorldBuildingScenarioStore`):
+
+```
+SessionLogs/
+  P01/
+    scenario/
+      sidewalkNarrowroad 03-08 15_19_20260308_152012/
+        scene.json       <- scene file: name, base sceneName, sessionId,
+                            objects (prefab/GLB source + pose),
+                            sceneObjectDeltas (hierarchy path + original pose + new pose / deleted)
+        assets/          <- asset library: copied import files (Meshy GLBs), so the scenario
+                            survives deletion of the originals and can be zipped/shared
+        thumbnail.png    <- snapshot shown on the onboarding card
+```
+
+Palette objects are respawned from `Resources/WorldBuildingSpawns/<prefabName>` (shipped with
+the build — not copied); imports load from `assets/` with the original absolute path as
+fallback (a missing file logs a warning and is skipped). Scene-object deltas are matched by
+hierarchy path; duplicate names are disambiguated by the recorded pristine pose. Old saves
+with `scenario.json` (no asset library) still load.
+
+**Robot and pedestrian goals.** Both goals AND starts are draggable in World Building and
+round-trip through scenarios. Registered as editable at editor entry: the task's four
+start/goal markers (`StartAndGoal/...`) AND the PWD spawner's named start/goal objects
+(`RandomAvatar.startObjectName`/`goalObjectName`, resolved with the same lookup spawning
+uses). All of them are marker-protected: a scenario only ever records their POSE — never a
+"deleted" delta (their active state is engine-managed, e.g. the unused start/goal is
+deactivated every scene load; deactivating a live goal on restore would break the trial).
+The task's Start markers are engine-deactivated outside World Building; entering World
+Building re-activates them (`ShowTaskStartMarkersForWorldBuilding`) so the start FLAG can be
+dragged — the robot body is usually not on its start point after a run — and exit re-hides
+exactly the ones it activated. After a restore (or on leaving World Building, for the live
+PWD):
+
+- a moved **robot** goal/start is written into the `CustomStartGoal` Locations
+  (`SyncRestoredRobotMarkers` / `SyncMovedRobotMarkersIntoTask`), else `NewTask` would
+  re-copy the old pose and ROS would navigate to the old goal. The start can come from the
+  dragged Start flag or the dragged robot body; when both moved, the flag wins;
+- a moved **pedestrian** start/goal is re-baked into the spawned PWD
+  (`WorldBuildingScenarioRestorer.SyncPwdSpawnerWaypoints`): `SFPWDAgent.waypointStart/Goal`
+  update (arrival detection + auto-nav re-targeted via `RestartNavigationCoroutine`, skipped
+  in manual mode), and on restore the agent is also teleported to the moved start. A moved
+  start also replaces the wheelchair controller's remembered spawn pose
+  (`ManualWheelchairController.SetSpawnPose`) — trial restarts (`ResetToSpawn`, i.e. the
+  in-place "Run Again" from World Building) teleport the agent to that pose, so without the
+  refresh the pedestrian would restart at the scene's ORIGINAL start. In
+  Player-controlled scenes the task's `playerGoal` marker needs no extra sync —
+  `SyncPwdPlayerToTaskStartGoal` re-reads it at every trial start.
+
+Markers without a renderer or collider cannot be clicked (selection needs visual bounds or a
+collider); the standard flag/beacon markers are visible and selectable.
 
 ### Trajectory JSON Format
 
@@ -198,7 +394,7 @@ Trial ends (task completes / timeout)
      -> auto-saves ROI export (review_roi_export.json + roi_topdown.png)
         into the same trial folder (SaveTrialRoi; toggle: autoSaveRoiWithTrial)
 
-User presses Tab:
+User presses T:
   -> SessionReviewManager.EnterRewindMode()
      -> freezes simulation (Time.timeScale = 0)
      -> builds snapshot from LiveTrajectoryRecorder

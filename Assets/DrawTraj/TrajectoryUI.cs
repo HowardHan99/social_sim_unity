@@ -27,7 +27,19 @@ public class TrajectoryUI : MonoBehaviour
     private GUIStyle headerStyle;
     private GUIStyle finishStyle;
     private GUIStyle cancelStyle;
+    private GUIStyle stopArmedStyle;
     private GUIStyle debugStyle;
+
+    // Compact variants for the DRAW MODE panel only. The panel is a dense stack of
+    // secondary actions, while the DRAW / ERASE gates it shares styles with are the
+    // primary touch target and stay large — hence a separate set rather than smaller
+    // fonts on the shared styles.
+    private GUIStyle panelButtonStyle;
+    private GUIStyle panelActiveStyle;
+    private GUIStyle panelFinishStyle;
+    private GUIStyle panelCancelStyle;
+    private GUIStyle panelHintStyle;
+    private GUIStyle panelHeaderStyle;
     private bool stylesBuilt;
 
     // Draggable/resizable/closable chrome for the default control buttons.
@@ -41,20 +53,22 @@ public class TrajectoryUI : MonoBehaviour
     private Rect _debugBoxRectGui;
     private bool _debugBoxActive;
 
-    // Bottom-left DRAW / ERASE gate buttons. Both are plain toggles (tap or click to
-    // switch on and off — no holding); TrajectoryManager reads DrawInputArmed /
-    // EraseInputArmed every frame, so switching both off makes pen/finger/mouse
-    // navigate only. Arming one disarms the other.
+    // Bottom-left DRAW / ADD STOP / ERASE gate buttons. All are plain toggles (tap or
+    // click to switch on and off — no holding); TrajectoryManager reads DrawInputArmed /
+    // StopInputArmed / EraseInputArmed every frame, so switching all off makes
+    // pen/finger/mouse navigate only. Arming one disarms the others.
     private const float GateButtonW = 170f;
     private const float GateButtonH = 96f;
     private const float GateButtonGap = 12f;
     private bool drawToggleLatched;
     private bool eraseToggleLatched;
+    private bool stopToggleLatched;
     private Rect _gateAreaRectGui;
     private bool _gateAreaActive;
 
     public bool DrawInputArmed => drawToggleLatched;
     public bool EraseInputArmed => eraseToggleLatched;
+    public bool StopInputArmed => stopToggleLatched;
 
     private void Start()
     {
@@ -86,12 +100,24 @@ public class TrajectoryUI : MonoBehaviour
         // Each draw session starts disarmed so the view can be framed first.
         drawToggleLatched = false;
         eraseToggleLatched = false;
+        stopToggleLatched = false;
 
         // Default control panel: draggable / resizable / closable window chrome.
         // The old floating "Play=.. FollowMode=.." diagnostic HUD now lives inside
         // the review Metrics panel (MetricsOverlayUI).
         float defaultHeight = SessionReview.ReviewPanels.TitleH + buttonHeight * 4f + buttonSpacing * 4f + 8f;
-        Rect defaultRect = new Rect(24f, SessionReview.ReviewUiScale.Height - defaultHeight - 24f, buttonWidth + 24f, defaultHeight);
+
+        // Bottom edge lifted clear of the replay progress bar: its scrubber is an IMGUI
+        // slider that eats clicks first, so buttons overlapping it scrub the timeline
+        // instead of firing. The constant is the fallback for the frame before the bar
+        // has drawn once (this rect is only used the first time the panel appears).
+        float bottomLimit = SessionReview.ReviewUiScale.Height - 124f;
+        var rewindDock = GetReviewController();
+        if (rewindDock != null && rewindDock.TryGetProgressBarRect(out Rect progressBar))
+            bottomLimit = progressBar.y - 12f;
+        float defaultY = Mathf.Max(10f, bottomLimit - defaultHeight);
+
+        Rect defaultRect = new Rect(24f, defaultY, buttonWidth + 24f, defaultHeight);
         if (SessionReview.ReviewPanels.Begin(controlsPanel, this, "Trajectory", defaultRect, out Rect content))
             DrawControlsPanelBody(content);
         SessionReview.ReviewPanels.End(controlsPanel);
@@ -148,15 +174,15 @@ public class TrajectoryUI : MonoBehaviour
 
     private void DrawDrawModePanel()
     {
-        const float pad = 14f;
-        const float bw = 240f;   // panel / button width
-        const float bh = 56f;    // touch-friendly button height
-        const float sp = 10f;    // spacing
+        const float pad = 10f;
+        const float bw = 200f;   // panel / button width
+        const float bh = 38f;    // secondary actions; the DRAW/ERASE gates stay large
+        const float sp = 6f;     // spacing
         const float x = 24f;
         const float top = 110f;
 
-        const float headerH = 26f;
-        const float hintH = 64f;
+        const float headerH = 20f;
+        const float hintH = 62f;   // three wrapped lines at panelHintStyle's 12px
         // undo, clear, zoom row, traj/ghosts row, finish, cancel (+ pencil and
         // detect/debug rows when the advanced calibration controls are shown)
         int rows = showAdvancedControls ? 8 : 6;
@@ -168,31 +194,34 @@ public class TrajectoryUI : MonoBehaviour
         GUI.Box(panel, GUIContent.none, panelStyle);
 
         float cy = top;
-        GUI.Label(new Rect(x, cy, bw, headerH), "DRAW MODE", headerStyle);
+        GUI.Label(new Rect(x, cy, bw, headerH), "DRAW MODE", panelHeaderStyle);
         cy += headerH + 6f;
 
         string line1 = manager.ApplePencilOnly
             ? (manager.StylusDetected ? "Apple Pencil draws" : "Pencil-only - waiting for pencil")
             : "Finger or pencil draws";
-        GUI.Label(new Rect(x, cy, bw, hintH),
-            line1 + "\nTap DRAW / ERASE (bottom-left) to toggle\n1 finger = pan  -  2 fingers = pinch-zoom",
-            hintStyle);
+        string hintBody = stopToggleLatched
+            ? "STOP: tap = add / remove\ndrag = move (snaps to line)\n1 finger pan  -  2 fingers zoom"
+            : line1 + "\nDRAW / ADD STOP / ERASE below\n1 finger pan  -  2 fingers zoom";
+        GUI.Label(new Rect(x, cy, bw, hintH), hintBody, panelHintStyle);
         cy += hintH + 8f;
 
         GUI.enabled = manager.CanUndo;
-        if (GUI.Button(new Rect(x, cy, bw, bh), "Undo last", buttonStyle))
+        string undoLabel = (stopToggleLatched && manager.SessionStopPointCount > 0)
+            ? "Undo last stop" : "Undo last";
+        if (GUI.Button(new Rect(x, cy, bw, bh), undoLabel, panelButtonStyle))
             manager.UndoLastStroke();
         cy += bh + sp;
 
-        if (GUI.Button(new Rect(x, cy, bw, bh), "Clear all", buttonStyle))
+        if (GUI.Button(new Rect(x, cy, bw, bh), "Clear all", panelButtonStyle))
             manager.ClearCurrentSession();
         GUI.enabled = true;
         cy += bh + sp;
 
         float halfW = (bw - sp) * 0.5f;
-        if (GUI.Button(new Rect(x, cy, halfW, bh), "Zoom +", buttonStyle))
+        if (GUI.Button(new Rect(x, cy, halfW, bh), "Zoom +", panelButtonStyle))
             manager.ZoomStep(true);
-        if (GUI.Button(new Rect(x + halfW + sp, cy, halfW, bh), "Zoom -", buttonStyle))
+        if (GUI.Button(new Rect(x + halfW + sp, cy, halfW, bh), "Zoom -", panelButtonStyle))
             manager.ZoomStep(false);
         cy += bh + sp;
 
@@ -202,16 +231,16 @@ public class TrajectoryUI : MonoBehaviour
         {
             string pencilLabel = manager.ApplePencilOnly ? "Pencil-only: ON" : "Pencil-only: OFF";
             if (GUI.Button(new Rect(x, cy, bw, bh), pencilLabel,
-                manager.ApplePencilOnly ? buttonActiveStyle : buttonStyle))
+                manager.ApplePencilOnly ? panelActiveStyle : panelButtonStyle))
                 manager.ApplePencilOnly = !manager.ApplePencilOnly;
             cy += bh + sp;
 
             // Detection strategy + debug toggle (for calibrating pencil-vs-finger).
-            if (GUI.Button(new Rect(x, cy, halfW, bh), "Detect: " + manager.PencilDetection, buttonStyle))
+            if (GUI.Button(new Rect(x, cy, halfW, bh), "Detect: " + manager.PencilDetection, panelButtonStyle))
                 manager.CyclePencilDetection();
             if (GUI.Button(new Rect(x + halfW + sp, cy, halfW, bh),
                 manager.ShowTouchDebug ? "Debug: ON" : "Debug: OFF",
-                manager.ShowTouchDebug ? buttonActiveStyle : buttonStyle))
+                manager.ShowTouchDebug ? panelActiveStyle : panelButtonStyle))
                 manager.ShowTouchDebug = !manager.ShowTouchDebug;
             cy += bh + sp;
         }
@@ -226,23 +255,23 @@ public class TrajectoryUI : MonoBehaviour
         bool trajShowing = trialTraj != null && trialTraj.IsShowing;
         if (GUI.Button(new Rect(x, cy, halfW, bh),
             trajShowing ? "Traj: ON" : "Traj: OFF",
-            trajShowing ? buttonActiveStyle : buttonStyle))
+            trajShowing ? panelActiveStyle : panelButtonStyle))
             trialTraj.SetVisible(!trajShowing);
 
         GUI.enabled = ghosts != null;
         bool ghostsOn = ghosts != null && ghosts.ShowGhosts;
         if (GUI.Button(new Rect(x + halfW + sp, cy, halfW, bh),
             ghostsOn ? "Ghosts: ON" : "Ghosts: OFF",
-            ghostsOn ? buttonActiveStyle : buttonStyle))
+            ghostsOn ? panelActiveStyle : panelButtonStyle))
             ghosts.ToggleGhosts();
         GUI.enabled = true;
         cy += bh + sp;
 
-        if (GUI.Button(new Rect(x, cy, bw, bh), "Finish & Save", finishStyle))
+        if (GUI.Button(new Rect(x, cy, bw, bh), "Finish & Save", panelFinishStyle))
             manager.ExitDrawMode();
         cy += bh + sp;
 
-        if (GUI.Button(new Rect(x, cy, bw, bh), "Cancel (discard)", cancelStyle))
+        if (GUI.Button(new Rect(x, cy, bw, bh), "Cancel (discard)", panelCancelStyle))
             manager.CancelDrawMode();
 
         DrawGateButtons();
@@ -250,9 +279,9 @@ public class TrajectoryUI : MonoBehaviour
     }
 
     /// <summary>
-    /// The bottom-left DRAW and ERASE gates. Both are simple toggles — tap or click
-    /// to switch on, tap again to switch off; arming one disarms the other. While
-    /// neither is armed, pen/finger/mouse input only navigates the view.
+    /// The bottom-left DRAW, ADD STOP and ERASE gates. All are simple toggles — tap
+    /// or click to switch on, tap again to switch off; arming one disarms the others.
+    /// While none is armed, pen/finger/mouse input only navigates the view.
     /// </summary>
     private void DrawGateButtons()
     {
@@ -261,14 +290,31 @@ public class TrajectoryUI : MonoBehaviour
         _gateAreaActive = true;
 
         Rect drawRect = new Rect(area.x, area.y, GateButtonW, area.height);
-        Rect eraseRect = new Rect(area.x + GateButtonW + GateButtonGap, area.y, GateButtonW, area.height);
+        Rect stopRect = new Rect(area.x + (GateButtonW + GateButtonGap), area.y, GateButtonW, area.height);
+        Rect eraseRect = new Rect(area.x + (GateButtonW + GateButtonGap) * 2f, area.y, GateButtonW, area.height);
 
         string drawLabel = drawToggleLatched ? "DRAW: ON\n(tap to stop)" : "DRAW\n(tap to start)";
         if (GUI.Button(drawRect, drawLabel, drawToggleLatched ? finishStyle : buttonStyle))
         {
             drawToggleLatched = !drawToggleLatched;
             if (drawToggleLatched)
+            {
                 eraseToggleLatched = false;
+                stopToggleLatched = false;
+            }
+        }
+
+        string stopLabel = stopToggleLatched
+            ? "ADD STOP: ON\ntap = add / remove\ndrag = move"
+            : "ADD STOP\n(tap to start)";
+        if (GUI.Button(stopRect, stopLabel, stopToggleLatched ? stopArmedStyle : buttonStyle))
+        {
+            stopToggleLatched = !stopToggleLatched;
+            if (stopToggleLatched)
+            {
+                drawToggleLatched = false;
+                eraseToggleLatched = false;
+            }
         }
 
         string eraseLabel = eraseToggleLatched ? "ERASE: ON\n(tap to stop)" : "ERASE\n(tap to start)";
@@ -276,13 +322,16 @@ public class TrajectoryUI : MonoBehaviour
         {
             eraseToggleLatched = !eraseToggleLatched;
             if (eraseToggleLatched)
+            {
                 drawToggleLatched = false;
+                stopToggleLatched = false;
+            }
         }
     }
 
     private Rect GetGateAreaRect()
     {
-        float w = GateButtonW * 2f + GateButtonGap;
+        float w = GateButtonW * 3f + GateButtonGap * 2f;
 
         // Dock above the replay progress bar: the bar's scrubber is an IMGUI slider
         // that consumes clicks/touches first, so a button overlapping it can never
@@ -292,6 +341,8 @@ public class TrajectoryUI : MonoBehaviour
         if (rewind != null && rewind.TryGetProgressBarRect(out Rect bar) && y + GateButtonH > bar.y)
             y = bar.y - GateButtonH - 12f;
 
+        // The "Robot intent" strip shares this bottom-left corner but hides itself for
+        // the whole draw session (RosOverlayVisibility.OnGUI), so nothing to stack around.
         Rect rect = new Rect(24f, y, w, GateButtonH);
 
         // On short screens the lifted buttons can reach the control panel; slide them
@@ -454,6 +505,16 @@ public class TrajectoryUI : MonoBehaviour
             active = { background = MakeTexture(new Color(0.45f, 0.16f, 0.18f, 0.98f)), textColor = Color.white }
         };
 
+        // Amber, so the armed ADD STOP gate reads differently from DRAW (green) and ERASE (red).
+        stopArmedStyle = new GUIStyle(buttonStyle)
+        {
+            fontSize = 17,
+            fontStyle = FontStyle.Bold,
+            normal = { background = MakeTexture(new Color(0.82f, 0.5f, 0.08f, 0.97f)), textColor = Color.white },
+            hover = { background = MakeTexture(new Color(0.9f, 0.58f, 0.12f, 0.98f)), textColor = Color.white },
+            active = { background = MakeTexture(new Color(0.68f, 0.4f, 0.06f, 0.98f)), textColor = Color.white }
+        };
+
         debugStyle = new GUIStyle(GUI.skin.label)
         {
             fontSize = 13,
@@ -461,6 +522,13 @@ public class TrajectoryUI : MonoBehaviour
             richText = false,
             normal = { textColor = new Color(0.78f, 0.95f, 0.82f) }
         };
+
+        panelButtonStyle = new GUIStyle(buttonStyle) { fontSize = 13 };
+        panelActiveStyle = new GUIStyle(buttonActiveStyle) { fontSize = 13 };
+        panelFinishStyle = new GUIStyle(finishStyle) { fontSize = 14 };
+        panelCancelStyle = new GUIStyle(cancelStyle) { fontSize = 14 };
+        panelHintStyle = new GUIStyle(hintStyle) { fontSize = 12 };
+        panelHeaderStyle = new GUIStyle(headerStyle) { fontSize = 15 };
     }
 
     private static bool IsReviewActive()

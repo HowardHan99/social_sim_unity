@@ -1,12 +1,19 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
 using UnityEngine;
 
 namespace SessionReview
 {
+    public enum WorldBuildingSpawnSourceType
+    {
+        Prefab,
+        MeshyGlb
+    }
+
     /// <summary>
     /// One row for the World Building IMGUI spawn palette (prefab + display label + optional thumbnail).
     /// </summary>
@@ -15,6 +22,19 @@ namespace SessionReview
         public string SpawnId;
         public string DisplayName;
         public Texture2D Thumbnail;
+        public WorldBuildingSpawnSourceType SourceType;
+        public string ImportGlbPath;
+
+        /// <summary>
+        /// True for rigged character prefabs whose palette card offers both spawn modes:
+        /// Static (passive prop) and Walking (SFAgent wandering the NavMesh). Imported GLB
+        /// models have no rig, so they stay single-mode.
+        /// </summary>
+        public bool SupportsAgentModes;
+
+        public bool IsImportedGlb =>
+            SourceType == WorldBuildingSpawnSourceType.MeshyGlb &&
+            !string.IsNullOrEmpty(ImportGlbPath);
     }
 
     /// <summary>
@@ -30,67 +50,82 @@ namespace SessionReview
         private static Dictionary<string, Texture2D> _thumbnailByAssetName =
             new Dictionary<string, Texture2D>(StringComparer.OrdinalIgnoreCase);
         private static bool _loggedRefreshSummary;
+        private static bool _builtFromResources;
+        private static bool _loggedMissingPrefabs;
 
         public static IReadOnlyList<SpawnableObject> LastSpawnables => _lastSpawnables;
         public static IReadOnlyList<WorldBuildingSpawnUiRow> LastUiRows => _lastUiRows;
         public static IReadOnlyList<WorldBuildingSpawnUiRow> LastObjectUiRows => _lastObjectUiRows;
         public static IReadOnlyList<WorldBuildingSpawnUiRow> LastCharacterUiRows => _lastCharacterUiRows;
 
-        public static void RefreshFromResources()
+        /// <summary>
+        /// Builds the palette from Resources and the local Meshy GLB cache. Callers sit on OnGUI
+        /// paths that run several times per frame, so re-scanning every event would spam the
+        /// console and re-walk every asset. Pass <paramref name="force"/> after generating a new
+        /// Meshy model to refresh the disk-backed rows.
+        /// </summary>
+        public static void RefreshFromResources(bool force = false)
         {
-            _loggedRefreshSummary = false;
-            GameObject[] prefabs = Resources.LoadAll<GameObject>("WorldBuildingSpawns");
-            if (prefabs == null || prefabs.Length == 0)
-            {
-                _lastSpawnables = new List<SpawnableObject>();
-                _lastUiRows = new List<WorldBuildingSpawnUiRow>();
-                _lastObjectUiRows = new List<WorldBuildingSpawnUiRow>();
-                _lastCharacterUiRows = new List<WorldBuildingSpawnUiRow>();
-                _thumbnailByAssetName.Clear();
-                Debug.LogWarning("[WorldBuildingSpawnLibrary] No prefabs found under Resources/WorldBuildingSpawns.");
+            if (_builtFromResources && !force)
                 return;
-            }
-
-            Array.Sort(prefabs, (a, b) =>
-                string.Compare(a.name, b.name, StringComparison.OrdinalIgnoreCase));
 
             Texture2D[] textures = LoadUiThumbnails();
-
             _lastSpawnables = new List<SpawnableObject>();
             _lastUiRows = new List<WorldBuildingSpawnUiRow>();
             _lastObjectUiRows = new List<WorldBuildingSpawnUiRow>();
             _lastCharacterUiRows = new List<WorldBuildingSpawnUiRow>();
 
-            RegisterExplicitPalettePrefabs(textures);
-
-            for (int i = 0; i < prefabs.Length; i++)
+            GameObject[] prefabs = Resources.LoadAll<GameObject>("WorldBuildingSpawns");
+            int prefabCount = prefabs != null ? prefabs.Length : 0;
+            if (prefabCount == 0)
             {
-                GameObject prefab = prefabs[i];
-                if (prefab == null)
-                    continue;
+                if (!_loggedMissingPrefabs)
+                {
+                    _loggedMissingPrefabs = true;
+                    Debug.LogWarning("[WorldBuildingSpawnLibrary] No prefabs found under Resources/WorldBuildingSpawns.");
+                }
+            }
+            else
+            {
+                Array.Sort(prefabs, (a, b) =>
+                    string.Compare(a.name, b.name, StringComparison.OrdinalIgnoreCase));
 
-                if (IsPaletteEntryRegistered(prefab.name))
-                    continue;
+                RegisterExplicitPalettePrefabs(textures);
 
-                if (!IsPaletteSpawnPrefab(prefab))
-                    continue;
+                for (int i = 0; i < prefabs.Length; i++)
+                {
+                    GameObject prefab = prefabs[i];
+                    if (prefab == null)
+                        continue;
 
-                Texture2D thumbnail = ResolveThumbnail(prefab.name, textures);
-                RegisterPaletteEntry(prefab, prefab.name, thumbnail);
+                    if (IsPaletteEntryRegistered(prefab.name))
+                        continue;
+
+                    if (!IsPaletteSpawnPrefab(prefab))
+                        continue;
+
+                    Texture2D thumbnail = ResolveThumbnail(prefab.name, textures);
+                    RegisterPaletteEntry(prefab, prefab.name, thumbnail);
+                }
             }
 
-            LogRefreshSummary(prefabs.Length, textures.Length);
+            RegisterWalkingPlayerCharacters();
+            RegisterDynamicPedestrian(textures);
+            int meshyCount = RegisterMeshyGeneratedModels();
+
+            _builtFromResources = true;
+            LogRefreshSummary(prefabCount, textures.Length, meshyCount);
 
             if (_lastObjectUiRows.Count == 0 && _lastCharacterUiRows.Count == 0)
             {
                 Debug.LogWarning(
                     "[WorldBuildingSpawnLibrary] No palette entries registered. "
-                    + prefabs.Length + " prefab(s) and " + textures.Length
-                    + " UI texture(s) were scanned.");
+                    + prefabCount + " prefab(s), " + textures.Length
+                    + " UI texture(s), and " + meshyCount + " Meshy model(s) were scanned.");
             }
         }
 
-        static void LogRefreshSummary(int prefabCount, int textureCount)
+        static void LogRefreshSummary(int prefabCount, int textureCount, int meshyCount)
         {
             if (_loggedRefreshSummary)
                 return;
@@ -101,7 +136,8 @@ namespace SessionReview
                 + _lastObjectUiRows.Count + " object(s) and "
                 + _lastCharacterUiRows.Count + " character(s) from "
                 + prefabCount + " prefab(s) and "
-                + textureCount + " UI texture(s).");
+                + textureCount + " UI texture(s), plus "
+                + meshyCount + " Meshy model(s).");
         }
 
         static Texture2D[] LoadUiThumbnails()
@@ -289,18 +325,383 @@ namespace SessionReview
                 spawnButton = null
             });
 
+            bool isCharacter = IsCharacterSpawnPrefab(prefabName);
             var uiRow = new WorldBuildingSpawnUiRow
             {
                 SpawnId = id,
                 DisplayName = GetDisplayName(prefabName),
-                Thumbnail = thumbnail
+                Thumbnail = thumbnail,
+                SourceType = WorldBuildingSpawnSourceType.Prefab,
+                SupportsAgentModes = isCharacter
             };
             _lastUiRows.Add(uiRow);
 
-            if (IsCharacterSpawnPrefab(prefabName))
+            if (isCharacter)
                 _lastCharacterUiRows.Add(uiRow);
             else
                 _lastObjectUiRows.Add(uiRow);
+        }
+
+        static int RegisterMeshyGeneratedModels()
+        {
+            string dir = MeshyGlbSceneImporter.GetMeshyModelsDirectory();
+            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir))
+                return 0;
+
+            string[] files;
+            try
+            {
+                files = Directory.GetFiles(dir, "*.glb", SearchOption.TopDirectoryOnly);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[WorldBuildingSpawnLibrary] Could not scan Meshy models at '{dir}': {ex.Message}");
+                return 0;
+            }
+
+            Array.Sort(files, (a, b) =>
+                string.Compare(Path.GetFileNameWithoutExtension(a), Path.GetFileNameWithoutExtension(b),
+                    StringComparison.OrdinalIgnoreCase));
+
+            int registered = 0;
+            for (int i = 0; i < files.Length; i++)
+            {
+                string path = files[i];
+                if (string.IsNullOrEmpty(path) || !File.Exists(path))
+                    continue;
+
+                string displayName = HumanizePrefabName(Path.GetFileNameWithoutExtension(path));
+                var uiRow = new WorldBuildingSpawnUiRow
+                {
+                    SpawnId = "meshy:" + path,
+                    DisplayName = displayName,
+                    Thumbnail = null,
+                    SourceType = WorldBuildingSpawnSourceType.MeshyGlb,
+                    ImportGlbPath = path
+                };
+
+                _lastUiRows.Add(uiRow);
+                if (IsCharacterGeneratedModel(displayName))
+                    _lastCharacterUiRows.Add(uiRow);
+                else
+                    _lastObjectUiRows.Add(uiRow);
+                registered++;
+            }
+
+            return registered;
+        }
+
+        /// <summary>
+        /// Finds a palette entry that a free-text prompt is describing ("a red fire hydrant"
+        /// —Fire Hydrant), so World Building can place an existing prefab instead of paying
+        /// for an AI generation. Returns null when nothing matches confidently —the caller
+        /// should generate in that case.
+        /// </summary>
+        public static WorldBuildingSpawnUiRow FindBestMatch(string prompt)
+        {
+            string[] promptTokens = TokenizePrompt(prompt);
+            if (promptTokens.Length == 0)
+                return null;
+
+            string promptKey = string.Concat(promptTokens);
+            WorldBuildingSpawnUiRow best = null;
+            int bestScore = 0;
+
+            for (int i = 0; i < _lastUiRows.Count; i++)
+            {
+                WorldBuildingSpawnUiRow row = _lastUiRows[i];
+                if (row == null || string.IsNullOrEmpty(row.DisplayName))
+                    continue;
+
+                // Palette names are already canonical —running them through the synonym map
+                // too would fold "Road Sign" into a doubled "roadroadsign" key.
+                string[] rowTokens = Tokenize(row.DisplayName, applySynonyms: false);
+                if (rowTokens.Length == 0)
+                    continue;
+
+                int score = ScorePromptMatch(promptTokens, promptKey, rowTokens);
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    best = row;
+                }
+            }
+
+            return bestScore >= MinPromptMatchScore ? best : null;
+        }
+
+        private const int MinPromptMatchScore = 100;
+
+        /// <summary>
+        /// Tiers are weighted by how many characters of the matched name were accounted for,
+        /// so a longer, more specific name wins: "a bench next to a trash can" must resolve to
+        /// TrashCan, not to the shorter Trash that is also present in the sentence.
+        /// </summary>
+        static int ScorePromptMatch(string[] promptTokens, string promptKey, string[] rowTokens)
+        {
+            string rowKey = string.Concat(rowTokens);
+
+            // "trash can" vs prefab "TrashCan": token counts differ but the collapsed keys agree.
+            if (string.Equals(promptKey, rowKey, StringComparison.Ordinal))
+                return 1000 + rowKey.Length;
+
+            // The prompt says everything the name says: "a big red fire hydrant" -> Fire Hydrant.
+            if (AllTokensPresent(rowTokens, promptTokens) ||
+                (rowKey.Length >= 4 && promptKey.Contains(rowKey)))
+                return 500 + 8 * rowKey.Length;
+
+            // The prompt is a fragment of the name: "hydrant" -> FireHydrant.
+            if (AllTokensPresent(promptTokens, rowTokens) ||
+                (promptKey.Length >= 4 && rowKey.Contains(promptKey)))
+                return 300 + 8 * promptKey.Length;
+
+            // Fall back to shared distinctive words ("traffic cone" -> Road Cone). Short words
+            // like "car" are too weak on their own to outrank an actual generation.
+            int overlap = 0;
+            for (int i = 0; i < rowTokens.Length; i++)
+            {
+                if (rowTokens[i].Length >= 4 && Array.IndexOf(promptTokens, rowTokens[i]) >= 0)
+                    overlap++;
+            }
+
+            return overlap > 0 ? 100 + 10 * overlap : 0;
+        }
+
+        static bool AllTokensPresent(string[] needles, string[] haystack)
+        {
+            for (int i = 0; i < needles.Length; i++)
+            {
+                if (Array.IndexOf(haystack, needles[i]) < 0)
+                    return false;
+            }
+
+            return needles.Length > 0;
+        }
+
+        static string[] TokenizePrompt(string text)
+        {
+            return Tokenize(text, applySynonyms: true);
+        }
+
+        /// <summary>
+        /// Lowercases, splits on non-alphanumerics, drops filler words and singularizes.
+        /// With <paramref name="applySynonyms"/> it also maps everyday words onto palette
+        /// vocabulary, so "Add 2 garbage bins please" and "TrashCan" meet in the middle.
+        /// </summary>
+        static string[] Tokenize(string text, bool applySynonyms)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return Array.Empty<string>();
+
+            string cleaned = Regex.Replace(text.ToLowerInvariant(), @"[^a-z0-9]+", " ");
+            string[] raw = cleaned.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+
+            var tokens = new List<string>(raw.Length);
+            for (int i = 0; i < raw.Length; i++)
+            {
+                string token = Singularize(raw[i]);
+                if (token.Length == 0 || IsPromptStopWord(token))
+                    continue;
+
+                if (applySynonyms && PromptSynonyms.TryGetValue(token, out string canonical))
+                    token = canonical;
+
+                if (!tokens.Contains(token))
+                    tokens.Add(token);
+            }
+
+            return tokens.ToArray();
+        }
+
+        static string Singularize(string token)
+        {
+            if (token.Length > 4 && token.EndsWith("ies", StringComparison.Ordinal))
+                return token.Substring(0, token.Length - 3) + "y";
+            if (token.Length > 4 && token.EndsWith("es", StringComparison.Ordinal))
+                return token.Substring(0, token.Length - 2);
+            if (token.Length > 3 && token.EndsWith("s", StringComparison.Ordinal) &&
+                !token.EndsWith("ss", StringComparison.Ordinal))
+                return token.Substring(0, token.Length - 1);
+
+            return token;
+        }
+
+        static bool IsPromptStopWord(string token)
+        {
+            for (int i = 0; i < PromptStopWords.Length; i++)
+            {
+                if (string.Equals(token, PromptStopWords[i], StringComparison.Ordinal))
+                    return true;
+            }
+
+            // Bare numbers and colors describe the request, not which prefab it is.
+            return token.Length == 1 || IsAllDigits(token);
+        }
+
+        static bool IsAllDigits(string token)
+        {
+            for (int i = 0; i < token.Length; i++)
+            {
+                if (!char.IsDigit(token[i]))
+                    return false;
+            }
+
+            return token.Length > 0;
+        }
+
+        static readonly string[] PromptStopWords =
+        {
+            "a", "an", "the", "some", "any", "this", "that", "these", "those",
+            "add", "place", "put", "create", "generate", "make", "build", "spawn", "give", "want", "need",
+            "please", "me", "my", "new", "of", "with", "and", "for", "in", "on", "at", "to", "into",
+            "model", "object", "asset", "prefab", "mesh", "3d", "realistic", "detailed", "simple", "small",
+            "big", "large", "tall", "short", "old", "modern", "nice", "good",
+            "red", "blue", "green", "yellow", "black", "white", "gray", "grey", "brown", "orange", "purple",
+        };
+
+        /// <summary>
+        /// Everyday words mapped onto the vocabulary the palette prefabs actually use. Only
+        /// word-for-word swaps belong here —a prompt that is a fragment of a name ("hydrant",
+        /// "cone", "box") already matches through the containment tiers.
+        /// </summary>
+        static readonly Dictionary<string, string> PromptSynonyms = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            { "bicycle", "bike" },
+            { "cycle", "bike" },
+            { "garbage", "trash" },
+            { "rubbish", "trash" },
+            { "waste", "trash" },
+            { "litter", "trash" },
+            { "bin", "can" },
+            { "streetlight", "lamppost" },
+            { "streetlamp", "lamppost" },
+            { "lamp", "lamppost" },
+            { "shrub", "bush" },
+            { "hedge", "bush" },
+            { "carton", "box" },
+            { "crate", "box" },
+            { "package", "box" },
+            { "parcel", "box" },
+            { "signpost", "sign" },
+            { "letterbox", "mailbox" },
+            { "postbox", "mailbox" },
+            { "moped", "scooter" },
+            { "vespa", "scooter" },
+            { "planter", "pot" },
+            { "leaf", "leave" },
+        };
+
+        /// <summary>
+        /// Walking player characters (Resources/PlayerCharacters) double as World Building
+        /// characters, so scenes can be populated with the same avatars the player can pick.
+        /// Thumbnails come from Resources/PlayerCharactersUI via PlayerCharacterLibrary.
+        /// </summary>
+        static void RegisterWalkingPlayerCharacters()
+        {
+            IReadOnlyList<PlayerCharacterOption> options = PlayerCharacterLibrary.Options;
+            for (int i = 0; i < options.Count; i++)
+            {
+                PlayerCharacterOption option = options[i];
+                if (option?.Prefab == null || IsPaletteEntryRegistered(option.Prefab.name))
+                    continue;
+
+                RegisterPaletteEntry(option.Prefab, option.Prefab.name, option.Thumbnail);
+            }
+        }
+
+        /// <summary>
+        /// Resources path of the autonomous pedestrian agent. RandomAvatar builds an SFAgent
+        /// (IVI.INavigable) on Awake; placed via World Building it walks the baked NavMesh.
+        /// </summary>
+        const string DynamicPedestrianPrefabPath = "Prefabs/RocketboxRandomAnimatedAgent";
+
+        /// <summary>Root prefab name of the dynamic (walking) pedestrian palette entry.</summary>
+        public const string DynamicPedestrianPrefabName = "RocketboxRandomAnimatedAgent";
+
+        const string DynamicPedestrianDisplayName = "Pedestrian";
+
+        /// <summary>Marker label for a pedestrian placed in Static mode.</summary>
+        public const string StaticPedestrianDisplayName = "Pedestrian (Static)";
+
+        /// <summary>
+        /// Virtual palette name recorded on a static pedestrian placement. Not a real prefab:
+        /// both spawn modes share the RocketboxRandomAnimatedAgent prefab, whose plain name in
+        /// old saves means "walking", so scenario save/restore needs a distinct name to re-spawn
+        /// the static one through the passive-prop pipeline.
+        /// </summary>
+        public const string StaticPedestrianPaletteName = DynamicPedestrianPrefabName + "_Static";
+
+        /// <summary>
+        /// Adds the random pedestrian as an Add-Characters entry. Like every character card it
+        /// offers Static and Walking; Walking keeps the navigation controllers RandomAvatar
+        /// builds (SFAgent) —RuntimeEditorManager branches on
+        /// <see cref="IsDynamicPedestrianPrefab"/> to skip the passive-prop pipeline and attach
+        /// WorldBuildingWanderPedestrian —while Static goes through the passive-prop pipeline,
+        /// which strips the SFAgent so the avatar just stands where it is placed.
+        /// </summary>
+        static void RegisterDynamicPedestrian(Texture2D[] textures)
+        {
+            GameObject prefab = Resources.Load<GameObject>(DynamicPedestrianPrefabPath);
+            if (prefab == null)
+            {
+                Debug.LogWarning("[WorldBuildingSpawnLibrary] Dynamic pedestrian prefab not found at Resources/"
+                    + DynamicPedestrianPrefabPath + "; the walking pedestrian will be missing from Add Characters.");
+                return;
+            }
+
+            if (IsPaletteEntryRegistered(prefab.name))
+                return;
+
+            // Exact-path only (no fuzzy matching) so this never borrows an unrelated object icon;
+            // drop a Resources/WorldBuildingUI/Pedestrian texture to give it art.
+            Texture2D thumbnail = LoadUiThumbnail("WorldBuildingUI/Pedestrian");
+            RegisterForcedCharacterEntry(prefab, DynamicPedestrianDisplayName, thumbnail);
+        }
+
+        /// <summary>
+        /// Registers a palette entry forced into the character list with an explicit display
+        /// name, for character prefabs whose name would not pass <see cref="IsCharacterSpawnPrefab"/>.
+        /// </summary>
+        static void RegisterForcedCharacterEntry(GameObject prefab, string displayName, Texture2D thumbnail)
+        {
+            string id = _lastSpawnables.Count.ToString(CultureInfo.InvariantCulture);
+            _lastSpawnables.Add(new SpawnableObject
+            {
+                id = id,
+                prefab = prefab,
+                spawnButton = null
+            });
+
+            var uiRow = new WorldBuildingSpawnUiRow
+            {
+                SpawnId = id,
+                DisplayName = displayName,
+                Thumbnail = thumbnail,
+                SourceType = WorldBuildingSpawnSourceType.Prefab,
+                SupportsAgentModes = true
+            };
+            _lastUiRows.Add(uiRow);
+            _lastCharacterUiRows.Add(uiRow);
+        }
+
+        /// <summary>
+        /// True for the autonomous walking pedestrian, which must keep its navigation
+        /// controllers (i.e. must NOT be turned into a passive prop) when placed.
+        /// </summary>
+        public static bool IsDynamicPedestrianPrefab(string prefabName)
+        {
+            return !string.IsNullOrEmpty(prefabName)
+                && string.Equals(prefabName, DynamicPedestrianPrefabName, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// True for the virtual palette name a static pedestrian placement is saved under
+        /// (see <see cref="StaticPedestrianPaletteName"/>).
+        /// </summary>
+        public static bool IsStaticPedestrianPaletteName(string prefabName)
+        {
+            return !string.IsNullOrEmpty(prefabName)
+                && string.Equals(prefabName, StaticPedestrianPaletteName, StringComparison.OrdinalIgnoreCase);
         }
 
         public static bool IsCharacterSpawnPrefab(string prefabName)
@@ -316,8 +717,53 @@ namespace SessionReview
             if (n.Contains("avatar") || n.Contains("pedestrian") || n.Contains("pwd"))
                 return true;
 
+            // Anything under Resources/PlayerCharacters is a character regardless of name.
+            return PlayerCharacterLibrary.FindPrefab(prefabName) != null;
+        }
+
+        public static bool IsCharacterGeneratedModel(string displayNameOrPrompt)
+        {
+            if (string.IsNullOrWhiteSpace(displayNameOrPrompt))
+                return false;
+
+            string n = displayNameOrPrompt.ToLowerInvariant();
+            if (n.Contains("wheelchair"))
+                return true;
+
+            string[] tokens = Tokenize(displayNameOrPrompt, applySynonyms: false);
+            for (int i = 0; i < tokens.Length; i++)
+            {
+                for (int j = 0; j < GeneratedCharacterTokens.Length; j++)
+                {
+                    if (string.Equals(tokens[i], GeneratedCharacterTokens[j], StringComparison.Ordinal))
+                        return true;
+                }
+            }
+
             return false;
         }
+
+        static readonly string[] GeneratedCharacterTokens =
+        {
+            "character",
+            "avatar",
+            "person",
+            "people",
+            "human",
+            "pedestrian",
+            "pwd",
+            "man",
+            "woman",
+            "boy",
+            "girl",
+            "male",
+            "female",
+            "walker",
+            "passenger",
+            "user",
+            "guest",
+            "host"
+        };
 
         public static string HumanizePrefabName(string raw)
         {

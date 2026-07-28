@@ -9,8 +9,8 @@ namespace SessionReview
     [Serializable]
     public class ReviewExportSettings
     {
-        public float paddingX = 3f;
-        public float paddingZ = 3f;
+        public float paddingX = 12f;
+        public float paddingZ = 12f;
         public float offsetX = 0f;
         public float offsetZ = 0f;
         public bool exportImage = true;
@@ -98,6 +98,7 @@ namespace SessionReview
         public float trialEndTime;
         public ReviewExportBounds bounds;
         public ReviewExportImageInfo image;
+        public ReviewExportImageInfo trajectoryImage;
         public List<ReviewExportObject> objects = new List<ReviewExportObject>();
         public List<ReviewExportAgent> agents = new List<ReviewExportAgent>();
     }
@@ -125,11 +126,8 @@ namespace SessionReview
                 if (!recording.timelineDict.TryGetValue(roleEntry.objectId, out ObjectStateTimeline timeline) || timeline.states == null)
                     continue;
 
-                foreach (var state in timeline.states)
+                foreach (var state in MultiAgentTrajectoryRenderer.CollectTrialStates(timeline, roleEntry.role, recStart, recEnd))
                 {
-                    if (state.timestamp < recStart || state.timestamp > recEnd)
-                        continue;
-
                     if (!hasPoint)
                     {
                         min = state.position;
@@ -212,10 +210,7 @@ namespace SessionReview
 
             if (settings.exportImage)
             {
-                string imageFileName = "roi_topdown.png";
-                string imagePath = Path.Combine(exportFolder, imageFileName);
-                ExportTopDownImage(roi, settings.imageMaxResolution, imagePath);
-                data.image = BuildImageInfo(roi, settings.imageMaxResolution, imageFileName);
+                ExportTopDownImages(roi, settings.imageMaxResolution, exportFolder, data);
             }
 
             string jsonPath = Path.Combine(exportFolder, "review_roi_export.json");
@@ -296,11 +291,8 @@ namespace SessionReview
                     displayName = ResolveAgentDisplayName(roleEntry.objectId)
                 };
 
-                foreach (var state in timeline.states)
+                foreach (var state in MultiAgentTrajectoryRenderer.CollectTrialStates(timeline, roleEntry.role, recStart, recEnd))
                 {
-                    if (state.timestamp < recStart || state.timestamp > recEnd)
-                        continue;
-
                     var sample = new ReviewExportTrajectorySample
                     {
                         timestamp = state.timestamp,
@@ -338,30 +330,13 @@ namespace SessionReview
             };
         }
 
-        private static ReviewExportImageInfo BuildImageInfo(Bounds roi, int maxResolution, string fileName)
+        private static ReviewExportImageInfo BuildImageInfo(Texture2D texture, string fileName)
         {
-            float width = Mathf.Max(roi.size.x, 0.1f);
-            float height = Mathf.Max(roi.size.z, 0.1f);
-            float aspect = width / height;
-
-            int pixelWidth;
-            int pixelHeight;
-            if (aspect >= 1f)
-            {
-                pixelWidth = maxResolution;
-                pixelHeight = Mathf.Max(1, Mathf.RoundToInt(maxResolution / aspect));
-            }
-            else
-            {
-                pixelHeight = maxResolution;
-                pixelWidth = Mathf.Max(1, Mathf.RoundToInt(maxResolution * aspect));
-            }
-
             return new ReviewExportImageInfo
             {
                 fileName = fileName,
-                width = pixelWidth,
-                height = pixelHeight
+                width = texture.width,
+                height = texture.height
             };
         }
 
@@ -692,7 +667,42 @@ namespace SessionReview
             return TrialDataArchive.CreateReviewExportFolder(trial);
         }
 
-        private static void ExportTopDownImage(Bounds roi, int maxResolution, string outputPath)
+        /// <summary>
+        /// Render the ROI top-down once and write two PNGs from it: the clean plate
+        /// (`roi_topdown.png`) and the same plate with the trial's trajectories drawn on
+        /// top (`roi_topdown_trajectory.png`). Both share one render, so they are
+        /// pixel-aligned with each other and with the exported ROI bounds.
+        /// </summary>
+        private static void ExportTopDownImages(Bounds roi, int maxResolution, string exportFolder, ReviewExportData data)
+        {
+            Texture2D texture = RenderTopDown(roi, maxResolution, out Rect worldRect);
+            if (texture == null)
+                return;
+
+            try
+            {
+                const string plainFileName = "roi_topdown.png";
+                File.WriteAllBytes(Path.Combine(exportFolder, plainFileName), texture.EncodeToPNG());
+                data.image = BuildImageInfo(texture, plainFileName);
+
+                const string trajectoryFileName = "roi_topdown_trajectory.png";
+                DrawAgentTrajectories(texture, worldRect, data.agents);
+                File.WriteAllBytes(Path.Combine(exportFolder, trajectoryFileName), texture.EncodeToPNG());
+                data.trajectoryImage = BuildImageInfo(texture, trajectoryFileName);
+            }
+            finally
+            {
+                UnityEngine.Object.Destroy(texture);
+            }
+        }
+
+        /// <summary>
+        /// Render the ROI from a top-down orthographic camera. <paramref name="worldRect"/>
+        /// receives the world XZ area the pixels actually cover (x/y = min X/Z), which can
+        /// differ from the ROI by a fraction of a metre because the pixel dimensions are
+        /// rounded; trajectory drawing must map through it, not through the raw ROI.
+        /// </summary>
+        private static Texture2D RenderTopDown(Bounds roi, int maxResolution, out Rect worldRect)
         {
             float widthWorld = Mathf.Max(roi.size.x, 0.1f);
             float heightWorld = Mathf.Max(roi.size.z, 0.1f);
@@ -711,12 +721,22 @@ namespace SessionReview
                 widthPx = Mathf.Max(1, Mathf.RoundToInt(maxResolution * aspect));
             }
 
+            float pixelAspect = widthPx / (float)heightPx;
+            float orthoSize = Mathf.Max(heightWorld * 0.5f, widthWorld * 0.5f / Mathf.Max(0.01f, pixelAspect));
+            float coveredHeight = orthoSize * 2f;
+            float coveredWidth = coveredHeight * pixelAspect;
+            worldRect = new Rect(
+                roi.center.x - coveredWidth * 0.5f,
+                roi.center.z - coveredHeight * 0.5f,
+                coveredWidth,
+                coveredHeight);
+
             var cameraGO = new GameObject("ReviewRoiExportCamera");
             var exportCamera = cameraGO.AddComponent<Camera>();
             exportCamera.orthographic = true;
             exportCamera.transform.position = new Vector3(roi.center.x, roi.center.y + 100f, roi.center.z);
             exportCamera.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
-            exportCamera.orthographicSize = Mathf.Max(heightWorld * 0.5f, widthWorld * 0.5f / Mathf.Max(0.01f, widthPx / (float)heightPx));
+            exportCamera.orthographicSize = orthoSize;
             exportCamera.clearFlags = CameraClearFlags.Skybox;
 
             var rt = new RenderTexture(widthPx, heightPx, 24);
@@ -732,8 +752,7 @@ namespace SessionReview
                 var tex = new Texture2D(widthPx, heightPx, TextureFormat.RGB24, false);
                 tex.ReadPixels(new Rect(0, 0, widthPx, heightPx), 0, 0);
                 tex.Apply();
-                File.WriteAllBytes(outputPath, tex.EncodeToPNG());
-                UnityEngine.Object.Destroy(tex);
+                return tex;
             }
             finally
             {
@@ -744,6 +763,157 @@ namespace SessionReview
                 UnityEngine.Object.Destroy(rt);
                 UnityEngine.Object.Destroy(cameraGO);
             }
+        }
+
+        // Same order/colours as review_roi_viewer.py so a baked image and the viewer
+        // assign the same colour to the same agent.
+        private static readonly Color32[] AgentPalette =
+        {
+            new Color32(0xff, 0x5f, 0x56, 0xff),
+            new Color32(0x37, 0xc9, 0x78, 0xff),
+            new Color32(0x4d, 0xa3, 0xff, 0xff),
+            new Color32(0xf2, 0xc1, 0x4e, 0xff),
+            new Color32(0xd2, 0x77, 0xff, 0xff),
+            new Color32(0xff, 0x8c, 0x42, 0xff)
+        };
+
+        private static readonly Color32 TrajectoryOutlineColor = new Color32(0x10, 0x14, 0x18, 0xff);
+
+        private static void DrawAgentTrajectories(Texture2D texture, Rect worldRect, List<ReviewExportAgent> agents)
+        {
+            if (agents == null || agents.Count == 0)
+                return;
+
+            int width = texture.width;
+            int height = texture.height;
+            Color32[] pixels = texture.GetPixels32();
+
+            // Scale line weight with resolution so a 2048px export is not hairline-thin.
+            int lineRadius = Mathf.Max(1, Mathf.RoundToInt(Mathf.Max(width, height) / 500f));
+            int markerRadius = lineRadius * 3;
+
+            for (int i = 0; i < agents.Count; i++)
+            {
+                ReviewExportAgent agent = agents[i];
+                if (agent == null || agent.samples == null || agent.samples.Count == 0)
+                    continue;
+
+                Color32 color = AgentPalette[i % AgentPalette.Length];
+
+                // Two passes: a dark casing first, then the colour, so paths stay readable
+                // over both bright pavement and dark shadow.
+                for (int pass = 0; pass < 2; pass++)
+                {
+                    Color32 passColor = pass == 0 ? TrajectoryOutlineColor : color;
+                    int passRadius = pass == 0 ? lineRadius + 1 : lineRadius;
+
+                    Vector2Int previous = default;
+                    bool hasPrevious = false;
+                    foreach (var sample in agent.samples)
+                    {
+                        Vector2Int point = WorldToPixel(sample.position, worldRect, width, height);
+                        if (hasPrevious)
+                            DrawLine(pixels, width, height, previous, point, passColor, passRadius);
+                        previous = point;
+                        hasPrevious = true;
+                    }
+
+                    DrawDisc(pixels, width, height, WorldToPixel(agent.startPosition, worldRect, width, height), passColor, pass == 0 ? markerRadius + 1 : markerRadius);
+                    DrawSquare(pixels, width, height, WorldToPixel(agent.endPosition, worldRect, width, height), passColor, pass == 0 ? markerRadius + 1 : markerRadius);
+                    if (!agent.goalIsInferred)
+                        DrawCross(pixels, width, height, WorldToPixel(agent.goalPosition, worldRect, width, height), passColor, markerRadius + 2, pass == 0 ? lineRadius + 1 : lineRadius);
+                }
+            }
+
+            texture.SetPixels32(pixels);
+            texture.Apply();
+        }
+
+        private static Vector2Int WorldToPixel(Vector3 world, Rect worldRect, int width, int height)
+        {
+            float u = (world.x - worldRect.xMin) / Mathf.Max(0.0001f, worldRect.width);
+            float v = (world.z - worldRect.yMin) / Mathf.Max(0.0001f, worldRect.height);
+            // Texture row 0 is the bottom of the render and the export camera's up axis is
+            // +Z, so world Z maps straight onto texture Y with no flip.
+            return new Vector2Int(
+                Mathf.RoundToInt(u * (width - 1)),
+                Mathf.RoundToInt(v * (height - 1)));
+        }
+
+        private static void DrawLine(Color32[] pixels, int width, int height, Vector2Int a, Vector2Int b, Color32 color, int radius)
+        {
+            // Trivial reject: samples outside the ROI are common (the trajectory runs past
+            // the padded box), and stepping across them pixel by pixel is pure waste.
+            if ((a.x < -radius && b.x < -radius) || (a.x >= width + radius && b.x >= width + radius) ||
+                (a.y < -radius && b.y < -radius) || (a.y >= height + radius && b.y >= height + radius))
+                return;
+
+            int dx = Mathf.Abs(b.x - a.x);
+            int sx = a.x < b.x ? 1 : -1;
+            int dy = -Mathf.Abs(b.y - a.y);
+            int sy = a.y < b.y ? 1 : -1;
+            int err = dx + dy;
+            int x = a.x;
+            int y = a.y;
+
+            int maxSteps = (width + height) * 4;
+            for (int step = 0; step <= maxSteps; step++)
+            {
+                DrawDisc(pixels, width, height, new Vector2Int(x, y), color, radius);
+                if (x == b.x && y == b.y)
+                    break;
+
+                int e2 = 2 * err;
+                if (e2 >= dy)
+                {
+                    err += dy;
+                    x += sx;
+                }
+                if (e2 <= dx)
+                {
+                    err += dx;
+                    y += sy;
+                }
+            }
+        }
+
+        private static void DrawDisc(Color32[] pixels, int width, int height, Vector2Int center, Color32 color, int radius)
+        {
+            int radiusSq = radius * radius;
+            for (int oy = -radius; oy <= radius; oy++)
+            {
+                for (int ox = -radius; ox <= radius; ox++)
+                {
+                    if (ox * ox + oy * oy > radiusSq)
+                        continue;
+                    SetPixel(pixels, width, height, center.x + ox, center.y + oy, color);
+                }
+            }
+        }
+
+        private static void DrawSquare(Color32[] pixels, int width, int height, Vector2Int center, Color32 color, int halfSize)
+        {
+            for (int oy = -halfSize; oy <= halfSize; oy++)
+            {
+                for (int ox = -halfSize; ox <= halfSize; ox++)
+                    SetPixel(pixels, width, height, center.x + ox, center.y + oy, color);
+            }
+        }
+
+        private static void DrawCross(Color32[] pixels, int width, int height, Vector2Int center, Color32 color, int halfSize, int thickness)
+        {
+            for (int offset = -halfSize; offset <= halfSize; offset++)
+            {
+                DrawDisc(pixels, width, height, new Vector2Int(center.x + offset, center.y + offset), color, thickness);
+                DrawDisc(pixels, width, height, new Vector2Int(center.x + offset, center.y - offset), color, thickness);
+            }
+        }
+
+        private static void SetPixel(Color32[] pixels, int width, int height, int x, int y, Color32 color)
+        {
+            if (x < 0 || y < 0 || x >= width || y >= height)
+                return;
+            pixels[y * width + x] = color;
         }
 
         private static List<Renderer> HideDynamicRenderers()
@@ -775,6 +945,10 @@ namespace SessionReview
             // The floating "ROBOT GOAL" text and goal outline are goal UI, not scene geometry.
             if (RobotGoalObjectBinding.Instance != null)
                 AddRenderers(hidden, RobotGoalObjectBinding.Instance.GoalUiRenderers);
+
+            // Same for GoalBeacon's floating goal labels, which are root objects rather than
+            // children of the markers hidden above.
+            AddRenderers(hidden, GoalBeacon.AllUiRenderers);
 
             return hidden;
         }

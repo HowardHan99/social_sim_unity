@@ -51,6 +51,15 @@ namespace SEAN.Scenario.Agents
         [Tooltip("Scene object name for goal point. Searches entire hierarchy by name.")]
         public string goalObjectName = "end";
 
+        [Header("PWD Robot-Trial Route (hidden second start/end)")]
+        [Tooltip("In a ROBOT trial the pedestrian spawns/goes here instead of start/end, so a player who drove the primary route while playing the human can't predict where it goes. Falls back to startObjectName/goalObjectName if not found in the scene.")]
+        public string robotTrialStartObjectName = "start2";
+        public string robotTrialGoalObjectName = "end2";
+
+        public enum PwdTrialMode { AutoFromOnboarding, PedestrianTrial, RobotTrial }
+        [Tooltip("Decides if THIS run is a ROBOT trial or a PEDESTRIAN trial. RobotTrial / PedestrianTrial force it directly and do NOT need onboarding -- use these when you just press Play / Run Again. AutoFromOnboarding follows the onboarding role (robot trial only when onboarding was completed with PlayerMode == Robot). In a ROBOT trial the pedestrian uses the robot-trial route AND every pedestrian start/end marker is hidden.")]
+        public PwdTrialMode pwdTrialMode = PwdTrialMode.AutoFromOnboarding;
+
         [Header("Background PWD Gender")]
         public PwdGender bgPwdGender = PwdGender.Random;
 
@@ -285,8 +294,36 @@ namespace SEAN.Scenario.Agents
                 return;
             }
 
-            GameObject startObj = FindByName(startObjectName);
-            GameObject goalObj = FindByName(goalObjectName);
+            // Two authored routes. HUMAN (pedestrian) trial uses the primary start/end that the
+            // player drives; ROBOT trial uses a separate start/end so the robot player -- who may
+            // have driven the primary route while playing the human -- can't predict the pedestrian.
+            bool useRobotTrialRoute;
+            switch (pwdTrialMode)
+            {
+                case PwdTrialMode.RobotTrial: useRobotTrialRoute = true; break;
+                case PwdTrialMode.PedestrianTrial: useRobotTrialRoute = false; break;
+                default:
+                    useRobotTrialRoute =
+                        SessionReview.SessionOnboardingSettings.HasCompletedOnboarding &&
+                        SessionReview.SessionOnboardingSettings.PlayerMode == SessionReview.OnboardingPlayerMode.Robot;
+                    break;
+            }
+            Debug.Log($"[PWD] pwdTrialMode={pwdTrialMode} -> useRobotTrialRoute={useRobotTrialRoute} " +
+                      $"(onboarding={SessionReview.SessionOnboardingSettings.HasCompletedOnboarding}, playerMode={SessionReview.SessionOnboardingSettings.PlayerMode})");
+
+            GameObject startObj = FindByName(useRobotTrialRoute ? robotTrialStartObjectName : startObjectName, !useRobotTrialRoute);
+            GameObject goalObj = FindByName(useRobotTrialRoute ? robotTrialGoalObjectName : goalObjectName, !useRobotTrialRoute);
+            if (useRobotTrialRoute && startObj == null)
+            {
+                Debug.LogWarning($"[PWD] Robot-trial start '{robotTrialStartObjectName}' not found; falling back to '{startObjectName}'.");
+                startObj = FindByName(startObjectName);
+            }
+            if (useRobotTrialRoute && goalObj == null)
+            {
+                Debug.LogWarning($"[PWD] Robot-trial goal '{robotTrialGoalObjectName}' not found; falling back to '{goalObjectName}'.");
+                goalObj = FindByName(goalObjectName);
+            }
+            Debug.Log($"[PWD] Route selection: {(useRobotTrialRoute ? "ROBOT trial (hidden second route)" : "HUMAN/pedestrian trial (primary route)")}");
 
             Vector3 rawPos = startObj != null ? startObj.transform.position : transform.position;
             UnityEngine.AI.NavMeshHit navHit;
@@ -304,11 +341,15 @@ namespace SEAN.Scenario.Agents
             avatarObject = Instantiate(avatarPrefab, spawnPos, spawnRot);
             avatarObject.name = "PWDPlayer";
 
-            Animator animator = avatarObject.GetComponent<Animator>();
+            // Root-or-child lookup: prefabs whose rig lives in a nested model instance
+            // (Wheelchair_female 1) carry the Animator below the root.
+            Animator animator = GetAvatarAnimator(avatarObject);
             RuntimeAnimatorController playerAnimController = spawnedWalkingCharacter ? animationController : pwdAnimationController;
-            if (animator != null && playerAnimController != null)
+            if (animator == null)
+                Debug.LogWarning($"[PWD] Avatar prefab '{avatarPrefab.name}' has no Animator; the player will not animate.", this);
+            else if (playerAnimController != null)
                 animator.runtimeAnimatorController = playerAnimController;
-            else if (animator != null)
+            else
                 Debug.LogWarning($"[PWD] No {(spawnedWalkingCharacter ? "walking" : "wheelchair")} animation controller assigned on '{gameObject.name}'.", this);
 
             Vector3 goalPos = spawnPos;
@@ -326,6 +367,12 @@ namespace SEAN.Scenario.Agents
             sfpwd.useWaypoints = true;
             sfpwd.waypointStart = spawnPos;
             sfpwd.waypointGoal = goalPos;
+
+            // Hide the pedestrian markers at load. They're only shown during the PEDESTRIAN trial
+            // (ApplyTrialRoute) and while world-building (RuntimeEditorManager). ApplyTrialRoute sets
+            // the authoritative visibility at trial start, once the "You play" role is known.
+            SetPedestrianMarkersVisible(false);
+
             if (spawnedWalkingCharacter)
             {
                 // Standing avatar: keep the Base-computed capsule center (seated recenter
@@ -428,7 +475,125 @@ namespace SEAN.Scenario.Agents
                       $"goal=({goalPos.x:F1},{goalPos.y:F1},{goalPos.z:F1})");
         }
 
+        /// <summary>
+        /// Re-selects and re-applies the pedestrian's route AFTER the role is chosen in the
+        /// "You play: Robot/Human" prompt. The PWD is spawned in Awake (before the role exists),
+        /// so this must run at trial start to actually move it. Called by SessionReviewManager.
+        /// robotTrialFromRole = (selectedPlayerMode == Robot). pwdTrialMode can force it either way.
+        /// </summary>
+        public void ApplyTrialRoute(bool robotTrialFromRole)
+        {
+            if (!isPwdPlayer)
+                return;
+
+            bool useRobotTrialRoute;
+            switch (pwdTrialMode)
+            {
+                case PwdTrialMode.RobotTrial: useRobotTrialRoute = true; break;
+                case PwdTrialMode.PedestrianTrial: useRobotTrialRoute = false; break;
+                default: useRobotTrialRoute = robotTrialFromRole; break;
+            }
+
+            // Target the ACTUAL player-driven pedestrian by name. When multiple isPwdPlayer
+            // RandomAvatars exist (e.g. the NavManager agentPrefab carries isPwdPlayer, so every
+            // background agent has it too), avatarObject on the one we were called through may be a
+            // BACKGROUND agent -- moving that teleports a random background pedestrian to start2 and
+            // leaves the real player behind. The real player is always the root object "PWDPlayer".
+            GameObject pwd = GameObject.Find("PWDPlayer");
+            if (pwd == null) pwd = avatarObject; // fallback if it's momentarily inactive
+            if (pwd == null)
+            {
+                Debug.LogWarning("[PWD] ApplyTrialRoute: PWDPlayer not found.");
+                return;
+            }
+
+            GameObject startObj = FindByName(useRobotTrialRoute ? robotTrialStartObjectName : startObjectName, false);
+            GameObject goalObj = FindByName(useRobotTrialRoute ? robotTrialGoalObjectName : goalObjectName, false);
+            if (useRobotTrialRoute && startObj == null) startObj = FindByName(startObjectName, false);
+            if (useRobotTrialRoute && goalObj == null) goalObj = FindByName(goalObjectName, false);
+
+            Vector3 spawnPos = SampleOnNavMesh(startObj, pwd.transform.position);
+            Vector3 goalPos = SampleOnNavMesh(goalObj, spawnPos);
+            float yAngle = startObj != null ? startObj.transform.eulerAngles.y : pwd.transform.eulerAngles.y;
+            Quaternion spawnRot = Quaternion.Euler(0f, yAngle, 0f);
+
+            var sfpwd = pwd.GetComponent<IVI.SFPWDAgent>();
+            if (sfpwd != null)
+            {
+                sfpwd.useWaypoints = true;
+                sfpwd.waypointStart = spawnPos;
+                sfpwd.waypointGoal = goalPos;
+            }
+            var mwc = pwd.GetComponent<IVI.ManualWheelchairController>();
+            if (mwc != null)
+                mwc.SetSpawnPose(spawnPos, spawnRot); // so ResetToSpawn uses the new start
+            pwd.transform.SetPositionAndRotation(spawnPos, spawnRot);
+
+            // Robot trial: hide every pedestrian marker so the robot player can't see the route.
+            // Pedestrian trial: show them again (the human needs to see the goal). The connecting
+            // line (TargetFlagArrow) stays hidden regardless -- it's disabled at the prefab level.
+            SetPedestrianMarkersVisible(!useRobotTrialRoute);
+
+            Debug.Log($"[PWD] ApplyTrialRoute: robotTrial={useRobotTrialRoute} (role={robotTrialFromRole}, mode={pwdTrialMode}); " +
+                      $"start=({spawnPos.x:F1},{spawnPos.z:F1}) goal=({goalPos.x:F1},{goalPos.z:F1}); markers {(useRobotTrialRoute ? "HIDDEN" : "visible")}.");
+        }
+
+        private static Vector3 SampleOnNavMesh(GameObject obj, Vector3 fallback)
+        {
+            if (obj == null) return fallback;
+            Vector3 raw = obj.transform.position;
+            UnityEngine.AI.NavMeshHit hit;
+            if (UnityEngine.AI.NavMesh.SamplePosition(raw, out hit, 5f, UnityEngine.AI.NavMesh.AllAreas)
+                && Mathf.Abs(hit.position.y - raw.y) < 1.5f)
+                return hit.position;
+            return raw;
+        }
+
+        /// <summary>
+        /// Show/hide the pedestrian start/end markers on every isPwdPlayer agent. Hidden at load and
+        /// during robot trials; shown during the pedestrian trial (ApplyTrialRoute) and while
+        /// world-building (RuntimeEditorManager enter/exit).
+        /// </summary>
+        public static void SetAllPedestrianMarkersVisible(bool visible)
+        {
+            foreach (var ra in FindObjectsOfType<RandomAvatar>(true))
+                if (ra != null && ra.isPwdPlayer)
+                    ra.SetPedestrianMarkersVisible(visible);
+        }
+
+        /// <summary>
+        /// Enables/disables the renderers of every pedestrian start/end marker (both routes).
+        /// GameObjects stay active so their positions remain resolvable by name.
+        /// </summary>
+        private void SetPedestrianMarkersVisible(bool visible)
+        {
+            string[] markerNames = { startObjectName, goalObjectName, robotTrialStartObjectName, robotTrialGoalObjectName };
+            foreach (string markerName in markerNames)
+            {
+                if (string.IsNullOrEmpty(markerName)) continue;
+                GameObject marker = FindByName(markerName, false);
+                if (marker == null) continue;
+                foreach (Renderer r in marker.GetComponentsInChildren<Renderer>(true))
+                    r.enabled = visible;
+            }
+        }
+
         private static GameObject FindByName(string objectName)
+        {
+            return FindByName(objectName, verbose: true);
+        }
+
+        /// <summary>
+        /// Same name-based scene lookup spawning uses, for World Building (marker registration,
+        /// scenario restore) — so "the object the PWD navigates to" resolves identically there.
+        /// Quiet: callers probe generic names ("start"/"end") in scenes that may lack them.
+        /// </summary>
+        public static GameObject FindSceneObjectByName(string objectName)
+        {
+            return FindByName(objectName, verbose: false);
+        }
+
+        private static GameObject FindByName(string objectName, bool verbose)
         {
             if (string.IsNullOrEmpty(objectName)) return null;
 
@@ -436,7 +601,8 @@ namespace SEAN.Scenario.Agents
             GameObject obj = GameObject.Find(objectName);
             if (obj != null)
             {
-                Debug.Log($"[PWD] Found '{objectName}' directly at ({obj.transform.position.x:F1},{obj.transform.position.y:F1},{obj.transform.position.z:F1})");
+                if (verbose)
+                    Debug.Log($"[PWD] Found '{objectName}' directly at ({obj.transform.position.x:F1},{obj.transform.position.y:F1},{obj.transform.position.z:F1})");
                 return obj;
             }
 
@@ -451,12 +617,14 @@ namespace SEAN.Scenario.Agents
                 Transform found = SearchChildrenRecursive(root.transform, leafName);
                 if (found != null)
                 {
-                    Debug.Log($"[PWD] Found '{leafName}' (from '{objectName}') via recursive search at ({found.position.x:F1},{found.position.y:F1},{found.position.z:F1})");
+                    if (verbose)
+                        Debug.Log($"[PWD] Found '{leafName}' (from '{objectName}') via recursive search at ({found.position.x:F1},{found.position.y:F1},{found.position.z:F1})");
                     return found.gameObject;
                 }
             }
 
-            Debug.LogError($"[PWD] Object '{objectName}' NOT FOUND anywhere in scene! Check Inspector name.");
+            if (verbose)
+                Debug.LogError($"[PWD] Object '{objectName}' NOT FOUND anywhere in scene! Check Inspector name.");
             return null;
         }
 
@@ -543,9 +711,11 @@ namespace SEAN.Scenario.Agents
                 camScript.allowMouseScrollZoom = false;
         }
 
-        // Player-side equivalent of the robot's two on-screen mini views
-        // (Robot.camera_overhead + Robot.camera_first, see OverheadCamera.prefab).
-        // Adds a top-down and a first-person panel in the top corners. They are
+        // Player-side equivalent of the robot's top-corner mini views
+        // (Robot.camera_overhead + Robot.camera_first). Adds a top-down and a
+        // first-person panel in the top corners. The robot's bottom-right
+        // rear-view mini is deliberately NOT mirrored here — only the robot
+        // gets a rear camera. They are
         // created DISABLED on the main display (0); SessionReviewManager owns their
         // lifecycle: ActivatePwdCameraAsMain() enables them (keeping display 0)
         // while a human drives the PWD, and RestoreRobotGameplayCameras() hides

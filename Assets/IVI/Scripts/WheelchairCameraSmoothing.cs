@@ -28,11 +28,16 @@ namespace IVI
         [Tooltip("Maximum yaw offset (degrees) the camera is allowed to lag behind the body.")]
         public float maxYawOffset = 30f;
 
+        [Tooltip("If the camera is further than this (metres) from where it should be, cut to it " +
+                 "instead of flying there. Catches avatar teleports. 0 disables the cut.")]
+        public float snapDistance = 3f;
+
         private float smoothedYaw;
         private float yawVelocity;
         private Vector3 positionVelocity;
         private bool initialized;
         private Transform followTarget;
+        private ComfortMotionBlur transitionBlur;
 
         /// <summary>Avatar root this camera follows (null before <see cref="Start"/>).</summary>
         public Transform FollowAvatarRoot => followTarget;
@@ -102,9 +107,33 @@ namespace IVI
                 positionVelocity = Vector3.zero;
             }
 
-            float safePositionSmoothTime = Mathf.Max(0.001f, positionSmoothTime);
-            transform.position = Vector3.SmoothDamp(
-                transform.position, desiredPos, ref positionVelocity, safePositionSmoothTime);
+            // The avatar teleports on task change, trial reset and respawn. Smoothing across that
+            // gap sweeps the camera through the whole world in a fraction of a second, which is a
+            // motion-sickness trigger; cut to the new spot instead.
+            if (snapDistance > 0f &&
+                (desiredPos - transform.position).sqrMagnitude > snapDistance * snapDistance)
+            {
+                // Re-seed the yaw too, otherwise the camera arrives facing the old direction and
+                // slews round afterwards, which is the same problem in the other axis.
+                smoothedYaw = targetYaw;
+                yawVelocity = 0f;
+                yawRot = Quaternion.Euler(0f, smoothedYaw, 0f);
+                desiredPos = targetPosition + yawRot * safeOffset;
+
+                transform.position = desiredPos;
+                positionVelocity = Vector3.zero;
+
+                if (transitionBlur == null)
+                    transitionBlur = GetComponent<ComfortMotionBlur>();
+                if (transitionBlur != null)
+                    transitionBlur.TriggerTransitionBlur();
+            }
+            else
+            {
+                float safePositionSmoothTime = Mathf.Max(0.001f, positionSmoothTime);
+                transform.position = Vector3.SmoothDamp(
+                    transform.position, desiredPos, ref positionVelocity, safePositionSmoothTime);
+            }
 
             Vector3 lookTarget = targetPosition + Vector3.up * lookAtHeight;
             Vector3 lookDirection = lookTarget - transform.position;

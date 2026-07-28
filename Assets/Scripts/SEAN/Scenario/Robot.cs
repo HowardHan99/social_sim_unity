@@ -15,6 +15,8 @@ namespace SEAN.Scenario
         public Camera camera_first;
         public Camera camera_third;
         public Camera camera_overhead;
+        [Tooltip("Rear-view camera mounted on the robot's right-back corner, shown as the bottom-right screen panel. Created automatically when left unassigned.")]
+        public Camera camera_rear;
 
         public Trajectory.TrackedTrajectory trajectory { get; private set; }
         private void GetOrAttachTrajectory()
@@ -45,6 +47,37 @@ namespace SEAN.Scenario
             {
                 throw new System.ArgumentException("A overhead camera must be assigned to the robot " + name);
             }
+            if (camera_rear == null)
+            {
+                camera_rear = CreateRearCamera();
+            }
+            AttachComfortBlur(camera_rear);
+        }
+
+        /// <summary>
+        /// Backup-style rear-view camera: mounted on the right-back corner of the
+        /// chassis looking backwards, rendered as a bottom-right mini panel
+        /// (mirroring the overhead mini in the top-left corner).
+        /// </summary>
+        private Camera CreateRearCamera()
+        {
+            GameObject camObj = new GameObject("RobotRearCamera");
+            camObj.transform.SetParent(base_link.transform, false);
+            // Slightly behind and above the chassis so the lens never sits
+            // inside body/sensor geometry.
+            camObj.transform.localPosition = new Vector3(0.2f, 0.6f, -0.35f);
+            camObj.transform.localRotation = Quaternion.Euler(15f, 180f, 0f);
+
+            Camera cam = camObj.AddComponent<Camera>();
+            cam.fieldOfView = 70f;
+            cam.nearClipPlane = 0.05f;
+            cam.farClipPlane = 200f;
+            cam.rect = new Rect(0.72f, 0.03f, 0.25f, 0.25f);
+            // Same depth as the overhead mini so both panels draw over the
+            // full-screen first/third person views.
+            cam.depth = camera_overhead.depth;
+            cam.targetDisplay = 0;
+            return cam;
         }
         public new Transform transform
         {

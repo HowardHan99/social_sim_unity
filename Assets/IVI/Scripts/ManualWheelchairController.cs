@@ -57,9 +57,12 @@ namespace IVI
         [Tooltip("deg/s^2 at full steering deflection or held A/D.")]
         [FormerlySerializedAs("gamepadAngularAcceleration")]
         public float inertiaAngularAcceleration = 420f;
-        [Tooltip("deg/s^2 of passive turn decay while no steering input is held.")]
+        [Tooltip("deg/s^2 of passive turn decay while no steering input is held. Only used when angularDirectDrive is off.")]
         [FormerlySerializedAs("gamepadAngularCoastDeceleration")]
         public float inertiaAngularCoastDeceleration = 320f;
+
+        [Tooltip("Steer by stick POSITION (stick angle = turn rate) instead of by acceleration. Turning a body in place has no real momentum; the acceleration model reads as 'slow to start, then keeps turning after you let go'. Off = legacy inertia steering.")]
+        public bool angularDirectDrive = true;
 
         [Header("Ground Follow / Step Climb")]
         [Tooltip("Ease the character up onto small steps/curbs it drives into (position-driven movement is otherwise blocked by their colliders). No effect on flat ground.")]
@@ -162,7 +165,15 @@ namespace IVI
         {
             if (!initialized) return;
 
-            if (Input.GetKeyDown(toggleModeKey) || ReadJoystickButtonDown(joystickToggleModeAxis))
+            // While the Agent Speed panel is open, Shift is a modifier for its speed
+            // hotkeys (Shift+-/=/0), so a bare Shift press must not flip manual mode.
+            // While the Agent Control panel is picking/driving another agent, the whole
+            // keyboard belongs to it (Shift = run there), so only the joystick toggles.
+            bool shiftOwnedBySpeedPanel = SessionReview.AgentSpeedOverlay.HudVisible &&
+                (toggleModeKey == KeyCode.LeftShift || toggleModeKey == KeyCode.RightShift);
+            bool keyboardOwnedByPossess = SessionReview.AgentPossessOverlay.KeyboardCaptured;
+            if ((!shiftOwnedBySpeedPanel && !keyboardOwnedByPossess && Input.GetKeyDown(toggleModeKey)) ||
+                ReadJoystickButtonDown(joystickToggleModeAxis))
             {
                 if (isManualMode)
                     SetAutomaticMode();
@@ -389,25 +400,35 @@ namespace IVI
                     currentManualLinearSpeed = Mathf.MoveTowards(
                         currentManualLinearSpeed, 0f, inertiaCoastDeceleration * Time.deltaTime);
 
-                float angularInput = joystickSteer;
-                if (useWASD)
+                if (angularDirectDrive)
                 {
-                    if (ManualKeyHeld(KeyCode.A, KeyCode.LeftArrow))
-                        angularInput = -1f;
-                    else if (ManualKeyHeld(KeyCode.D, KeyCode.RightArrow))
-                        angularInput = 1f;
+                    // Stick angle IS the turn rate (manualDesiredAng already folds in the
+                    // stick, A/D and the hard stop), reached at manualAngularAcceleration.
+                    currentManualAngularSpeed = Mathf.MoveTowards(
+                        currentManualAngularSpeed, manualDesiredAng, manualAngularAcceleration * Time.deltaTime);
                 }
-
-                if (hardStopHeld)
-                    currentManualAngularSpeed = Mathf.MoveTowards(
-                        currentManualAngularSpeed, 0f, manualAngularAcceleration * Time.deltaTime);
-                else if (Mathf.Abs(angularInput) > 0.001f)
-                    currentManualAngularSpeed = Mathf.Clamp(
-                        currentManualAngularSpeed + angularInput * inertiaAngularAcceleration * Time.deltaTime,
-                        -rotationSpeed, rotationSpeed);
                 else
-                    currentManualAngularSpeed = Mathf.MoveTowards(
-                        currentManualAngularSpeed, 0f, inertiaAngularCoastDeceleration * Time.deltaTime);
+                {
+                    float angularInput = joystickSteer;
+                    if (useWASD)
+                    {
+                        if (ManualKeyHeld(KeyCode.A, KeyCode.LeftArrow))
+                            angularInput = -1f;
+                        else if (ManualKeyHeld(KeyCode.D, KeyCode.RightArrow))
+                            angularInput = 1f;
+                    }
+
+                    if (hardStopHeld)
+                        currentManualAngularSpeed = Mathf.MoveTowards(
+                            currentManualAngularSpeed, 0f, manualAngularAcceleration * Time.deltaTime);
+                    else if (Mathf.Abs(angularInput) > 0.001f)
+                        currentManualAngularSpeed = Mathf.Clamp(
+                            currentManualAngularSpeed + angularInput * inertiaAngularAcceleration * Time.deltaTime,
+                            -rotationSpeed, rotationSpeed);
+                    else
+                        currentManualAngularSpeed = Mathf.MoveTowards(
+                            currentManualAngularSpeed, 0f, inertiaAngularCoastDeceleration * Time.deltaTime);
+                }
             }
             else
             {
@@ -496,6 +517,18 @@ namespace IVI
                 rb.velocity = Vector3.zero;
 
             Debug.Log("[PWD] AUTO mode");
+        }
+
+        /// <summary>
+        /// Re-anchors where ResetToSpawn returns this agent. The pose is captured once in
+        /// Start(), so when the start marker is moved afterwards (World Building drag or a
+        /// scenario restore) the marker sync must push the new pose here — otherwise every
+        /// trial restart teleports the agent back to the scene's original start.
+        /// </summary>
+        public void SetSpawnPose(Vector3 position, Quaternion rotation)
+        {
+            spawnPosition = position;
+            spawnRotation = rotation;
         }
 
         public void ResetToSpawn()
@@ -607,12 +640,51 @@ namespace IVI
         // human's active role (so a robot + PWD both in manual don't move together).
         private bool ManualKeyHeld(KeyCode wasdKey, KeyCode arrowKey)
         {
-            return Input.GetKey(manualUseArrowKeys ? arrowKey : wasdKey);
+            // Keyboard belongs to the Agent Control panel while it picks/drives another
+            // agent; the D-pad (participant's gamepad) keeps working.
+            if (SessionReview.AgentPossessOverlay.KeyboardCaptured)
+                return DpadHeld(wasdKey);
+            return Input.GetKey(manualUseArrowKeys ? arrowKey : wasdKey) || DpadHeld(wasdKey);
         }
 
         private bool ManualKeyDown(KeyCode wasdKey, KeyCode arrowKey)
         {
-            return Input.GetKeyDown(manualUseArrowKeys ? arrowKey : wasdKey);
+            if (SessionReview.AgentPossessOverlay.KeyboardCaptured)
+                return DpadPressed(wasdKey);
+            return Input.GetKeyDown(manualUseArrowKeys ? arrowKey : wasdKey) || DpadPressed(wasdKey);
+        }
+
+        // The gamepad D-pad is a second set of WASD keys -- same roles, nothing new to
+        // learn. It follows the joystick's ownership rule (ManualUsesJoystick), so the
+        // agent that is NOT the human's active role never moves with it.
+        private bool DpadHeld(KeyCode wasdKey)
+        {
+            if (!ManualUsesJoystick)
+                return false;
+
+            switch (wasdKey)
+            {
+                case KeyCode.W: return SEAN.Input.GamepadHotkeys.DpadUpHeld;
+                case KeyCode.S: return SEAN.Input.GamepadHotkeys.DpadDownHeld;
+                case KeyCode.A: return SEAN.Input.GamepadHotkeys.DpadLeftHeld;
+                case KeyCode.D: return SEAN.Input.GamepadHotkeys.DpadRightHeld;
+                default: return false;
+            }
+        }
+
+        private bool DpadPressed(KeyCode wasdKey)
+        {
+            if (!ManualUsesJoystick)
+                return false;
+
+            switch (wasdKey)
+            {
+                case KeyCode.W: return SEAN.Input.GamepadHotkeys.DpadUpPressed;
+                case KeyCode.S: return SEAN.Input.GamepadHotkeys.DpadDownPressed;
+                case KeyCode.A: return SEAN.Input.GamepadHotkeys.DpadLeftPressed;
+                case KeyCode.D: return SEAN.Input.GamepadHotkeys.DpadRightPressed;
+                default: return false;
+            }
         }
 
         private float GetAxisSafely(string axisName)

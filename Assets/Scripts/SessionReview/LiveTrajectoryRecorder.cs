@@ -27,7 +27,11 @@ namespace SessionReview
     public class LiveTrajectoryRecorder : MonoBehaviour
     {
         [SerializeField] private float sampleRate = 10f;
-        [SerializeField] private bool freezePlanUpdatesDuringRobotManual = true;
+        // Deliberately NOT FormerlySerializedAs("freezePlanUpdatesDuringRobotManual"): the old
+        // field shipped serialized as true (freeze), and carrying that value over would keep
+        // suppressing the recording the new default is meant to enable.
+        [Tooltip("Keep sampling the ROS planner's nav-plan snapshots while a human drives the robot. The backend keeps replanning from the robot's actual pose, so review can show what ROS would have done (hidden there by default). Untick to freeze the plan at the moment manual control takes over.")]
+        [SerializeField] private bool recordPlanDuringRobotManual = true;
 
         private float sampleInterval;
         private float lastSampleTime;
@@ -143,7 +147,7 @@ namespace SessionReview
             Vector3[] plan = planVisualizer.GetCurrentPlanPositions();
             if (plan == null || plan.Length == 0) return;
 
-            if (freezePlanUpdatesDuringRobotManual &&
+            if (!recordPlanDuringRobotManual &&
                 planSnapshots.Count > 0 &&
                 IsRobotManualControlActive())
             {
@@ -224,6 +228,22 @@ namespace SessionReview
                     result.Add(snap);
             }
             return result;
+        }
+
+        /// <summary>
+        /// Did this trial capture any ROS nav plan at all? Lets review tell "the plan is toggled
+        /// off" apart from "no plan ever arrived" (a trial run without the ROS backend) instead
+        /// of showing a legend row that can never draw anything. Note that HIDING the plan line
+        /// does not affect this: PlanVisualizer computes its path before consulting its
+        /// suppression flags, so a hidden plan is still recorded in full.
+        /// </summary>
+        public bool HasAnyPlanSnapshots
+        {
+            get
+            {
+                var source = replayOverridePlans ?? planSnapshots;
+                return source != null && source.Count > 0;
+            }
         }
 
         /// <summary>
@@ -408,17 +428,15 @@ namespace SessionReview
             {
                 string agentId = kvp.Key;
                 var src = kvp.Value;
+                // Robot/PWD-player paths extend past recEnd to their true end (see
+                // MultiAgentTrajectoryRenderer.CollectTrialStates) so a saved trial reloads with
+                // the full path, matching what live review draws. Others stay window-clipped.
+                AgentRole role = roleMap.ContainsKey(agentId) ? roleMap[agentId] : AgentRole.BackgroundPed;
                 var filtered = new ObjectStateTimeline
                 {
                     objectId = agentId,
-                    states = new List<ObjectState>()
+                    states = MultiAgentTrajectoryRenderer.CollectTrialStates(src, role, recStart, recEnd)
                 };
-
-                foreach (var s in src.states)
-                {
-                    if (s.timestamp >= recStart && s.timestamp <= recEnd)
-                        filtered.states.Add(s);
-                }
 
                 if (filtered.states.Count == 0) continue;
 

@@ -9,7 +9,8 @@ public class GenerateModel : MonoBehaviour
 {
     private const string BaseUrl = "https://api.meshy.ai/openapi/v2/text-to-3d";
 
-    [SerializeField] private string apiKey = "msy_Cvkw6oaN0bBM2tmq9lltFJhJyjd7ouLjMTZU";
+    // Resolved in Awake: SessionReview/.env → MESHY_API_KEY env var → this Inspector value.
+    [SerializeField] private string apiKey = "";
     [SerializeField] private bool shouldRemesh = true;
     [SerializeField] private int targetPolycount = 30000;
     [SerializeField] private string poseMode = "a-pose";
@@ -29,8 +30,9 @@ public class GenerateModel : MonoBehaviour
 
     void Awake()
     {
-        if (string.IsNullOrWhiteSpace(apiKey))
-            apiKey = Environment.GetEnvironmentVariable("MESHY_API_KEY");
+        string loadedKey = MeshyApiKeyLoader.Load();
+        if (!string.IsNullOrWhiteSpace(loadedKey))
+            apiKey = loadedKey;
 
         Debug.Log($"[GenerateModel] Awake on '{gameObject.name}'. API key {(string.IsNullOrWhiteSpace(apiKey) ? "MISSING" : "set")}.");
     }
@@ -54,7 +56,7 @@ public class GenerateModel : MonoBehaviour
 
         if (string.IsNullOrWhiteSpace(apiKey))
         {
-            Debug.LogError("[GenerateModel] Set apiKey in the Inspector or MESHY_API_KEY env var.");
+            Debug.LogError("[GenerateModel] Set Meshy_API_KEY in Assets/Scripts/SessionReview/.env, the MESHY_API_KEY env var, or apiKey in the Inspector.");
             Completed?.Invoke(GenerateModelResult.Failed(prompt, "Missing API key"));
             return;
         }
@@ -396,3 +398,68 @@ class MeshyTaskError { public string message; }
 
 [Serializable]
 class ModelUrls { public string glb; }
+
+public static class MeshyApiKeyLoader
+{
+    private const string MeshyApiEnvVar = "MESHY_API_KEY";
+    private const string DotEnvFileName = ".env";
+
+    public static string Load()
+    {
+        string[] dotEnvPaths =
+        {
+            Path.Combine(Application.dataPath, "Scripts", "SessionReview", DotEnvFileName),
+            Path.Combine(Application.dataPath, "Scripts", DotEnvFileName),
+            Path.Combine(Application.dataPath, DotEnvFileName)
+        };
+
+        foreach (string dotEnvPath in dotEnvPaths)
+        {
+            string dotEnvKey = LoadFromDotEnv(dotEnvPath, MeshyApiEnvVar);
+            if (!string.IsNullOrWhiteSpace(dotEnvKey))
+                return dotEnvKey;
+        }
+
+        string envKey = Environment.GetEnvironmentVariable(MeshyApiEnvVar);
+        if (!string.IsNullOrWhiteSpace(envKey))
+            return envKey.Trim();
+
+        return string.Empty;
+    }
+
+    private static string LoadFromDotEnv(string path, string variableName)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            return string.Empty;
+
+        foreach (string rawLine in File.ReadAllLines(path))
+        {
+            if (string.IsNullOrWhiteSpace(rawLine))
+                continue;
+
+            string line = rawLine.Trim();
+            if (line.StartsWith("#"))
+                continue;
+
+            int separatorIndex = line.IndexOf('=');
+            if (separatorIndex <= 0)
+                continue;
+
+            string key = line.Substring(0, separatorIndex).Trim();
+            if (!string.Equals(key, variableName, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            string value = line.Substring(separatorIndex + 1).Trim();
+            if (value.Length >= 2 &&
+                ((value.StartsWith("\"") && value.EndsWith("\"")) ||
+                 (value.StartsWith("'") && value.EndsWith("'"))))
+            {
+                value = value.Substring(1, value.Length - 2);
+            }
+
+            return value;
+        }
+
+        return string.Empty;
+    }
+}

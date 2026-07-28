@@ -77,6 +77,7 @@ public class UIManager : MonoBehaviour
     private GameObject presetPanelInstance;     // generated root panel, when no template is used
     private GameObject detailedSectionInstance; // collapsible checkbox/LLM section
     private TMP_Text detailedExpanderLabel;
+    private TMP_InputField customMessageInput;  // free-form message that goes straight to TTS
     private readonly List<Toggle> generatedToggles = new List<Toggle>();
     private static readonly string[] DetailedSignalOptions =
     {
@@ -243,8 +244,8 @@ public class UIManager : MonoBehaviour
             if (SessionReview.SessionReviewManager.Instance != null)
                 SessionReview.SessionReviewManager.Instance.AttachVLMReplayResponse(finalResponse);
 
-            // Convert to speech
-            ttsManager.ConvertTextToSpeech(finalResponse);
+            // Convert to speech and play it (ConvertTextToSpeech only generates + caches).
+            ttsManager.PlaySpeech(finalResponse);
 
             // Optional: Disable the confirm button to prevent multiple clicks
             confirmResponseButton.interactable = false;
@@ -494,6 +495,9 @@ public class UIManager : MonoBehaviour
             quickButton.onClick.AddListener(() => SendPresetVoiceMessage(capturedMessage));
         }
 
+        // --- Custom message: type anything and send it through the same TTS quick-send channel ---
+        CreateCustomMessageRow(root.transform);
+
         // --- Expander: reveals the detailed (LLM) options only on demand ---
         Button expandButton = CreatePresetButtonObject(root.transform, CollapsedExpanderText, presetExpanderColor);
         detailedExpanderLabel = expandButton.GetComponentInChildren<TextMeshProUGUI>(true);
@@ -558,6 +562,103 @@ public class UIManager : MonoBehaviour
             detailedSectionInstance.SetActive(false);
         if (detailedExpanderLabel != null)
             detailedExpanderLabel.text = CollapsedExpanderText;
+    }
+
+    // Free-form input + Speak button so any message can bypass the VLM and go straight to TTS.
+    private void CreateCustomMessageRow(Transform parent)
+    {
+        var row = new GameObject("CustomMessageRow",
+            typeof(RectTransform), typeof(HorizontalLayoutGroup), typeof(LayoutElement));
+        row.transform.SetParent(parent, false);
+
+        var rowLayout = row.GetComponent<HorizontalLayoutGroup>();
+        rowLayout.spacing = presetButtonSpacing;
+        rowLayout.childAlignment = TextAnchor.MiddleLeft;
+        rowLayout.childControlWidth = true;
+        rowLayout.childControlHeight = true;
+        rowLayout.childForceExpandWidth = false;
+        rowLayout.childForceExpandHeight = false;
+
+        var rowElement = row.GetComponent<LayoutElement>();
+        rowElement.minHeight = presetButtonSize.y;
+        rowElement.preferredHeight = presetButtonSize.y;
+
+        // Input field background
+        var inputObj = new GameObject("CustomMessageInput",
+            typeof(RectTransform), typeof(Image), typeof(LayoutElement));
+        inputObj.transform.SetParent(row.transform, false);
+
+        Image inputBackground = inputObj.GetComponent<Image>();
+        inputBackground.color = new Color(1f, 1f, 1f, 0.92f);
+
+        var inputElement = inputObj.GetComponent<LayoutElement>();
+        inputElement.flexibleWidth = 1f;
+        inputElement.minHeight = presetButtonSize.y;
+        inputElement.preferredHeight = presetButtonSize.y;
+
+        TMP_InputField input = inputObj.AddComponent<TMP_InputField>();
+
+        var textArea = new GameObject("Text Area", typeof(RectTransform), typeof(RectMask2D));
+        textArea.transform.SetParent(inputObj.transform, false);
+        RectTransform textAreaRect = textArea.GetComponent<RectTransform>();
+        textAreaRect.anchorMin = Vector2.zero;
+        textAreaRect.anchorMax = Vector2.one;
+        textAreaRect.offsetMin = new Vector2(12f, 6f);
+        textAreaRect.offsetMax = new Vector2(-12f, -6f);
+
+        var placeholderObj = new GameObject("Placeholder", typeof(RectTransform));
+        placeholderObj.transform.SetParent(textArea.transform, false);
+        StretchToParent(placeholderObj);
+        TextMeshProUGUI placeholder = placeholderObj.AddComponent<TextMeshProUGUI>();
+        placeholder.text = "Type your own message…";
+        placeholder.fontStyle = FontStyles.Italic;
+        placeholder.color = new Color(0.25f, 0.25f, 0.25f, 0.75f);
+        placeholder.fontSize = presetButtonFontSize - 3f;
+        placeholder.alignment = TextAlignmentOptions.MidlineLeft;
+
+        var textObj = new GameObject("Text", typeof(RectTransform));
+        textObj.transform.SetParent(textArea.transform, false);
+        StretchToParent(textObj);
+        TextMeshProUGUI textComponent = textObj.AddComponent<TextMeshProUGUI>();
+        textComponent.color = new Color(0.08f, 0.08f, 0.08f, 1f);
+        textComponent.fontSize = presetButtonFontSize - 3f;
+        textComponent.alignment = TextAlignmentOptions.MidlineLeft;
+
+        input.targetGraphic = inputBackground;
+        input.textViewport = textAreaRect;
+        input.textComponent = textComponent;
+        input.placeholder = placeholder;
+        input.lineType = TMP_InputField.LineType.SingleLine;
+        input.onSubmit.AddListener(_ => SendCustomVoiceMessage());
+        customMessageInput = input;
+
+        Button speakButton = CreatePresetButtonObject(row.transform, "Speak", presetConfirmColor);
+        var speakElement = speakButton.GetComponent<LayoutElement>();
+        speakElement.minWidth = 110f;
+        speakElement.preferredWidth = 110f;
+        speakButton.onClick.AddListener(SendCustomVoiceMessage);
+    }
+
+    private void SendCustomVoiceMessage()
+    {
+        if (customMessageInput == null)
+            return;
+
+        string message = customMessageInput.text != null ? customMessageInput.text.Trim() : string.Empty;
+        if (string.IsNullOrWhiteSpace(message))
+            return;
+
+        customMessageInput.text = string.Empty;
+        SendPresetVoiceMessage(message);
+    }
+
+    private static void StretchToParent(GameObject target)
+    {
+        RectTransform rect = target.GetComponent<RectTransform>();
+        rect.anchorMin = Vector2.zero;
+        rect.anchorMax = Vector2.one;
+        rect.offsetMin = Vector2.zero;
+        rect.offsetMax = Vector2.zero;
     }
 
     private static Canvas FindParentCanvas(Transform start)

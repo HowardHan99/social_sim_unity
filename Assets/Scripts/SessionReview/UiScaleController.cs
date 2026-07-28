@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace SessionReview
 {
@@ -44,23 +45,34 @@ namespace SessionReview
             }
         }
 
+        /// <summary>
+        /// Resolution-based auto scale (1x at 1600x900, capped at 2.5x) applied on top of the
+        /// user zoom, so panels grow with the display instead of shrinking into a corner on
+        /// large/high-DPI screens. Never shrinks below 1x on small windows.
+        /// </summary>
+        public static float AutoScale =>
+            Mathf.Clamp(Mathf.Min(Screen.width / 1600f, Screen.height / 900f), 1f, 2.5f);
+
+        /// <summary>Total zoom applied to opted-in overlays: user zoom × resolution auto-scale.</summary>
+        public static float Effective => Value * AutoScale;
+
         /// <summary>Virtual screen width in GUI units; use instead of Screen.width in scaled OnGUI code.</summary>
-        public static float Width => Screen.width / Value;
+        public static float Width => Screen.width / Effective;
 
         /// <summary>Virtual screen height in GUI units; use instead of Screen.height in scaled OnGUI code.</summary>
-        public static float Height => Screen.height / Value;
+        public static float Height => Screen.height / Effective;
 
         /// <summary>Call first thing in OnGUI so the whole overlay (fonts + layout) zooms uniformly.</summary>
         public static void Apply()
         {
-            float v = Value;
+            float v = Effective;
             GUI.matrix = Matrix4x4.Scale(new Vector3(v, v, 1f));
         }
 
         /// <summary>Screen point (Input/Touch/WorldToScreenPoint, origin bottom-left, real pixels) to scaled GUI point.</summary>
         public static Vector2 ScreenToGui(Vector2 screenPos)
         {
-            float v = Value;
+            float v = Effective;
             return new Vector2(screenPos.x / v, (Screen.height - screenPos.y) / v);
         }
 
@@ -76,6 +88,10 @@ namespace SessionReview
     /// top-left corner showing the current zoom; clicking it expands a strip with a
     /// slider, +/- steppers and presets. Hotkeys work anywhere: Ctrl +/- zooms,
     /// Ctrl 0 resets (Cmd on macOS).
+    ///
+    /// The badge is drawn only in the practice/training scene — zoom is set up once
+    /// there, and in the study scenes it only crowds the top-left corner. The hotkeys
+    /// stay live everywhere so the zoom can still be corrected mid-session.
     ///
     /// Self-bootstraps at runtime so no scene wiring is needed (duplicates destroy
     /// themselves, mirroring AgentSpeedOverlay).
@@ -115,6 +131,10 @@ namespace SessionReview
             return Time.frameCount - controlFrame <= 1 && controlRect.Contains(guiPoint);
         }
 
+        // Cached scene gate: this object survives scene loads (DontDestroyOnLoad), so it
+        // is re-evaluated on every load rather than per OnGUI call.
+        private bool inPracticeScene;
+
         void Awake()
         {
             if (instance != null && instance != this)
@@ -123,6 +143,24 @@ namespace SessionReview
                 return;
             }
             instance = this;
+            RefreshSceneGate();
+            SceneManager.sceneLoaded += OnSceneLoaded;
+        }
+
+        void OnDestroy()
+        {
+            if (instance == this)
+                SceneManager.sceneLoaded -= OnSceneLoaded;
+        }
+
+        private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+        {
+            RefreshSceneGate();
+        }
+
+        private void RefreshSceneGate()
+        {
+            inPracticeScene = SessionReviewManager.IsNamedTestScene();
         }
 
         void Update()
@@ -188,6 +226,14 @@ namespace SessionReview
 
         void OnGUI()
         {
+            // Practice scene only. controlFrame stops advancing, so ControlContains()
+            // stops claiming the corner for scene-input handlers within a frame.
+            if (!inPracticeScene)
+            {
+                expanded = false;
+                return;
+            }
+
             ReviewUiScale.Apply();
             EnsureStyles();
 

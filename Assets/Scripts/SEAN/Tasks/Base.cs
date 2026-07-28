@@ -39,6 +39,11 @@ namespace SEAN.Tasks
         public static string Topic = "/move_base_simple/goal";
         public string FrameID = "map";
 
+        /// <summary>Names of the flag visuals a goal marker carries, shared with the code that
+        /// hides duplicates (RosOverlayVisibility, CustomStartGoal).</summary>
+        public const string TargetFlagCubeName = "TargetFlagCube";
+        public const string TargetFlagArrowName = "TargetFlagArrow";
+
         protected SEAN sean;
         private static ROSConnection ros;
 
@@ -47,6 +52,7 @@ namespace SEAN.Tasks
         public float postTrialPromptDelaySec = 0.15f;
         private float debounceStartupTime = 0f;
         protected float debounceStartupTimeoutSec = 3f;
+        private bool loggedMissingStartAndGoal = false;
         private static RosMessageTypes.Geometry.MPoseStamped nextGoal;
 
         public Transform robotStartTransform
@@ -168,11 +174,11 @@ namespace SEAN.Tasks
         {
             foreach (Transform child in goal.transform)
             {
-                if (child.name == "TargetFlagCube")
+                if (child.name == TargetFlagCubeName)
                 {
                     cube = child.gameObject;
                 }
-                else if (child.name == "TargetFlagArrow")
+                else if (child.name == TargetFlagArrowName)
                 {
                     arrow = child.gameObject;
                 }
@@ -187,15 +193,60 @@ namespace SEAN.Tasks
 
         public virtual void Start()
         {
-            ros = ROSConnection.instance;
-            sean = SEAN.instance;
-            initStartAndGoal();
+            EnsureInitialized();
             number = 0;
             debounceStartupTime = Time.time;
         }
 
+        /// <summary>
+        /// Resolves the start/goal markers on demand. Start() normally does this, but a task can
+        /// be asked to prepare, publish or complete a task in the same frame it is activated
+        /// (SEAN.SetTask, or a world-building reload while the trial warmup is already running) —
+        /// i.e. before its Start() has run — and NewTask would then dereference a null marker.
+        /// Returns false when the markers cannot be resolved at all, so callers bail out with a
+        /// single explanatory error instead of a NullReferenceException per frame.
+        /// </summary>
+        protected bool EnsureInitialized()
+        {
+            if (ros == null) { ros = ROSConnection.instance; }
+            if (sean == null) { sean = SEAN.instance; }
+            if (sean == null) { return false; }
+
+            // Re-running the lookup once the markers exist would re-apply their active state every
+            // frame and fight anything that toggles them, so it only runs while one is missing.
+            if (!HasRequiredMarkers())
+            {
+                initStartAndGoal();
+            }
+
+            if (HasRequiredMarkers())
+            {
+                return true;
+            }
+
+            if (!loggedMissingStartAndGoal)
+            {
+                loggedMissingStartAndGoal = true;
+                Debug.LogError($"[{name}] Start/Target markers for the controlled agent were not found " +
+                               "under StartAndGoal; the task cannot publish a goal or detect completion.");
+            }
+            return false;
+        }
+
+        private bool HasRequiredMarkers()
+        {
+            if (robotStart == null || robotGoal == null)
+            {
+                return false;
+            }
+            // The player markers are only dereferenced (interactiveGoal, UpdatePositions) when the
+            // participant drives, so a robot-only scene without them is fine.
+            return !sean.PlayerControl || (playerStart != null && playerGoal != null);
+        }
+
         public void Update()
         {
+            if (!EnsureInitialized()) { return; }
             CheckNewTask();
             // rotate the target
             timer += Time.deltaTime;
@@ -225,22 +276,25 @@ namespace SEAN.Tasks
             robotGoal = sean.GetStartOrGoal(Scenario.Agents.ControlledAgent.Robot, false);
             playerStart = sean.GetStartOrGoal(Scenario.Agents.ControlledAgent.Player, true);
             playerGoal = sean.GetStartOrGoal(Scenario.Agents.ControlledAgent.Player, false);
-            if (sean.ControlledAgent == Scenario.Agents.ControlledAgent.Robot)
-            {
-                robotGoal.SetActive(true);
-                playerGoal.SetActive(false);
-            }
-            if (sean.ControlledAgent == Scenario.Agents.ControlledAgent.Player)
-            {
-                robotGoal.SetActive(false);
-                playerGoal.SetActive(true);
-            }
-            robotStart.SetActive(false);
-            playerStart.SetActive(false);
+            bool robotControlled = sean.ControlledAgent == Scenario.Agents.ControlledAgent.Robot;
+            SetActiveIfPresent(robotGoal, robotControlled);
+            SetActiveIfPresent(playerGoal, !robotControlled);
+            SetActiveIfPresent(robotStart, false);
+            SetActiveIfPresent(playerStart, false);
+        }
+
+        private static void SetActiveIfPresent(GameObject go, bool active)
+        {
+            if (go != null) { go.SetActive(active); }
         }
 
         public void StartNewTask() {
             if (SessionReviewManager.Instance != null && SessionReviewManager.Instance.BlocksAutomaticTrialStart)
+            {
+                return;
+            }
+
+            if (!EnsureInitialized())
             {
                 return;
             }
@@ -285,6 +339,11 @@ namespace SEAN.Tasks
                 return true;
             }
 
+            if (!EnsureInitialized())
+            {
+                return false;
+            }
+
             if (!NewTask())
             {
                 return false;
@@ -306,6 +365,8 @@ namespace SEAN.Tasks
         public void RepublishPreviewGoal()
         {
             if (!hasPreparedTaskPreview || !PublishGoal)
+                return;
+            if (!EnsureInitialized())
                 return;
 
             RefreshPreparedTask();

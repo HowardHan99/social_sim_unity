@@ -8,12 +8,23 @@ using UnityTemplateProjects;
 
 namespace SessionReview
 {
+    /// <summary>What happens after the "Save This Scene?" modal is answered.</summary>
+    public enum WorldBuildingSaveFollowUp
+    {
+        /// <summary>Opened by the World Building "Save World" button: go back to editing.</summary>
+        None,
+        /// <summary>Opened by an onboarding Apply that reloads the scene: continue the switch.</summary>
+        ContinueApply,
+        /// <summary>Opened by "Run Again": reload the base scene and go to the trial-start prompt.</summary>
+        RestartTrial
+    }
+
     public class SessionReviewManager : MonoBehaviour
     {
         public static SessionReviewManager Instance { get; private set; }
 
         [Header("Keyboard Shortcuts")]
-        [SerializeField] private KeyCode reviewToggleKey = KeyCode.Tab;
+        [SerializeField] private KeyCode reviewToggleKey = KeyCode.T;
         [SerializeField] private KeyCode prevTrialKey = KeyCode.LeftBracket;
         [SerializeField] private KeyCode nextTrialKey = KeyCode.RightBracket;
         [SerializeField] private KeyCode playPauseKey = KeyCode.Space;
@@ -90,6 +101,11 @@ namespace SessionReview
         private bool sessionFullyComplete;
         private TrialRecord currentReviewTrial;
         private Rerun.StateRecording currentReviewRecording;
+
+        /// <summary>Absolute SessionLogs folder of the trial currently under review
+        /// (live archive or loaded from disk); null outside review. DrawTraj uses it
+        /// to mirror drawn trajectories into the trial's own folder.</summary>
+        public static string CurrentReviewTrialFolder { get; private set; }
         private float currentReviewTimeOffset;
         private bool showReviewExportPanel;
         private ReviewExportSettings reviewExportSettings = new ReviewExportSettings();
@@ -106,10 +122,34 @@ namespace SessionReview
         private static Texture2D lineTexture;
         private Vector2 worldBuildingAddObjectsScroll;
         private Vector2 worldBuildingAddCharactersScroll;
+        private string worldBuildingSpawnSearch = "";
         private bool worldBuildingAddObjectsMinimized = false;
         private bool worldBuildingAddCharactersMinimized = true;
         private bool worldBuildingGenerateObjectsMinimized = true;
+        private bool worldBuildingWeatherMinimized = true;
         private bool worldBuildingOverlayMinimized;
+
+        // Drag/resize state for the world-building panels. Position/size are in scaled GUI
+        // units; while the has* flags are false the panel keeps its default docked layout.
+        // Static so a rearranged layout survives scene reloads within a run (and because the
+        // overlay rect getter is static). Double-clicking a header clears both overrides.
+        private sealed class WorldBuildingPanelLayout
+        {
+            public bool hasCustomPosition;
+            public Vector2 position;
+            public bool hasCustomSize;
+            public Vector2 size;
+            public Vector2 dragOffset;
+            public Vector2 resizeStartMouse;
+            public Vector2 resizeStartSize;
+            public Vector2 resizeStartPosition;
+        }
+
+        private static readonly WorldBuildingPanelLayout worldBuildingOverlayLayout = new WorldBuildingPanelLayout();
+        private static readonly WorldBuildingPanelLayout worldBuildingGeneratePanelLayout = new WorldBuildingPanelLayout();
+        private static readonly WorldBuildingPanelLayout worldBuildingCharactersPanelLayout = new WorldBuildingPanelLayout();
+        private static readonly WorldBuildingPanelLayout worldBuildingObjectsPanelLayout = new WorldBuildingPanelLayout();
+        private static readonly WorldBuildingPanelLayout worldBuildingWeatherPanelLayout = new WorldBuildingPanelLayout();
         private const float WorldBuildingSidePanelMarginBase = 24f;
         private const float WorldBuildingSidePanelGapBase = 10f;
         private const float WorldBuildingSidePanelHeaderHeightBase = 44f;
@@ -160,13 +200,20 @@ namespace SessionReview
         private GenerateModel meshyGenerator;
         private bool meshyGlbImportInProgress;
         private static float worldBuildingOverlayHeight = 228f;
-        private const int WorldBuildingSpawnPaletteCols = 2;
         private const float WorldBuildingSidePanelWidthBase = 380f;
+        private const float WorldBuildingSidePanelMaxWidthBase = 420f;
+        private const float WorldBuildingSidePanelCustomMaxWidthBase = 560f;
         private const float WorldBuildingSpawnPaletteCardHeightBase = 112f;
         private const float WorldBuildingSpawnPaletteCardGapBase = 10f;
+        private const float WorldBuildingSpawnPalettePreferredCardWidth = 190f;
+        private const float WorldBuildingSpawnPaletteMinimumTwoColumnWidth = 300f;
         private static float WorldBuildingSidePanelWidth => WorldBuildingSidePanelWidthBase * WorldBuildingUiScale;
-        private static float WorldBuildingSpawnPaletteCardHeight => WorldBuildingSpawnPaletteCardHeightBase * WorldBuildingUiScale;
-        private static float WorldBuildingSpawnPaletteCardGap => WorldBuildingSpawnPaletteCardGapBase * WorldBuildingUiScale;
+        private static float WorldBuildingSidePanelMaxWidth => WorldBuildingSidePanelMaxWidthBase;
+        private static float WorldBuildingSidePanelCustomMaxWidth => WorldBuildingSidePanelCustomMaxWidthBase;
+        private static float WorldBuildingPaletteMetricScale => Mathf.Clamp(WorldBuildingUiScale, 1f, 1.25f);
+        private static float WorldBuildingSpawnPaletteCardHeight => WorldBuildingSpawnPaletteCardHeightBase * WorldBuildingPaletteMetricScale;
+        private static float WorldBuildingSpawnPaletteCardGap => WorldBuildingSpawnPaletteCardGapBase * WorldBuildingPaletteMetricScale;
+        private static float WorldBuildingSpawnPaletteSearchBlockHeight => 38f * WorldBuildingUiScale;
 
         private GUIStyle worldBuildingTitleStyle;
         private GUIStyle worldBuildingBodyStyle;
@@ -176,6 +223,15 @@ namespace SessionReview
         private int worldBuildingStylesFontSize = -1;
         // Measured during OnGUI from the wrapped subtitle text; -1 until the first draw.
         private float worldBuildingAddObjectsHeaderHeight = -1f;
+        // Feedback line under the Generate Object button ("Added X from the library", "Generating...").
+        private string worldBuildingGenerateStatus;
+        private float worldBuildingGenerateStatusHeight = -1f;
+        // Weather panel hint, measured during OnGUI like the generate status; -1 until drawn.
+        private const string WorldBuildingWeatherHint =
+            "Saved with this world and applied when it runs. The top-down map stays clear —switch to free camera to preview.";
+        private float worldBuildingWeatherHintHeight = -1f;
+        // Prompt whose library match was just placed; repeating it forces a real generation.
+        private string lastLibraryMatchPrompt;
 
         public bool UsePostTrialPrompt => usePostTrialPrompt;
         public bool IsReviewModeActive => inRewindMode;
@@ -184,6 +240,29 @@ namespace SessionReview
         public bool IsTrialStartPromptActive => showTrialStartPrompt;
         public bool IsOnboardingActive => showOnboarding;
         public bool IsReviewUiActive => inRewindMode && !inWorldBuildingMode;
+
+        /// <summary>
+        /// True while DrawTraj owns the screen (its DRAW MODE panel and DRAW/ERASE gates are up).
+        /// Review overlays that are only noise while sketching a trajectory hide themselves on
+        /// this; input handlers also use it to leave pan/zoom to TrajectoryManager's draw camera.
+        /// </summary>
+        public bool IsDrawTrajectoryModeActive
+        {
+            get
+            {
+                // Re-find only when the cache is stale: a scene reload destroys the manager,
+                // and this is read from OnGUI (several times a frame) where FindObjectOfType
+                // is far too expensive to call unconditionally.
+                if (drawTrajManager == null)
+                    drawTrajManager = FindObjectOfType<TrajectoryManager>();
+                return drawTrajManager != null && drawTrajManager.IsDrawMode;
+            }
+        }
+        private TrajectoryManager drawTrajManager;
+
+        /// <summary>Static form of <see cref="IsDrawTrajectoryModeActive"/> for overlays without a manager reference.</summary>
+        public static bool DrawTrajectoryModeActive =>
+            Instance != null && Instance.IsDrawTrajectoryModeActive;
         public bool IsLiveTrialRunning
         {
             get
@@ -203,6 +282,18 @@ namespace SessionReview
         public bool IsMovementInputBlocked =>
             showOnboarding || showTrialStartPrompt || trialWarmupPending ||
             inRewindMode || showReviewCompletionPrompt;
+
+        public bool ShouldShowEndInteractionButton => CanEndCurrentInteraction;
+        public string EndInteractionButtonLabel => endInteractionButtonLabel;
+
+        private bool CanEndCurrentInteraction =>
+            showEndInteractionButton &&
+            sessionTracker != null &&
+            sessionTracker.IsTracking &&
+            !IsMovementInputBlocked &&
+            !showPostTrialPrompt &&
+            !inWorldBuildingMode &&
+            !showOnboarding;
 
         private static readonly float[] speedSteps = { 0.25f, 0.5f, 1f, 2f, 4f };
         private int currentSpeedIndex = 2;
@@ -242,6 +333,29 @@ namespace SessionReview
         private Texture2D dogwalkerPreview;
         private Texture2D scooterUserPreview;
 
+        // ---- Saved World Building scenarios (SessionLogs/<session>/scenario/) ----
+        // The onboarding page lists them as optional thumbnail cards under the preset
+        // scene list; -1 keeps the default behavior of launching the preset scene clean.
+        private List<WorldBuildingScenarioInfo> savedScenarios = new List<WorldBuildingScenarioInfo>();
+        private readonly List<int> visibleScenarioIndices = new List<int>();
+        private int selectedScenarioIndex = -1;
+        // Picker scope: off = only the current session's saved worlds (+ unassigned);
+        // on = every session's (the "Show all sessions" toggle over the header).
+        private bool showAllSessionScenarios = false;
+        // "Save This Scene?" modal. Opened by the World Building "Save World" button, or by an
+        // Apply / Run Again that is about to reload the scene while World Building changes exist.
+        private bool showWorldBuildingSavePrompt;
+        private WorldBuildingSaveFollowUp worldBuildingSaveFollowUp = WorldBuildingSaveFollowUp.None;
+        private string worldBuildingSaveNameInput = string.Empty;
+        private Texture2D worldBuildingSaveThumbnail;
+        // Feedback line under the World Building overlay buttons ("Saved ..." / "Nothing to save").
+        private string worldBuildingSaveStatus;
+
+        private const float ScenarioCardWidth = 236f;
+        private const float ScenarioCardHeight = 204f;
+        private const float ScenarioCardGapX = 16f;
+        private const float ScenarioCardGapY = 12f;
+
         void Awake()
         {
             if (Instance != null && Instance != this)
@@ -250,6 +364,10 @@ namespace SessionReview
                 return;
             }
             Instance = this;
+            // Tab now belongs to the first-/third-person camera switch
+            // (AgentViewToggle); migrate scenes that still serialize Tab here.
+            if (reviewToggleKey == KeyCode.Tab)
+                reviewToggleKey = KeyCode.T;
             EnsureComponents();
             LoadOnboardingPreviewTextures();
             ApplyTestScenePwdManualDefaults();
@@ -267,7 +385,11 @@ namespace SessionReview
             showOnboardingOnStart = false;
         }
 
-        private static bool IsNamedTestScene()
+        /// <summary>
+        /// True in the practice/training scene. Also gates practice-only UI elsewhere
+        /// (e.g. the "Aa" zoom badge in <see cref="UiScaleController"/>).
+        /// </summary>
+        public static bool IsNamedTestScene()
         {
             return string.Equals(
                 SceneManager.GetActiveScene().name,
@@ -386,7 +508,7 @@ namespace SessionReview
             sessionFullyComplete = false;
             // Show the review menu the instant the first agent arrives, but DO NOT
             // freeze time: the simulation keeps running so agents that have not yet
-            // reached their goal continue to navigate. Entering review ([Tab]/Review)
+            // reached their goal continue to navigate. Entering review ([T]/Review)
             // still freezes time for replay; the user can do that at any point.
             showPostTrialPrompt = usePostTrialPrompt;
             SessionReview.SessionReviewLog.Log($"[SessionReview] Trial #{info.trialNumber} ended ({info.reason}). " +
@@ -433,14 +555,14 @@ namespace SessionReview
             // panel a stale focus (IMGUI sliders latch keyboardControl too) must not eat
             // the hotkey.
             bool typingInOnboarding = showOnboarding && GUIUtility.keyboardControl != 0;
-            if (Input.GetKeyDown(onboardingToggleKey) && !typingInOnboarding &&
+            if (Input.GetKeyDown(onboardingToggleKey) && !typingInOnboarding && !showWorldBuildingSavePrompt &&
                 (SessionOnboardingSettings.HasCompletedOnboarding || !showOnboarding))
                 SetOnboardingVisible(!showOnboarding);
 
             // Saved-replay browser. Deliberately available during onboarding too: after a
             // fresh Unity start the onboarding screen is the first thing shown, and loading
             // an old trajectory should not require starting a live trial first.
-            if (Input.GetKeyDown(loadReplayKey) && !inWorldBuildingMode)
+            if (Input.GetKeyDown(loadReplayKey) && !inWorldBuildingMode && !showWorldBuildingSavePrompt)
             {
                 ToggleLoadTrialPanel();
                 return;
@@ -485,7 +607,7 @@ namespace SessionReview
                 return;
             }
 
-            // Tab only works when there are completed trials
+            // The review key only works when there are completed trials
             if (Input.GetKeyDown(reviewToggleKey) && trialArchive.TrialCount > 0)
                 EnterRewindMode(trialArchive.TrialCount - 1);
         }
@@ -498,7 +620,9 @@ namespace SessionReview
                 return;
             }
 
-            if (Input.GetKeyDown(startTrialKey) || Input.GetKeyDown(KeyCode.KeypadEnter))
+            if (Input.GetKeyDown(startTrialKey) ||
+                Input.GetKeyDown(KeyCode.KeypadEnter) ||
+                SEAN.Input.JoystickProfiles.UiStartPressedThisFrame())
             {
                 if (trialStartReady)
                 {
@@ -518,7 +642,7 @@ namespace SessionReview
 
             // Dismiss the menu and unfreeze time (mid-run: remaining agents keep
             // navigating; after full completion: the scene simply idles);
-            // [Tab] still re-opens review at any time.
+            // The review key still re-opens review at any time.
             if (Input.GetKeyDown(KeyCode.Escape))
             {
                 HidePostTrialPrompt();
@@ -566,6 +690,11 @@ namespace SessionReview
 
         private void HandleWorldBuildingInput()
         {
+            // The save modal is up: it owns input, and the editor-inactive check below must not
+            // tear World Building down while the operator is typing a name.
+            if (showWorldBuildingSavePrompt)
+                return;
+
             if (runtimeEditorManager == null)
             {
                 ExitWorldBuildingMode(true);
@@ -586,15 +715,12 @@ namespace SessionReview
 
         private void HandleRewindInput()
         {
-            var drawTrajManager = FindObjectOfType<TrajectoryManager>();
-            bool isDrawTrajectoryModeActive = drawTrajManager != null && drawTrajManager.IsDrawMode;
-
             // While draw-trajectory mode owns the pointer, TrajectoryManager pans/zooms
             // its own draw camera; zooming the hidden rewind camera here would fight it.
-            if (!isDrawTrajectoryModeActive)
+            if (!IsDrawTrajectoryModeActive)
                 HandleTopDownMouseInput();
 
-            if (isDrawTrajectoryModeActive)
+            if (IsDrawTrajectoryModeActive)
             {
                 if (Input.GetKeyDown(reviewToggleKey))
                     return;
@@ -750,7 +876,7 @@ namespace SessionReview
             {
                 // Scale by the actual scroll amount so smooth-scrolling mice, which spread one
                 // notch over several frames, do not compound a full step every frame.
-                float zoomMultiplier = Mathf.Pow(0.85f, scroll);
+                float zoomMultiplier = Mathf.Pow(0.92f, scroll);
                 rewindController.ZoomTopDownAtScreenPoint(Input.mousePosition, zoomMultiplier);
             }
 
@@ -834,6 +960,15 @@ namespace SessionReview
             var recording = trajectoryRecorder.BuildSnapshot();
             float timeOffset = trajectoryRecorder.RecordingStartTime;
 
+            // The trial is archived the instant the FIRST primary agent reaches its goal, so its
+            // endTime initially covers only that first arrival. FinalizeLatestTrial (fired on
+            // SessionFullyComplete) normally stretches it to the LAST arrival, but if review is
+            // opened before the whole session finishes -- or an agent never arrives -- the window
+            // stays clipped at the first arrival and the replay is truncated. Stretch it here so
+            // the progress-bar length is governed by the LAST agent to arrive (or, for a still-
+            // running latest trial, the latest recorded moment) instead of the first.
+            ExtendReviewWindowToLastArrival(trial, trialIndex);
+
             float recStart = trial.startTime - timeOffset;
             float recEnd = trial.endTime - timeOffset;
             var planSnapshots = trajectoryRecorder.GetPlanSnapshots(recStart, recEnd);
@@ -841,6 +976,51 @@ namespace SessionReview
             var signalAnnotations = trajectoryRecorder.GetSignalAnnotations(recStart, recEnd);
 
             BeginReviewSession(trial, recording, timeOffset, planSnapshots, vlmCaptures, signalAnnotations, trialIndex);
+        }
+
+        /// <summary>
+        /// Widen a trial's review window so its end time reflects the LAST primary agent (robot +
+        /// PWD player) to arrive rather than the first (the moment the trial is first archived).
+        /// No-op once the window already covers the last arrival, so a fully-completed trial that
+        /// FinalizeLatestTrial already stretched is left untouched.
+        /// </summary>
+        private void ExtendReviewWindowToLastArrival(TrialRecord trial, int trialIndex)
+        {
+            if (trial == null)
+                return;
+
+            float end = trial.endTime;
+
+            // Latest arrival latched on the record. Its AgentArrivalInfo objects are shared with
+            // the live SessionTracker, so arrivals that happened after the first archive show up
+            // here even without a FinalizeLatestTrial pass.
+            if (trial.agentArrivals != null)
+            {
+                foreach (var arrival in trial.agentArrivals)
+                {
+                    if (arrival == null || !arrival.arrived)
+                        continue;
+                    if (arrival.role != AgentRole.Robot && arrival.role != AgentRole.PWDPlayer)
+                        continue;
+                    if (arrival.arrivalTime > end)
+                        end = arrival.arrivalTime;
+                }
+            }
+
+            // Reviewing the latest trial while the session is still running: the sim advanced past
+            // the first arrival and kept recording, so cover everything up to now rather than
+            // discarding those samples (e.g. an agent that is stuck and never formally "arrives").
+            bool isLatestTrial = trialArchive != null && trialIndex == trialArchive.TrialCount - 1;
+            if (isLatestTrial && sessionTracker != null && sessionTracker.IsTracking)
+                end = Mathf.Max(end, Time.time);
+
+            if (end > trial.endTime)
+            {
+                SessionReview.SessionReviewLog.Log(
+                    $"[SessionReview] Extended review window end {trial.endTime:F2}s -> {end:F2}s " +
+                    "so the progress bar spans up to the last agent to arrive.");
+                trial.endTime = end;
+            }
         }
 
         /// <summary>
@@ -883,6 +1063,8 @@ namespace SessionReview
                 session.vlmCaptures, session.signalAnnotations);
             isReviewingLoadedTrial = true;
             loadedTrialLabel = $"{session.trial.trialName} ({info.folderName})";
+            session.trial.archiveFolder = info.folderPath;
+            CurrentReviewTrialFolder = info.folderPath;
 
             BeginReviewSession(session.trial, session.recording, session.timeOffset,
                 session.planSnapshots, session.vlmCaptures, session.signalAnnotations, -1);
@@ -899,6 +1081,8 @@ namespace SessionReview
             ExitWorldBuildingMode(true);
 
             reviewTrialIndex = trialIndex;
+            if (trialIndex >= 0)
+                CurrentReviewTrialFolder = trial != null ? trial.archiveFolder : null;
             inRewindMode = true;
             showReviewCompletionPrompt = false;
             currentSpeedIndex = 2;
@@ -922,7 +1106,11 @@ namespace SessionReview
             // Review is where the robot's intent is actually wanted, so the switch the trial ran
             // with flips back on. Must precede EnterRewind: that is where the "ROS Nav Plan"
             // legend row is registered, and it reads its initial visibility from this switch.
-            RosOverlayVisibility.SetAllVisible(true);
+            // One exception: when a human drove the robot, the recorded plan is only what ROS
+            // would have done —kept available behind the legend row / Control Traj toggle,
+            // but not shown until a reviewer asks for it.
+            RosOverlayVisibility.SetRobotGoalVisible(true);
+            RosOverlayVisibility.SetPlanVisible(!WasRobotManuallyDriven(trial));
 
             trajectoryRenderer.ShowTrajectories(trial, recording, controlModeLog, planSnapshots, vlmCaptures, signalAnnotations, timeOffset);
             metricsOverlay.ShowTrial(trial);
@@ -937,11 +1125,47 @@ namespace SessionReview
                 reviewExportEnvelope = new Bounds(Vector3.zero, new Vector3(10f, 1f, 10f));
         }
 
+        /// <summary>
+        /// Did a human drive the robot during this trial? Read from the trial record itself
+        /// (its control-mode entries carry the state active at the trial-window start), so it
+        /// works for disk-loaded trials too; the live ControlModeLog is the fallback for older
+        /// saves that only recorded in-window transitions.
+        /// </summary>
+        private bool WasRobotManuallyDriven(TrialRecord trial)
+        {
+            if (trial == null)
+                return false;
+
+            var robotIds = new HashSet<string> { "robot" }; // ControlModeLog's id fallback
+            foreach (var roleEntry in trial.agentRoles)
+            {
+                if (roleEntry.role == AgentRole.Robot && !string.IsNullOrEmpty(roleEntry.objectId))
+                    robotIds.Add(roleEntry.objectId);
+            }
+
+            foreach (var entry in trial.controlModeEntries)
+            {
+                if (entry.mode == ControlMode.Manual && robotIds.Contains(entry.agentId))
+                    return true;
+            }
+
+            if (!isReviewingLoadedTrial && controlModeLog != null)
+            {
+                foreach (string robotId in robotIds)
+                {
+                    if (controlModeLog.GetModeAtTime(robotId, trial.startTime) == ControlMode.Manual)
+                        return true;
+                }
+            }
+
+            return false;
+        }
+
         public void ExitReviewMode()
         {
             // Guarantee at least one ROI export per live review: if the reviewer never
             // exported (key or button), save one on the way out while the review data is
-            // still bound. Loaded-from-disk replays are skipped 鈥?their trial data is
+            // still bound. Loaded-from-disk replays are skipped —their trial data is
             // already on disk, and re-exporting on every viewing would just pile up folders.
             if (autoExportRoiOnReviewExit && inRewindMode && !isReviewingLoadedTrial &&
                 currentReviewTrial != null && string.IsNullOrEmpty(lastReviewExportPath))
@@ -969,9 +1193,52 @@ namespace SessionReview
             trajectoryRecorder.ClearReplayOverride();
             isReviewingLoadedTrial = false;
             loadedTrialLabel = null;
+            CurrentReviewTrialFolder = null;
         }
 
         public void StartNextTrialFromPrompt()
+        {
+            // "Run Again" pressed from inside World Building means "run what I just built": the
+            // edits —dragged start/goal markers above all —ARE the point of the run, so it
+            // restarts in place and keeps them. Reloading here would silently revert the goal the
+            // operator just moved, for both the robot and the pedestrian.
+            if (inWorldBuildingMode)
+            {
+                StartNextTrialInPlace();
+                return;
+            }
+
+            // Outside World Building an edited world is an *option*, never sticky state: the next
+            // trial starts from the original scene, and the edits come back only when the operator
+            // picks their card on the session page. Unsaved edits are offered to the save modal
+            // first so a restart cannot silently throw the work away.
+            //
+            // Gated on the onboarding flow: the reloaded scene only finds its way back to the
+            // trial-start prompt through SessionOnboardingSettings (see Start()), so a scene
+            // that never ran onboarding restarts in place instead of coming up with no prompt.
+            if (SessionOnboardingSettings.HasCompletedOnboarding)
+            {
+                switch (ClassifyWorldBuildingChanges())
+                {
+                    case WorldBuildingChangeState.Unsaved:
+                        CaptureReviewCameraForWorldBuilding();
+                        OpenWorldBuildingSavePrompt(WorldBuildingSaveFollowUp.RestartTrial);
+                        return;
+                    case WorldBuildingChangeState.Saved:
+                        RestartTrialWithCleanScene();
+                        return;
+                }
+            }
+
+            StartNextTrialInPlace();
+        }
+
+        /// <summary>
+        /// Restart without a scene reload, so whatever is in the world right now is what runs.
+        /// Used when the world already matches the base scene, and when the operator asked for
+        /// this run from inside World Building -- see <see cref="StartNextTrialFromPrompt"/>.
+        /// </summary>
+        private void StartNextTrialInPlace()
         {
             CaptureReviewCameraForWorldBuilding();
             showReviewCompletionPrompt = false;
@@ -1023,6 +1290,7 @@ namespace SessionReview
             showTrialStartPrompt = false;
 
             ResetControlledMotion();
+            ApplyPwdTrialRoute(); // re-select pedestrian route + reposition + hide markers now that the role is known
             sean.robotTask.StartPendingOrNewTask();
             ApplyStartupControlDefaults();
             sessionTracker?.BeginTrackingForCurrentTask();
@@ -1169,6 +1437,15 @@ namespace SessionReview
             // and all layout below uses ReviewUiScale.Width/Height as the screen size.
             ReviewUiScale.Apply();
 
+            // Modal: drawn instead of (not over) the onboarding panel, and last of all so no
+            // click can fall through to the World Building editor behind it.
+            if (showWorldBuildingSavePrompt)
+            {
+                EnsureOnboardingStyles();
+                DrawWorldBuildingSavePrompt();
+                return;
+            }
+
             if (showOnboarding)
                 DrawOnboardingUI();
 
@@ -1182,28 +1459,34 @@ namespace SessionReview
             if (showPostTrialPrompt)
                 DrawPostTrialPrompt();
 
-            if (showReviewCompletionPrompt)
+            // Both prompts are next-step menus about the replay as a whole —pure clutter
+            // over a drawing canvas, and the draw session has to be finished or cancelled
+            // before any of their buttons make sense anyway.
+            bool drawing = IsDrawTrajectoryModeActive;
+
+            if (showReviewCompletionPrompt && !drawing)
                 DrawReviewCompletionPrompt();
 
             if (inRewindMode)
             {
                 DrawReviewRoiOverlay();
 
-                string perspective = rewindController.CurrentPerspective.ToString();
-                string playing = rewindController.IsPlaying ? "PLAYING" : "PAUSED";
-                var drawTrajManager = FindObjectOfType<TrajectoryManager>();
-                bool isDrawTrajectoryModeActive = drawTrajManager != null && drawTrajManager.IsDrawMode;
-                string controlsLine = isDrawTrajectoryModeActive
-                    ? $"{perspective} | Draw Traj: hold DRAW to draw  1-finger/LMB pan  2-finger/wheel zoom"
-                    : $"{perspective} | F1-F5:View  Wheel:Zoom  MMB:Pan  Tab/Esc:Exit";
-                string trialLabel = isReviewingLoadedTrial
-                    ? $"Loaded: {loadedTrialLabel}"
-                    : $"Trial {reviewTrialIndex + 1}/{trialArchive.TrialCount}";
-                GUI.Box(new Rect(ReviewUiScale.Width - 340, 10, 330, 50), "");
-                GUI.Label(new Rect(ReviewUiScale.Width - 335, 15, 320, 20),
-                    $"REWIND [{playing}] {trialLabel}");
-                GUI.Label(new Rect(ReviewUiScale.Width - 335, 35, 320, 20),
-                    controlsLine);
+                // The REWIND status box is skipped while drawing: the DRAW MODE panel already
+                // spells out the same pan/zoom controls, so it is duplicated noise on the right.
+                if (!drawing)
+                {
+                    string perspective = rewindController.CurrentPerspective.ToString();
+                    string playing = rewindController.IsPlaying ? "PLAYING" : "PAUSED";
+                    string trialLabel = isReviewingLoadedTrial
+                        ? $"Loaded: {loadedTrialLabel}"
+                        : $"Trial {reviewTrialIndex + 1}/{trialArchive.TrialCount}";
+                    GUI.Box(new Rect(ReviewUiScale.Width - 340, 10, 330, 50), "");
+                    GUI.Label(new Rect(ReviewUiScale.Width - 335, 15, 320, 20),
+                        $"REWIND [{playing}] {trialLabel}");
+                    GUI.Label(new Rect(ReviewUiScale.Width - 335, 35, 320, 20),
+                        $"{perspective} | F1-F5:View  Wheel:Zoom  MMB:Pan  {reviewToggleKey}/Esc:Exit");
+                }
+
                 DrawEndReviewButton();
                 DrawTopDownReviewControls();
 
@@ -1227,6 +1510,8 @@ namespace SessionReview
         {
             if (!showEndInteractionButton)
                 return;
+            if (EndInteractionOverlay.HandlesEndInteractionButton)
+                return;
 
             // Only available while an interaction is actively running and nothing else
             // (onboarding, prompts, review, world building) is occupying the screen.
@@ -1240,8 +1525,25 @@ namespace SessionReview
             float x = (ReviewUiScale.Width - width) * 0.5f;
             float y = ReviewUiScale.Height - height - 24f;
 
-            if (GUI.Button(new Rect(x, y, width, height), endInteractionButtonLabel))
+            // The uGUI Send Signal button (robot player) also sits bottom-center, in
+            // unscaled canvas pixels —at higher UI scales the two land on the same
+            // spot. While it is visible, sit directly above it instead of on top.
+            if (SignalUIManager.TryGetVisibleSendSignalRect(out Rect signalRect))
+            {
+                float signalTopGui = ReviewUiScale.ScreenToGui(new Vector2(0f, signalRect.yMax)).y;
+                y = Mathf.Min(y, signalTopGui - height - 10f);
+            }
+
+            if (GUI.Button(new Rect(x, Mathf.Max(10f, y), width, height), endInteractionButtonLabel))
                 EndInteractionAndProceed();
+        }
+
+        public void EndCurrentInteraction()
+        {
+            if (!CanEndCurrentInteraction)
+                return;
+
+            EndInteractionAndProceed();
         }
 
         private void EndInteractionAndProceed()
@@ -1256,9 +1558,16 @@ namespace SessionReview
             float width = 156f;
             float height = 34f;
             float x = ReviewUiScale.Width - width - 18f;
-            float y = ReviewUiScale.Height - 126f;
 
-            if (GUI.Button(new Rect(x, y, width, height), "End Review / Menu"))
+            // Sit fully above the replay progress bar. Its scrubber is an IMGUI slider
+            // that consumes clicks first, so a button overlapping it scrubs the timeline
+            // instead of ending the review. The constant is the fallback for the frame
+            // before the bar has drawn once.
+            float y = ReviewUiScale.Height - 124f - height;
+            if (rewindController != null && rewindController.TryGetProgressBarRect(out Rect bar))
+                y = bar.y - height - 12f;
+
+            if (GUI.Button(new Rect(x, Mathf.Max(10f, y), width, height), "End Review / Menu"))
                 EndReviewAndShowNextStepMenu();
         }
 
@@ -1310,15 +1619,15 @@ namespace SessionReview
             GUI.Label(new Rect(x, y, innerWidth, 22f), $"ROI: {roi.size.x:F1}m x {roi.size.z:F1}m");
             y += 26f;
 
-            DrawSliderRow(x, ref y, innerWidth, "Pad X", ref reviewExportSettings.paddingX, 0f, 15f);
-            DrawSliderRow(x, ref y, innerWidth, "Pad Z", ref reviewExportSettings.paddingZ, 0f, 15f);
-            DrawSliderRow(x, ref y, innerWidth, "Offset X", ref reviewExportSettings.offsetX, -15f, 15f);
-            DrawSliderRow(x, ref y, innerWidth, "Offset Z", ref reviewExportSettings.offsetZ, -15f, 15f);
+            DrawSliderRow(x, ref y, innerWidth, "Pad X", ref reviewExportSettings.paddingX, 0f, 60f);
+            DrawSliderRow(x, ref y, innerWidth, "Pad Z", ref reviewExportSettings.paddingZ, 0f, 60f);
+            DrawSliderRow(x, ref y, innerWidth, "Offset X", ref reviewExportSettings.offsetX, -60f, 60f);
+            DrawSliderRow(x, ref y, innerWidth, "Offset Z", ref reviewExportSettings.offsetZ, -60f, 60f);
 
             reviewExportSettings.exportImage = GUI.Toggle(
                 new Rect(x, y, innerWidth, 22f),
                 reviewExportSettings.exportImage,
-                "Export aligned top-down PNG");
+                "Export top-down PNGs (plain + trajectory)");
             y += 26f;
 
             float resolution = reviewExportSettings.imageMaxResolution;
@@ -1544,6 +1853,8 @@ namespace SessionReview
         private void DrawStatusBadge()
         {
             if (inRewindMode || inWorldBuildingMode || showOnboarding || showPostTrialPrompt || showTrialStartPrompt) return;
+            // Hidden together with the Agent Speed panel; F8 toggles both.
+            if (!AgentSpeedOverlay.HudVisible) return;
 
             var sean = SEAN.SEAN.instance;
             bool running = sean != null && sean.robotTask != null && sean.robotTask.isRunning;
@@ -1560,7 +1871,7 @@ namespace SessionReview
             }
             else if (trials > 0)
             {
-                text = $"TRIAL ENDED | {trials} trial(s) ready | [Tab] Review | [{loadReplayKey}] Load";
+                text = $"TRIAL ENDED | {trials} trial(s) ready | [{reviewToggleKey}] Review | [{loadReplayKey}] Load";
                 bgColor = new Color(0.3f, 0.15f, 0f, 0.85f);
             }
             else
@@ -1658,6 +1969,7 @@ namespace SessionReview
         {
             float s = WorldBuildingUiScale;
             int bodyFontSize = Mathf.RoundToInt(15f * s);
+            int buttonFontSize = Mathf.RoundToInt(15f * Mathf.Clamp(s, 1f, 1.35f));
             if (worldBuildingStylesFontSize == bodyFontSize && worldBuildingTitleStyle != null)
                 return;
 
@@ -1686,13 +1998,64 @@ namespace SessionReview
 
             worldBuildingButtonStyle = new GUIStyle(GUI.skin.button)
             {
-                fontSize = bodyFontSize
+                fontSize = buttonFontSize
             };
 
             worldBuildingTextFieldStyle = new GUIStyle(GUI.skin.textField)
             {
                 fontSize = bodyFontSize
             };
+        }
+
+        // World building hides the vertical gizmo axis (lockVerticalMovement), so the selected
+        // object's exact height is edited here instead: type a value and press Enter, or nudge.
+        private string worldBuildingHeightText = "";
+        private GameObject worldBuildingHeightTarget;
+        private const string WorldBuildingHeightControlName = "WorldBuildingHeightField";
+        private const float WorldBuildingHeightNudgeStep = 0.1f;
+
+        private float DrawWorldBuildingHeightRow(float x, float y, float width, GameObject target)
+        {
+            float s = WorldBuildingUiScale;
+            float rowHeight = 26f * s;
+            float labelWidth = 62f * s;
+            float nudgeWidth = 30f * s;
+            float gap = 6f * s;
+            float fieldWidth = Mathf.Max(50f * s, width - labelWidth - (nudgeWidth + gap) * 2f);
+
+            // While the field has focus the user's in-progress text wins; otherwise mirror the
+            // object's live Y (selection changes, undo/redo, nudges).
+            bool fieldFocused = GUI.GetNameOfFocusedControl() == WorldBuildingHeightControlName;
+            if (!fieldFocused || worldBuildingHeightTarget != target)
+            {
+                worldBuildingHeightText = target.transform.position.y.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+                worldBuildingHeightTarget = target;
+            }
+
+            GUI.Label(new Rect(x, y, labelWidth, rowHeight), "Height:", worldBuildingBodyStyle);
+
+            // Commit on Enter, before the text field consumes the key event.
+            if (fieldFocused && Event.current.type == EventType.KeyDown &&
+                (Event.current.keyCode == KeyCode.Return || Event.current.keyCode == KeyCode.KeypadEnter))
+            {
+                if (float.TryParse(worldBuildingHeightText, System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out float typedY))
+                    runtimeEditorManager?.SetSelectedObjectHeight(typedY);
+                GUI.FocusControl(null);
+                Event.current.Use();
+            }
+
+            GUI.SetNextControlName(WorldBuildingHeightControlName);
+            worldBuildingHeightText = GUI.TextField(
+                new Rect(x + labelWidth, y, fieldWidth, rowHeight), worldBuildingHeightText, worldBuildingTextFieldStyle);
+
+            float nudgeX = x + labelWidth + fieldWidth + gap;
+            if (GUI.Button(new Rect(nudgeX, y, nudgeWidth, rowHeight), "-", worldBuildingButtonStyle))
+                runtimeEditorManager?.SetSelectedObjectHeight(target.transform.position.y - WorldBuildingHeightNudgeStep);
+            if (GUI.Button(new Rect(nudgeX + nudgeWidth + gap, y, nudgeWidth, rowHeight), "+", worldBuildingButtonStyle))
+                runtimeEditorManager?.SetSelectedObjectHeight(target.transform.position.y + WorldBuildingHeightNudgeStep);
+
+            return y + rowHeight + 4f * s;
         }
 
         private void DrawWorldBuildingOverlay()
@@ -1704,6 +2067,7 @@ namespace SessionReview
                 worldBuildingOverlayHeight = WorldBuildingOverlayHeaderHeight;
 
             Rect rect = GetWorldBuildingOverlayRect();
+            HandleWorldBuildingPanelDragAndResize(rect, worldBuildingOverlayLayout, WorldBuildingOverlayHeaderHeight, allowResize: false);
             GUI.Box(rect, "");
             DrawWorldBuildingOverlayHeader(rect);
 
@@ -1713,29 +2077,27 @@ namespace SessionReview
                 float contentWidth = rect.width - 32f * s;
                 float y = rect.y + WorldBuildingOverlayHeaderHeight;
 
-                string introText =
-                    "Session review is now using the runtime editor. It opens in top-down map view so objects are easier to place, and you can switch into free camera while editing.";
-                float introHeight = worldBuildingBodyStyle.CalcHeight(new GUIContent(introText), contentWidth);
-                GUI.Label(new Rect(contentX, y, contentWidth, introHeight), introText, worldBuildingBodyStyle);
-                y += introHeight + 10f * s;
-
                 string cameraMode = worldBuildingCameraController != null && worldBuildingCameraController.IsTopDownView()
                     ? "Top-down"
                     : "Free camera";
                 string selectionText = runtimeEditorManager != null && runtimeEditorManager.CurrentSelectedObject != null
-                    ? $"Selected: {runtimeEditorManager.CurrentSelectedObject.name}"
-                    : "Selected: none";
+                    ? runtimeEditorManager.CurrentSelectedObject.name
+                    : "none";
 
                 float infoRowHeight = 24f * s;
-                GUI.Label(new Rect(contentX, y, contentWidth, infoRowHeight), $"Camera: {cameraMode}", worldBuildingBodyStyle);
+                GUI.Label(new Rect(contentX, y, contentWidth, infoRowHeight),
+                    $"Camera: {cameraMode}    Selected: {selectionText}", worldBuildingBodyStyle);
                 y += infoRowHeight;
-                GUI.Label(new Rect(contentX, y, contentWidth, infoRowHeight), selectionText, worldBuildingBodyStyle);
-                y += infoRowHeight + 6f * s;
+
+                GameObject heightTarget = runtimeEditorManager != null ? runtimeEditorManager.CurrentSelectedObject : null;
+                if (heightTarget != null)
+                    y = DrawWorldBuildingHeightRow(contentX, y, contentWidth, heightTarget);
+
+                y += 6f * s;
 
                 float buttonHeight = 34f * s;
                 float buttonGap = 10f * s;
-                const int buttonCols = 2;
-                float buttonWidth = (contentWidth - buttonGap * (buttonCols - 1)) / buttonCols;
+                float buttonWidth = (contentWidth - buttonGap) / 2f;
 
                 if (GUI.Button(new Rect(contentX, y, buttonWidth, buttonHeight), "Back To Menu", worldBuildingButtonStyle))
                 {
@@ -1751,28 +2113,44 @@ namespace SessionReview
                 if (GUI.Button(new Rect(contentX, y, buttonWidth, buttonHeight), "Run Again", worldBuildingButtonStyle))
                     StartNextTrialFromPrompt();
 
+                // Save the built world without having to switch scene/character first.
+                if (GUI.Button(new Rect(contentX + (buttonWidth + buttonGap), y, buttonWidth, buttonHeight), "Save World...", worldBuildingButtonStyle))
+                    OpenWorldBuildingSavePromptFromEditor();
+
+                y += buttonHeight + buttonGap;
+
                 int undoCount = runtimeEditorManager != null ? runtimeEditorManager.UndoCount : 0;
                 int redoCount = runtimeEditorManager != null ? runtimeEditorManager.RedoCount : 0;
                 bool hasSelection = runtimeEditorManager?.CurrentSelectedObject != null;
+                float thirdWidth = (contentWidth - buttonGap * 2f) / 3f;
 
+                // Ctrl+Z / Ctrl+Y / Del still work as hotkeys; the labels stay short so
+                // the three actions fit one row.
                 GUI.enabled = undoCount > 0;
-                if (GUI.Button(new Rect(contentX + (buttonWidth + buttonGap), y, buttonWidth, buttonHeight), $"Undo  [{undoCount}]  Ctrl+Z", worldBuildingButtonStyle))
+                if (GUI.Button(new Rect(contentX, y, thirdWidth, buttonHeight), $"Undo [{undoCount}]", worldBuildingButtonStyle))
                     runtimeEditorManager?.UndoLastAction();
 
-                GUI.enabled = true;
-                y += buttonHeight + buttonGap;
-
                 GUI.enabled = redoCount > 0;
-                if (GUI.Button(new Rect(contentX, y, buttonWidth, buttonHeight), $"Redo  [{redoCount}]  Ctrl+Y", worldBuildingButtonStyle))
+                if (GUI.Button(new Rect(contentX + (thirdWidth + buttonGap), y, thirdWidth, buttonHeight), $"Redo [{redoCount}]", worldBuildingButtonStyle))
                     runtimeEditorManager?.RedoLastAction();
 
                 GUI.enabled = hasSelection;
-                if (GUI.Button(new Rect(contentX + (buttonWidth + buttonGap), y, buttonWidth, buttonHeight), "Delete  [Del]", worldBuildingButtonStyle))
+                if (GUI.Button(new Rect(contentX + (thirdWidth + buttonGap) * 2f, y, thirdWidth, buttonHeight), "Delete", worldBuildingButtonStyle))
                     runtimeEditorManager?.DeleteSelectedObject();
 
                 GUI.enabled = true;
 
-                worldBuildingOverlayHeight = (y + buttonHeight + 12f * s) - rect.y;
+                if (!string.IsNullOrEmpty(worldBuildingSaveStatus))
+                {
+                    y += buttonHeight + 6f * s;
+                    float statusHeight = worldBuildingBodyStyle.CalcHeight(new GUIContent(worldBuildingSaveStatus), contentWidth);
+                    GUI.Label(new Rect(contentX, y, contentWidth, statusHeight), worldBuildingSaveStatus, worldBuildingBodyStyle);
+                    worldBuildingOverlayHeight = (y + statusHeight + 12f * s) - rect.y;
+                }
+                else
+                {
+                    worldBuildingOverlayHeight = (y + buttonHeight + 12f * s) - rect.y;
+                }
             }
 
             DrawWorldBuildingSidePanels();
@@ -1800,22 +2178,53 @@ namespace SessionReview
         private void DrawWorldBuildingSidePanels()
         {
             EnsureWorldBuildingStyles();
-            worldBuildingAddObjectsHeaderHeight = ComputeWorldBuildingAddObjectsHeaderHeight(GetWorldBuildingSidePanelWidth());
+            worldBuildingAddObjectsHeaderHeight = ComputeWorldBuildingAddObjectsHeaderHeight(
+                GetWorldBuildingPanelWidth(worldBuildingObjectsPanelLayout, GetWorldBuildingSidePanelWidth()));
             EnsureWorldBuildingSpawnLibraryCurrent();
 
             GetWorldBuildingSidePanelRects(
+                out Rect weatherRect,
                 out Rect generateRect,
                 out Rect charactersRect,
                 out Rect objectsRect);
+
+            // Handle drag/resize before any drawing, in reverse draw order so the visually
+            // topmost panel (drawn last) gets first claim on mouse events when panels overlap.
+            HandleWorldBuildingPanelDragAndResize(
+                objectsRect,
+                worldBuildingObjectsPanelLayout,
+                worldBuildingAddObjectsMinimized ? objectsRect.height : GetWorldBuildingAddObjectsHeaderHeight(),
+                allowResize: !worldBuildingAddObjectsMinimized,
+                gripOnRight: true);
+            HandleWorldBuildingPanelDragAndResize(
+                charactersRect,
+                worldBuildingCharactersPanelLayout,
+                Mathf.Min(WorldBuildingSidePanelHeaderHeight, charactersRect.height),
+                allowResize: !worldBuildingAddCharactersMinimized);
+            HandleWorldBuildingPanelDragAndResize(
+                generateRect,
+                worldBuildingGeneratePanelLayout,
+                Mathf.Min(WorldBuildingSidePanelHeaderHeight, generateRect.height),
+                allowResize: !worldBuildingGenerateObjectsMinimized);
+            HandleWorldBuildingPanelDragAndResize(
+                weatherRect,
+                worldBuildingWeatherPanelLayout,
+                Mathf.Min(WorldBuildingSidePanelHeaderHeight, weatherRect.height),
+                allowResize: !worldBuildingWeatherMinimized);
 
             IReadOnlyList<WorldBuildingSpawnUiRow> objectRows = WorldBuildingSpawnLibrary.LastObjectUiRows;
             IReadOnlyList<WorldBuildingSpawnUiRow> characterRows = WorldBuildingSpawnLibrary.LastCharacterUiRows;
 
             int previousDepth = GUI.depth;
             GUI.depth = -1000;
+            DrawWorldBuildingWeatherPanel(weatherRect);
+            DrawWorldBuildingPanelGrip(weatherRect, !worldBuildingWeatherMinimized);
             DrawWorldBuildingGenerateObjectsPanel(generateRect);
+            DrawWorldBuildingPanelGrip(generateRect, !worldBuildingGenerateObjectsMinimized);
             DrawWorldBuildingAddCharactersPanel(charactersRect, characterRows);
+            DrawWorldBuildingPanelGrip(charactersRect, !worldBuildingAddCharactersMinimized);
             DrawWorldBuildingAddObjectsPanel(objectsRect, objectRows);
+            DrawWorldBuildingPanelGrip(objectsRect, !worldBuildingAddObjectsMinimized, gripOnRight: true);
             GUI.depth = previousDepth;
         }
 
@@ -1827,7 +2236,8 @@ namespace SessionReview
                 "Add Objects",
                 WorldBuildingAddObjectsSubtitle,
                 ref worldBuildingAddObjectsMinimized,
-                GetWorldBuildingAddObjectsHeaderHeight());
+                GetWorldBuildingAddObjectsHeaderHeight(),
+                gripOnRight: true);
 
             if (worldBuildingAddObjectsMinimized)
                 return;
@@ -1850,7 +2260,10 @@ namespace SessionReview
                 panelRect,
                 GetWorldBuildingAddObjectsHeaderHeight(),
                 rows,
-                ref worldBuildingAddObjectsScroll);
+                ref worldBuildingAddObjectsScroll,
+                ref worldBuildingSpawnSearch,
+                "Search objects and characters...",
+                true);
         }
 
         private void DrawWorldBuildingAddCharactersPanel(Rect panelRect, IReadOnlyList<WorldBuildingSpawnUiRow> rows)
@@ -1884,7 +2297,10 @@ namespace SessionReview
                 panelRect,
                 WorldBuildingSidePanelHeaderHeight,
                 rows,
-                ref worldBuildingAddCharactersScroll);
+                ref worldBuildingAddCharactersScroll,
+                ref worldBuildingSpawnSearch,
+                "Search objects and characters...",
+                worldBuildingAddObjectsMinimized);
         }
 
         private void DrawWorldBuildingGenerateObjectsPanel(Rect panelRect)
@@ -1903,24 +2319,104 @@ namespace SessionReview
             DrawWorldBuildingGenerateObjectsBody(panelRect);
         }
 
+        /// <summary>
+        /// The Weather panel: picks the weather the built world runs with. Clear/Fog switch
+        /// applies live (fog previews in the free camera; the orthographic top-down map is
+        /// kept fog-free by FogController so editing stays possible), Light/Medium/Heavy set
+        /// the fog density. The choice is captured into scene.json by
+        /// WorldBuildingScenarioStore and re-applied on restore. Rain/Snow are placeholders
+        /// until those effects exist.
+        /// </summary>
+        private void DrawWorldBuildingWeatherPanel(Rect panelRect)
+        {
+            GUI.Box(panelRect, "");
+            DrawWorldBuildingSidePanelHeader(
+                panelRect,
+                "Weather",
+                null,
+                ref worldBuildingWeatherMinimized,
+                WorldBuildingSidePanelHeaderHeight);
+
+            if (worldBuildingWeatherMinimized)
+                return;
+
+            float s = WorldBuildingUiScale;
+            float x = panelRect.x + 14f * s;
+            float w = panelRect.width - 28f * s;
+            float y = panelRect.y + WorldBuildingSidePanelHeaderHeight;
+
+            worldBuildingWeatherHintHeight = worldBuildingSubtitleStyle.CalcHeight(
+                new GUIContent(WorldBuildingWeatherHint), w);
+            GUI.Label(new Rect(x, y, w, worldBuildingWeatherHintHeight), WorldBuildingWeatherHint, worldBuildingSubtitleStyle);
+            y += worldBuildingWeatherHintHeight + 8f * s;
+
+            Weather.FogController fog = Weather.FogController.Instance;
+            bool fogOn = fog != null && fog.FogActive;
+
+            float rowHeight = 34f * s;
+            float gap = 8f * s;
+            float buttonWidth = (w - gap * 3f) / 4f;
+
+            if (GUI.Toggle(new Rect(x, y, buttonWidth, rowHeight), !fogOn, "Clear", worldBuildingButtonStyle) && fogOn)
+                fog.SetFog(false);
+            if (GUI.Toggle(new Rect(x + (buttonWidth + gap), y, buttonWidth, rowHeight), fogOn, "Fog", worldBuildingButtonStyle) && !fogOn)
+                Weather.FogController.EnsureInstance().SetFog(true);
+
+            GUI.enabled = false;
+            GUI.Toggle(new Rect(x + (buttonWidth + gap) * 2f, y, buttonWidth, rowHeight), false, "Rain", worldBuildingButtonStyle);
+            GUI.Toggle(new Rect(x + (buttonWidth + gap) * 3f, y, buttonWidth, rowHeight), false, "Snow", worldBuildingButtonStyle);
+            GUI.enabled = true;
+            y += rowHeight + gap;
+
+            if (!fogOn)
+                return;
+
+            string[] presetLabels = { "Light", "Medium", "Heavy" };
+            float presetWidth = (w - gap * (presetLabels.Length - 1)) / presetLabels.Length;
+            for (int i = 0; i < presetLabels.Length; i++)
+            {
+                bool active = fog.presetIndex == i;
+                if (GUI.Toggle(new Rect(x + (presetWidth + gap) * i, y, presetWidth, rowHeight), active, presetLabels[i], worldBuildingButtonStyle) && !active)
+                    fog.SetPreset(i);
+            }
+        }
+
+        private float GetWorldBuildingWeatherPanelHeight()
+        {
+            if (worldBuildingWeatherMinimized)
+                return WorldBuildingSidePanelHeaderHeight;
+
+            float s = WorldBuildingUiScale;
+            // Measured during the previous draw (needs OnGUI); fall back to two lines until then.
+            float hintHeight = worldBuildingWeatherHintHeight > 0f ? worldBuildingWeatherHintHeight : 36f * s;
+            bool fogOn = Weather.FogController.Instance != null && Weather.FogController.Instance.FogActive;
+            float rowHeight = 34f * s;
+            float gap = 8f * s;
+            float body = hintHeight + gap + rowHeight + (fogOn ? gap + rowHeight : 0f);
+            return WorldBuildingSidePanelHeaderHeight + body + 12f * s;
+        }
+
         private void DrawWorldBuildingSidePanelHeader(
             Rect panelRect,
             string title,
             string subtitle,
             ref bool minimized,
-            float expandedHeaderHeight)
+            float expandedHeaderHeight,
+            bool gripOnRight = false)
         {
             float s = WorldBuildingUiScale;
             float toggleWidth = 30f * s;
             float toggleHeight = 24f * s;
+            // With the resize grip in the top-right corner the toggle shifts left of it.
+            float gripReserve = gripOnRight ? 20f * s : 0f;
             Rect toggleRect = new Rect(
-                panelRect.xMax - toggleWidth - 10f * s,
+                panelRect.xMax - toggleWidth - 10f * s - gripReserve,
                 panelRect.y + 8f * s,
                 toggleWidth,
                 toggleHeight);
 
             GUI.Label(
-                new Rect(panelRect.x + 14f * s, panelRect.y + 10f * s, panelRect.width - toggleWidth - 32f * s, 26f * s),
+                new Rect(panelRect.x + 14f * s, panelRect.y + 10f * s, panelRect.width - toggleWidth - 32f * s - gripReserve, 26f * s),
                 title,
                 worldBuildingTitleStyle);
 
@@ -1955,55 +2451,197 @@ namespace SessionReview
             return WorldBuildingSidePanelHeaderHeight + 40f * WorldBuildingUiScale;
         }
 
+        private static float GetWorldBuildingSpawnPaletteContentWidth(float panelWidth)
+        {
+            float innerPad = 12f * WorldBuildingUiScale;
+            const float scrollBarReserve = 18f;
+            return Mathf.Max(1f, panelWidth - innerPad * 2f - scrollBarReserve);
+        }
+
+        private static int GetWorldBuildingSpawnPaletteColumnCount(float contentWidth)
+        {
+            float gap = WorldBuildingSpawnPaletteCardGap;
+            int columns = Mathf.FloorToInt((contentWidth + gap) / (WorldBuildingSpawnPalettePreferredCardWidth + gap));
+
+            if (contentWidth >= WorldBuildingSpawnPaletteMinimumTwoColumnWidth * WorldBuildingPaletteMetricScale)
+                columns = Mathf.Max(columns, 2);
+
+            return Mathf.Clamp(Mathf.Max(1, columns), 1, 6);
+        }
+
+        private bool DrawWorldBuildingSpawnSearchField(
+            Rect panelRect,
+            float y,
+            float innerPad,
+            ref string search,
+            string placeholder)
+        {
+            float s = WorldBuildingUiScale;
+            string previous = search ?? string.Empty;
+            bool hasSearch = !string.IsNullOrWhiteSpace(previous);
+            float fieldHeight = 28f * s;
+            float clearSize = 26f * s;
+            Rect fieldRect = new Rect(
+                panelRect.x + innerPad,
+                y + 4f * s,
+                panelRect.width - innerPad * 2f,
+                fieldHeight);
+            Rect textRect = hasSearch
+                ? new Rect(fieldRect.x, fieldRect.y, fieldRect.width - clearSize - 6f * s, fieldRect.height)
+                : fieldRect;
+
+            string next = GUI.TextField(textRect, previous, 64, worldBuildingTextFieldStyle);
+            if (!hasSearch && Event.current.type == EventType.Repaint)
+            {
+                Color previousColor = GUI.color;
+                GUI.color = new Color(0.68f, 0.72f, 0.76f, 0.78f);
+                GUI.Label(
+                    new Rect(textRect.x + 7f * s, textRect.y + 4f * s, textRect.width - 14f * s, textRect.height),
+                    placeholder,
+                    worldBuildingSubtitleStyle);
+                GUI.color = previousColor;
+            }
+
+            if (hasSearch)
+            {
+                Rect clearRect = new Rect(fieldRect.xMax - clearSize, fieldRect.y, clearSize, clearSize);
+                if (GUI.Button(clearRect, "x", worldBuildingButtonStyle))
+                    next = string.Empty;
+            }
+
+            bool changed = !string.Equals(previous, next, StringComparison.Ordinal);
+            search = next;
+            return changed;
+        }
+
+        private static int CountWorldBuildingFilteredRows(
+            IReadOnlyList<WorldBuildingSpawnUiRow> rows,
+            string search)
+        {
+            if (rows == null)
+                return 0;
+
+            int count = 0;
+            for (int i = 0; i < rows.Count; i++)
+            {
+                if (WorldBuildingRowMatchesSearch(rows[i], search))
+                    count++;
+            }
+
+            return count;
+        }
+
+        private static bool WorldBuildingRowMatchesSearch(WorldBuildingSpawnUiRow row, string search)
+        {
+            if (row == null)
+                return false;
+            if (string.IsNullOrWhiteSpace(search))
+                return true;
+
+            string haystack = (row.DisplayName ?? string.Empty) + " "
+                              + (row.SpawnId ?? string.Empty) + " "
+                              + Path.GetFileNameWithoutExtension(row.ImportGlbPath ?? string.Empty);
+            string[] tokens = search.Split(
+                new[] { ' ', '\t', '_', '-', '.', '/', '\\' },
+                StringSplitOptions.RemoveEmptyEntries);
+
+            for (int i = 0; i < tokens.Length; i++)
+            {
+                if (haystack.IndexOf(tokens[i], StringComparison.OrdinalIgnoreCase) < 0)
+                    return false;
+            }
+
+            return tokens.Length > 0;
+        }
+
         private void DrawWorldBuildingSpawnCardGrid(
             Rect panelRect,
             float headerHeight,
             IReadOnlyList<WorldBuildingSpawnUiRow> rows,
-            ref Vector2 scroll)
+            ref Vector2 scroll,
+            ref string search,
+            string searchPlaceholder,
+            bool drawSearchField)
         {
             int totalCards = rows?.Count ?? 0;
             if (totalCards == 0)
                 return;
 
             float s = WorldBuildingUiScale;
-            int rowCount = (totalCards + WorldBuildingSpawnPaletteCols - 1) / WorldBuildingSpawnPaletteCols;
-            float scrollAreaMin = WorldBuildingSpawnCardPanelMinScrollHeight;
-            float scrollAreaMax = Mathf.Min(280f * s, ReviewUiScale.Height * 0.38f);
-            float scrollInnerHeight = rowCount * (WorldBuildingSpawnPaletteCardHeight + WorldBuildingSpawnPaletteCardGap)
-                                      + WorldBuildingSpawnPaletteCardGap;
-            float availableHeight = panelRect.height - headerHeight - 16f * s;
-            float scrollViewportH = Mathf.Clamp(scrollInnerHeight, scrollAreaMin, scrollAreaMax);
-            scrollViewportH = Mathf.Min(scrollViewportH, Mathf.Max(0f, availableHeight));
-            if (scrollViewportH < scrollAreaMin && availableHeight >= scrollAreaMin)
-                scrollViewportH = scrollAreaMin;
-            if (scrollViewportH <= 0f)
+            float innerPad = 12f * s;
+            float contentY = panelRect.y + headerHeight;
+            float searchBlockHeight = drawSearchField ? WorldBuildingSpawnPaletteSearchBlockHeight : 0f;
+            if (drawSearchField &&
+                DrawWorldBuildingSpawnSearchField(
+                        panelRect,
+                        contentY,
+                        innerPad,
+                        ref search,
+                        searchPlaceholder))
+            {
+                worldBuildingAddObjectsScroll = Vector2.zero;
+                worldBuildingAddCharactersScroll = Vector2.zero;
+            }
+            contentY += searchBlockHeight;
+
+            int visibleCards = CountWorldBuildingFilteredRows(rows, search);
+            if (visibleCards == 0)
+            {
+                GUI.Label(
+                    new Rect(
+                        panelRect.x + innerPad,
+                        contentY + 4f * s,
+                        panelRect.width - innerPad * 2f,
+                        40f * s),
+                    "No matches.",
+                    worldBuildingSubtitleStyle);
+                return;
+            }
+
+            // The panel height already encodes the auto min/max clamps (or the user's resize),
+            // so the viewport simply fills whatever space the panel offers.
+            float availableHeight = panelRect.height - headerHeight - searchBlockHeight - 16f * s;
+            if (availableHeight <= 0f)
                 return;
 
-            float innerPad = 12f * s;
             float scrollBarReserve = 18f;
             Rect viewRect = new Rect(
                 panelRect.x + innerPad,
-                panelRect.y + headerHeight,
+                contentY,
                 panelRect.width - innerPad * 2f,
-                scrollViewportH);
+                availableHeight);
             float innerW = viewRect.width - scrollBarReserve;
-            float cardW = (innerW - (WorldBuildingSpawnPaletteCols - 1) * WorldBuildingSpawnPaletteCardGap)
-                          / WorldBuildingSpawnPaletteCols;
+            int columnCount = GetWorldBuildingSpawnPaletteColumnCount(innerW);
+            int rowCount = (visibleCards + columnCount - 1) / columnCount;
+            float scrollInnerHeight = rowCount * (WorldBuildingSpawnPaletteCardHeight + WorldBuildingSpawnPaletteCardGap)
+                                      + WorldBuildingSpawnPaletteCardGap;
+            float scrollViewportH = Mathf.Min(scrollInnerHeight, availableHeight);
+            if (scrollViewportH <= 0f)
+                return;
+
+            viewRect.height = scrollViewportH;
+            float cardW = (innerW - (columnCount - 1) * WorldBuildingSpawnPaletteCardGap)
+                          / columnCount;
             float contentW = viewRect.width - scrollBarReserve;
             float contentH = Mathf.Max(scrollInnerHeight, viewRect.height);
             Rect contentRect = new Rect(0f, 0f, contentW, contentH);
 
             scroll = GUI.BeginScrollView(viewRect, scroll, contentRect, false, true);
-            for (int slot = 0; slot < totalCards; slot++)
+            int slot = 0;
+            for (int i = 0; i < totalCards; i++)
             {
-                int r = slot / WorldBuildingSpawnPaletteCols;
-                int c = slot % WorldBuildingSpawnPaletteCols;
+                WorldBuildingSpawnUiRow row = rows[i];
+                if (!WorldBuildingRowMatchesSearch(row, search))
+                    continue;
+
+                int r = slot / columnCount;
+                int c = slot % columnCount;
                 float cardX = c * (cardW + WorldBuildingSpawnPaletteCardGap);
                 float cardY = WorldBuildingSpawnPaletteCardGap + r * (WorldBuildingSpawnPaletteCardHeight + WorldBuildingSpawnPaletteCardGap);
                 Rect cardRect = new Rect(cardX, cardY, cardW, WorldBuildingSpawnPaletteCardHeight);
 
-                WorldBuildingSpawnUiRow row = rows[slot];
-                DrawSpawnPreviewCard(cardRect, row.DisplayName, row.SpawnId, row.Thumbnail);
+                DrawSpawnPreviewCard(cardRect, row);
+                slot++;
             }
 
             GUI.EndScrollView();
@@ -2031,11 +2669,26 @@ namespace SessionReview
             if (GUI.Button(new Rect(panelRect.x + pad, y, innerW, 32f * s), "Generate Object", worldBuildingButtonStyle))
                 GenerateObjectFromPrompt();
             GUI.enabled = true;
+            y += 38f * s;
 
             if (IsMeshyModelLoading())
             {
-                y += 38f * s;
                 GUI.Label(new Rect(panelRect.x + pad, y, innerW, WorldBuildingGenerateObjectsLoadingLabelHeight), "Loading...", worldBuildingBodyStyle);
+                y += WorldBuildingGenerateObjectsLoadingLabelHeight;
+            }
+
+            if (!string.IsNullOrEmpty(worldBuildingGenerateStatus))
+            {
+                worldBuildingGenerateStatusHeight =
+                    worldBuildingSubtitleStyle.CalcHeight(new GUIContent(worldBuildingGenerateStatus), innerW);
+                GUI.Label(
+                    new Rect(panelRect.x + pad, y, innerW, worldBuildingGenerateStatusHeight),
+                    worldBuildingGenerateStatus,
+                    worldBuildingSubtitleStyle);
+            }
+            else
+            {
+                worldBuildingGenerateStatusHeight = -1f;
             }
         }
 
@@ -2052,26 +2705,70 @@ namespace SessionReview
             string prompt = (aiGenerationPrompt ?? string.Empty).Trim();
             if (string.IsNullOrEmpty(prompt))
             {
-                Debug.LogWarning("[GenerateModel] Text field is empty — enter a description first.");
+                worldBuildingGenerateStatus = "Type a description first.";
+                Debug.LogWarning("[GenerateModel] Text field is empty —enter a description first.");
                 return;
             }
 
+            // 1) Reuse a prefab already in the palette when the prompt is describing one —
+            // instant, free, and it comes with the collider/setup the AI import lacks.
+            // Pressing Generate again on the same prompt overrides the match and generates.
+            bool forceGenerate = string.Equals(prompt, lastLibraryMatchPrompt, StringComparison.OrdinalIgnoreCase);
+            if (!forceGenerate && TrySpawnExistingLibraryMatch(prompt))
+                return;
+
+            lastLibraryMatchPrompt = null;
+
+            // 2) Reuse a model previously generated for this exact prompt.
             string localPath = MeshyGlbSceneImporter.GetSavedGlbPath(prompt);
-            if (File.Exists(localPath))
+            if (!forceGenerate && File.Exists(localPath))
             {
-                Debug.Log($"[GenerateModel] Saved GLB found — importing instead of generating: {localPath}");
+                worldBuildingGenerateStatus = $"Reusing the model generated earlier for \"{prompt}\".";
+                Debug.Log($"[GenerateModel] Saved GLB found —importing instead of generating: {localPath}");
                 StartImportSavedGlb(localPath, prompt);
                 return;
             }
 
             if (meshyGenerator == null)
             {
+                worldBuildingGenerateStatus = "Generator unavailable —check the console.";
                 Debug.LogError("[GenerateModel] No GenerateModel component found on SessionReviewManager GameObject.");
                 return;
             }
 
-            Debug.Log($"[GenerateModel] No saved GLB — calling Meshy for \"{prompt}\"");
+            // 3) Nothing to reuse —generate.
+            worldBuildingGenerateStatus = $"Generating \"{prompt}\"... this can take a minute.";
+            Debug.Log($"[GenerateModel] No library match and no saved GLB —calling Meshy for \"{prompt}\"");
             meshyGenerator.Generate(prompt);
+        }
+
+        /// <summary>
+        /// Places the palette prefab the prompt is asking for, if there is a confident match.
+        /// Returns false when the prompt describes something the library does not have.
+        /// </summary>
+        private bool TrySpawnExistingLibraryMatch(string prompt)
+        {
+            EnsureWorldBuildingSpawnLibraryCurrent();
+
+            WorldBuildingSpawnUiRow match = WorldBuildingSpawnLibrary.FindBestMatch(prompt);
+            if (match == null || string.IsNullOrEmpty(match.SpawnId))
+                return false;
+
+            if (runtimeEditorManager == null)
+                runtimeEditorManager = RuntimeEditorManager.Instance;
+
+            if (runtimeEditorManager == null)
+            {
+                Debug.LogWarning("[GenerateModel] Library match found but RuntimeEditorManager is missing —falling through to generation.");
+                return false;
+            }
+
+            SpawnWorldBuildingRow(match);
+            lastLibraryMatchPrompt = prompt;
+            worldBuildingGenerateStatus =
+                $"Added \"{match.DisplayName}\" from the library. Press Generate again to build a new model instead.";
+            Debug.Log($"[GenerateModel] Prompt \"{prompt}\" matched existing palette entry \"{match.DisplayName}\" —spawned instead of generating.");
+            return true;
         }
 
         private void OnMeshyGenerateComplete(GenerateModelResult result)
@@ -2081,22 +2778,27 @@ namespace SessionReview
 
             if (!result.Success)
             {
-                Debug.LogWarning($"[GenerateModel] Generation failed — not importing: {result.Error}");
+                worldBuildingGenerateStatus = $"Generation failed: {result.Error}";
+                Debug.LogWarning($"[GenerateModel] Generation failed —not importing: {result.Error}");
                 return;
             }
 
             if (!inWorldBuildingMode)
             {
-                Debug.LogWarning("[GenerateModel] Model ready but World Building is not active — GLB saved to disk only.");
+                Debug.LogWarning("[GenerateModel] Model ready but World Building is not active —GLB saved to disk only.");
                 return;
             }
 
             if (string.IsNullOrEmpty(result.LocalGlbPath) || !File.Exists(result.LocalGlbPath))
             {
+                worldBuildingGenerateStatus = "Generation finished but the model file is missing —check the console.";
                 Debug.LogError($"[GenerateModel] GLB missing after generation: {result.LocalGlbPath}");
                 return;
             }
 
+            worldBuildingGenerateStatus = $"Generated \"{result.Prompt}\" —placing it in the scene.";
+            WorldBuildingSpawnLibrary.RefreshFromResources(force: true);
+            EnsureWorldBuildingSpawnPrefabsConfigured();
             StartImportSavedGlb(result.LocalGlbPath, result.Prompt);
         }
 
@@ -2113,13 +2815,13 @@ namespace SessionReview
 
             if (runtimeEditorManager == null)
             {
-                Debug.LogError("[GenerateModel] RuntimeEditorManager not found — cannot spawn imported GLB.");
+                Debug.LogError("[GenerateModel] RuntimeEditorManager not found —cannot spawn imported GLB.");
                 return;
             }
 
             if (!runtimeEditorManager.isEditorActive)
             {
-                Debug.LogError("[GenerateModel] Editor mode is not active — enter World Building first.");
+                Debug.LogError("[GenerateModel] Editor mode is not active —enter World Building first.");
                 return;
             }
 
@@ -2141,7 +2843,10 @@ namespace SessionReview
         private float GetWorldBuildingSpawnCardPanelHeight(
             IReadOnlyList<WorldBuildingSpawnUiRow> rows,
             bool minimized,
-            float expandedHeaderHeight)
+            float expandedHeaderHeight,
+            float panelWidth,
+            string search,
+            bool includeSearchField)
         {
             if (minimized)
                 return WorldBuildingSidePanelHeaderHeight;
@@ -2151,18 +2856,29 @@ namespace SessionReview
                 return expandedHeaderHeight + WorldBuildingSidePanelEmptyBodyHeight;
 
             float s = WorldBuildingUiScale;
-            int rowCount = (totalCards + WorldBuildingSpawnPaletteCols - 1) / WorldBuildingSpawnPaletteCols;
+            float searchBlockHeight = includeSearchField ? WorldBuildingSpawnPaletteSearchBlockHeight : 0f;
+            float innerW = GetWorldBuildingSpawnPaletteContentWidth(panelWidth);
+            int columnCount = GetWorldBuildingSpawnPaletteColumnCount(innerW);
+            int visibleCards = CountWorldBuildingFilteredRows(rows, search);
+            if (visibleCards == 0)
+                return expandedHeaderHeight + searchBlockHeight + WorldBuildingSidePanelEmptyBodyHeight;
+
+            int rowCount = (visibleCards + columnCount - 1) / columnCount;
             float scrollAreaMin = WorldBuildingSpawnCardPanelMinScrollHeight;
             float scrollAreaMax = Mathf.Min(280f * s, ReviewUiScale.Height * 0.38f);
             float scrollInnerHeight = rowCount * (WorldBuildingSpawnPaletteCardHeight + WorldBuildingSpawnPaletteCardGap)
                                       + WorldBuildingSpawnPaletteCardGap;
             float scrollViewportH = Mathf.Clamp(scrollInnerHeight, scrollAreaMin, scrollAreaMax);
-            return expandedHeaderHeight + scrollViewportH + 16f * s;
+            return expandedHeaderHeight + searchBlockHeight + scrollViewportH + 16f * s;
         }
 
-        private static float GetWorldBuildingSpawnCardPanelMinimumExpandedHeight(float expandedHeaderHeight)
+        private static float GetWorldBuildingSpawnCardPanelMinimumExpandedHeight(
+            float expandedHeaderHeight,
+            bool includeSearchField)
         {
-            return expandedHeaderHeight + WorldBuildingSpawnCardPanelMinScrollHeight + 16f * WorldBuildingUiScale;
+            float searchBlockHeight = includeSearchField ? WorldBuildingSpawnPaletteSearchBlockHeight : 0f;
+            return expandedHeaderHeight + searchBlockHeight
+                   + WorldBuildingSpawnCardPanelMinScrollHeight + 16f * WorldBuildingUiScale;
         }
 
         private void EnsureWorldBuildingSpawnLibraryCurrent()
@@ -2182,17 +2898,33 @@ namespace SessionReview
             if (IsMeshyModelLoading())
                 bodyHeight += WorldBuildingGenerateObjectsLoadingLabelHeight;
 
+            if (!string.IsNullOrEmpty(worldBuildingGenerateStatus))
+            {
+                // Measured during the previous draw; fall back to two lines until then.
+                bodyHeight += worldBuildingGenerateStatusHeight > 0f
+                    ? worldBuildingGenerateStatusHeight + 6f * WorldBuildingUiScale
+                    : WorldBuildingGenerateObjectsLoadingLabelHeight * 2f;
+            }
+
             return WorldBuildingSidePanelHeaderHeight + bodyHeight + 12f * WorldBuildingUiScale;
         }
 
         private static float GetWorldBuildingSidePanelWidth()
         {
-            // Never let the palette take more than ~45% of a narrow window.
-            return Mathf.Min(WorldBuildingSidePanelWidth, ReviewUiScale.Width * 0.45f);
+            // Keep the docked palette compact when UI scale grows; it should reveal more rows,
+            // not become a huge side panel.
+            return Mathf.Min(WorldBuildingSidePanelWidth, WorldBuildingSidePanelMaxWidth, ReviewUiScale.Width * 0.42f);
         }
 
         private static Rect GetWorldBuildingOverlayRect()
         {
+            if (worldBuildingOverlayLayout.hasCustomPosition)
+            {
+                Vector2 pos = ClampWorldBuildingPanelPosition(worldBuildingOverlayLayout.position, WorldBuildingOverlayWidth);
+                worldBuildingOverlayLayout.position = pos;
+                return new Rect(pos.x, pos.y, WorldBuildingOverlayWidth, worldBuildingOverlayHeight);
+            }
+
             float margin = 24f * WorldBuildingUiScale;
             return new Rect(margin, margin, WorldBuildingOverlayWidth, worldBuildingOverlayHeight);
         }
@@ -2215,6 +2947,11 @@ namespace SessionReview
 
         public bool IsPointerOverWorldBuildingUi()
         {
+            // While the save modal is up it owns every click, so the editor underneath must
+            // not select/spawn/drag anything.
+            if (showWorldBuildingSavePrompt)
+                return true;
+
             return inWorldBuildingMode && IsMouseOverWorldBuildingUi();
         }
 
@@ -2223,62 +2960,162 @@ namespace SessionReview
             EnsureWorldBuildingSpawnLibraryCurrent();
 
             GetWorldBuildingSidePanelRects(
+                out Rect weatherRect,
                 out Rect generateRect,
                 out Rect charactersRect,
                 out Rect objectsRect);
 
-            return generateRect.Contains(guiPoint) ||
+            return weatherRect.Contains(guiPoint) ||
+                   generateRect.Contains(guiPoint) ||
                    charactersRect.Contains(guiPoint) ||
                    objectsRect.Contains(guiPoint);
         }
 
-        private void GetWorldBuildingSidePanelRects(out Rect generateRect, out Rect charactersRect, out Rect objectsRect)
+        private void GetWorldBuildingSidePanelRects(out Rect weatherRect, out Rect generateRect, out Rect charactersRect, out Rect objectsRect)
         {
             float panelWidth = GetWorldBuildingSidePanelWidth();
             IReadOnlyList<WorldBuildingSpawnUiRow> objectRows = WorldBuildingSpawnLibrary.LastObjectUiRows;
             IReadOnlyList<WorldBuildingSpawnUiRow> characterRows = WorldBuildingSpawnLibrary.LastCharacterUiRows;
+            float weatherWidth = GetWorldBuildingPanelWidth(worldBuildingWeatherPanelLayout, panelWidth);
+            float generateWidth = GetWorldBuildingPanelWidth(worldBuildingGeneratePanelLayout, panelWidth);
+            float charactersWidth = GetWorldBuildingPanelWidth(worldBuildingCharactersPanelLayout, panelWidth);
+            float objectsWidth = GetWorldBuildingPanelWidth(worldBuildingObjectsPanelLayout, panelWidth);
+            bool characterPanelShowsSearch = worldBuildingAddObjectsMinimized;
 
+            float weatherHeight = GetWorldBuildingWeatherPanelHeight();
             float generateHeight = GetWorldBuildingGenerateObjectsPanelHeight();
             float charactersHeight = GetWorldBuildingSpawnCardPanelHeight(
                 characterRows,
                 worldBuildingAddCharactersMinimized,
-                WorldBuildingSidePanelHeaderHeight);
+                WorldBuildingSidePanelHeaderHeight,
+                charactersWidth,
+                worldBuildingSpawnSearch,
+                characterPanelShowsSearch);
             float objectsHeight = GetWorldBuildingSpawnCardPanelHeight(
                 objectRows,
                 worldBuildingAddObjectsMinimized,
-                GetWorldBuildingAddObjectsHeaderHeight());
+                GetWorldBuildingAddObjectsHeaderHeight(),
+                objectsWidth,
+                worldBuildingSpawnSearch,
+                true);
+
+            // User resizes override the content-driven heights while expanded. The generate
+            // panel keeps its content height —its grip only changes width.
+            float maxPanelHeight = ReviewUiScale.Height - 16f;
+            if (!worldBuildingAddCharactersMinimized && worldBuildingCharactersPanelLayout.hasCustomSize)
+                charactersHeight = Mathf.Clamp(
+                    worldBuildingCharactersPanelLayout.size.y,
+                    GetWorldBuildingSpawnCardPanelMinimumExpandedHeight(WorldBuildingSidePanelHeaderHeight, characterPanelShowsSearch),
+                    maxPanelHeight);
+            if (!worldBuildingAddObjectsMinimized && worldBuildingObjectsPanelLayout.hasCustomSize)
+                objectsHeight = Mathf.Clamp(
+                    worldBuildingObjectsPanelLayout.size.y,
+                    GetWorldBuildingSpawnCardPanelMinimumExpandedHeight(GetWorldBuildingAddObjectsHeaderHeight(), true),
+                    maxPanelHeight);
+
+            // Dragged-away (floating) panels leave their docked stack; only docked panels
+            // share the stack height budget and overflow reduction. The Add Objects palette
+            // docks on the LEFT edge (the tool panels keep the right), so it budgets its
+            // height separately against the space below the docked overlay panel.
+            bool weatherFloating = worldBuildingWeatherPanelLayout.hasCustomPosition;
+            bool generateFloating = worldBuildingGeneratePanelLayout.hasCustomPosition;
+            bool charactersFloating = worldBuildingCharactersPanelLayout.hasCustomPosition;
+            bool objectsFloating = worldBuildingObjectsPanelLayout.hasCustomPosition;
 
             float maxStackHeight = Mathf.Max(
                 WorldBuildingSidePanelHeaderHeight,
                 ReviewUiScale.Height - WorldBuildingSidePanelMargin * 2f);
-            float stackHeight = generateHeight + charactersHeight + objectsHeight + WorldBuildingSidePanelGap * 2f;
+            int dockedCount = (weatherFloating ? 0 : 1) + (generateFloating ? 0 : 1)
+                              + (charactersFloating ? 0 : 1);
+            float stackHeight = (weatherFloating ? 0f : weatherHeight)
+                                + (generateFloating ? 0f : generateHeight)
+                                + (charactersFloating ? 0f : charactersHeight)
+                                + WorldBuildingSidePanelGap * Mathf.Max(0, dockedCount - 1);
             float overflow = Mathf.Max(0f, stackHeight - maxStackHeight);
-            ReducePanelHeightForOverflow(
-                ref objectsHeight,
-                worldBuildingAddObjectsMinimized,
-                GetWorldBuildingSpawnCardPanelMinimumExpandedHeight(GetWorldBuildingAddObjectsHeaderHeight()),
-                ref overflow);
-            ReducePanelHeightForOverflow(
-                ref charactersHeight,
-                worldBuildingAddCharactersMinimized,
-                GetWorldBuildingSpawnCardPanelMinimumExpandedHeight(WorldBuildingSidePanelHeaderHeight),
-                ref overflow);
-            ReducePanelHeightForOverflow(
-                ref generateHeight,
-                worldBuildingGenerateObjectsMinimized,
-                WorldBuildingSidePanelHeaderHeight,
-                ref overflow);
+            if (!charactersFloating)
+                ReducePanelHeightForOverflow(
+                    ref charactersHeight,
+                    worldBuildingAddCharactersMinimized,
+                    GetWorldBuildingSpawnCardPanelMinimumExpandedHeight(WorldBuildingSidePanelHeaderHeight, characterPanelShowsSearch),
+                    ref overflow);
+            if (!generateFloating)
+                ReducePanelHeightForOverflow(
+                    ref generateHeight,
+                    worldBuildingGenerateObjectsMinimized,
+                    WorldBuildingSidePanelHeaderHeight,
+                    ref overflow);
+            if (!weatherFloating)
+                ReducePanelHeightForOverflow(
+                    ref weatherHeight,
+                    worldBuildingWeatherMinimized,
+                    WorldBuildingSidePanelHeaderHeight,
+                    ref overflow);
 
-            float x = GetWorldBuildingSidePanelX(panelWidth);
+            if (!objectsFloating)
+            {
+                float leftTop = worldBuildingOverlayLayout.hasCustomPosition
+                    ? WorldBuildingSidePanelMargin
+                    : GetWorldBuildingOverlayRect().yMax + WorldBuildingSidePanelGap;
+                float maxObjectsHeight = Mathf.Max(
+                    WorldBuildingSidePanelHeaderHeight,
+                    ReviewUiScale.Height - WorldBuildingSidePanelMargin - leftTop);
+                float objectsOverflow = Mathf.Max(0f, objectsHeight - maxObjectsHeight);
+                ReducePanelHeightForOverflow(
+                    ref objectsHeight,
+                    worldBuildingAddObjectsMinimized,
+                    GetWorldBuildingSpawnCardPanelMinimumExpandedHeight(GetWorldBuildingAddObjectsHeaderHeight(), true),
+                    ref objectsOverflow);
+            }
+
             float yBottom = ReviewUiScale.Height - WorldBuildingSidePanelMargin;
+            weatherRect = PlaceWorldBuildingSidePanel(worldBuildingWeatherPanelLayout, weatherWidth, weatherHeight, ref yBottom);
+            generateRect = PlaceWorldBuildingSidePanel(worldBuildingGeneratePanelLayout, generateWidth, generateHeight, ref yBottom);
+            charactersRect = PlaceWorldBuildingSidePanel(worldBuildingCharactersPanelLayout, charactersWidth, charactersHeight, ref yBottom);
 
-            generateRect = new Rect(x, yBottom - generateHeight, panelWidth, generateHeight);
+            float leftYBottom = ReviewUiScale.Height - WorldBuildingSidePanelMargin;
+            objectsRect = PlaceWorldBuildingSidePanel(worldBuildingObjectsPanelLayout, objectsWidth, objectsHeight, ref leftYBottom, dockLeft: true);
+        }
 
-            yBottom = generateRect.y - WorldBuildingSidePanelGap;
-            charactersRect = new Rect(x, yBottom - charactersHeight, panelWidth, charactersHeight);
+        // Docked panels stack bottom-up along the right edge (left edge for dockLeft
+        // panels); floating panels sit wherever the user dragged them (clamped so the
+        // header always stays reachable).
+        private static Rect PlaceWorldBuildingSidePanel(
+            WorldBuildingPanelLayout layout,
+            float width,
+            float height,
+            ref float yBottom,
+            bool dockLeft = false)
+        {
+            if (layout.hasCustomPosition)
+            {
+                Vector2 pos = ClampWorldBuildingPanelPosition(layout.position, width);
+                layout.position = pos;
+                return new Rect(pos.x, pos.y, width, height);
+            }
 
-            yBottom = charactersRect.y - WorldBuildingSidePanelGap;
-            objectsRect = new Rect(x, yBottom - objectsHeight, panelWidth, objectsHeight);
+            float x = dockLeft ? WorldBuildingSidePanelMargin : GetWorldBuildingSidePanelX(width);
+            Rect rect = new Rect(x, yBottom - height, width, height);
+            yBottom = rect.y - WorldBuildingSidePanelGap;
+            return rect;
+        }
+
+        private static float GetWorldBuildingPanelWidth(WorldBuildingPanelLayout layout, float defaultWidth)
+        {
+            if (!layout.hasCustomSize)
+                return defaultWidth;
+
+            float maxWidth = Mathf.Min(WorldBuildingSidePanelCustomMaxWidth, ReviewUiScale.Width - 32f);
+            float minWidth = Mathf.Min(240f * WorldBuildingUiScale, defaultWidth, maxWidth);
+            return Mathf.Clamp(layout.size.x, minWidth, maxWidth);
+        }
+
+        private static Vector2 ClampWorldBuildingPanelPosition(Vector2 position, float panelWidth)
+        {
+            float s = WorldBuildingUiScale;
+            float minVisible = 100f * s;
+            position.x = Mathf.Clamp(position.x, minVisible - panelWidth, ReviewUiScale.Width - minVisible);
+            position.y = Mathf.Clamp(position.y, 0f, ReviewUiScale.Height - 40f * s);
+            return position;
         }
 
         private static float GetWorldBuildingSidePanelX(float panelWidth)
@@ -2301,27 +3138,224 @@ namespace SessionReview
             overflow -= reduction;
         }
 
-        private void DrawSpawnPreviewCard(Rect rect, string label, string spawnId, Texture2D thumbnail)
+        /// <summary>
+        /// Drag (header) / resize (corner grip) handling for a world-building panel. Call
+        /// before drawing the panel body so the grip's MouseDown wins over the scroll view.
+        /// Left-button drag on the header moves the panel (it becomes floating); dragging the
+        /// grip resizes it; double-clicking the header snaps it back to the default layout.
+        /// The grip sits in the top corner that actually moves as the panel grows —top-left
+        /// for right-docked panels, top-right (gripOnRight) for left-docked ones —so the
+        /// grip follows the cursor instead of sitting on a pinned edge.
+        /// </summary>
+        private static void HandleWorldBuildingPanelDragAndResize(
+            Rect panelRect,
+            WorldBuildingPanelLayout layout,
+            float dragHandleHeight,
+            bool allowResize,
+            bool gripOnRight = false)
         {
             float s = WorldBuildingUiScale;
+            int dragId = GUIUtility.GetControlID(FocusType.Passive);
+            int resizeId = GUIUtility.GetControlID(FocusType.Passive);
+            Event e = Event.current;
+
+            Rect gripRect = GetWorldBuildingPanelGripRect(panelRect, gripOnRight);
+
+            // Keep the minimize toggle (right of the header) and the grip clickable; with the
+            // grip on the right both reserves sit on the same side.
+            float toggleReserve = 48f * s;
+            float gripReserve = allowResize ? gripRect.width : 0f;
+            float leftReserve = gripOnRight ? 0f : gripReserve;
+            float rightReserve = toggleReserve + (gripOnRight ? gripReserve : 0f);
+            Rect dragRect = new Rect(
+                panelRect.x + leftReserve,
+                panelRect.y,
+                Mathf.Max(0f, panelRect.width - leftReserve - rightReserve),
+                Mathf.Min(dragHandleHeight, panelRect.height));
+
+            switch (e.type)
+            {
+                case EventType.MouseDown:
+                    if (e.button != 0)
+                        break;
+                    if (allowResize && gripRect.Contains(e.mousePosition))
+                    {
+                        GUIUtility.hotControl = resizeId;
+                        layout.resizeStartMouse = e.mousePosition;
+                        layout.resizeStartSize = new Vector2(panelRect.width, panelRect.height);
+                        layout.resizeStartPosition = new Vector2(panelRect.x, panelRect.y);
+                        e.Use();
+                    }
+                    else if (dragRect.Contains(e.mousePosition))
+                    {
+                        if (e.clickCount >= 2)
+                        {
+                            layout.hasCustomPosition = false;
+                            layout.hasCustomSize = false;
+                            e.Use();
+                        }
+                        else
+                        {
+                            GUIUtility.hotControl = dragId;
+                            layout.dragOffset = e.mousePosition - new Vector2(panelRect.x, panelRect.y);
+                            e.Use();
+                        }
+                    }
+                    break;
+
+                case EventType.MouseDrag:
+                    if (GUIUtility.hotControl == dragId)
+                    {
+                        layout.hasCustomPosition = true;
+                        layout.position = ClampWorldBuildingPanelPosition(e.mousePosition - layout.dragOffset, panelRect.width);
+                        e.Use();
+                    }
+                    else if (GUIUtility.hotControl == resizeId)
+                    {
+                        // Top-left grip: dragging up/left grows the panel. Top-right grip
+                        // (left-docked panels): dragging up/right grows it.
+                        Vector2 delta = e.mousePosition - layout.resizeStartMouse;
+                        layout.hasCustomSize = true;
+                        layout.size = gripOnRight
+                            ? new Vector2(layout.resizeStartSize.x + delta.x, layout.resizeStartSize.y - delta.y)
+                            : layout.resizeStartSize - delta;
+
+                        // A floating panel is anchored by its top-left corner, so that corner has
+                        // to travel with the cursor for the opposite corner to stay put. With the
+                        // grip on the right the left edge is the anchored one, so only y travels.
+                        // Docked panels are pinned to their edges by the layout pass already.
+                        if (layout.hasCustomPosition)
+                            layout.position = gripOnRight
+                                ? new Vector2(layout.resizeStartPosition.x, layout.resizeStartPosition.y + delta.y)
+                                : layout.resizeStartPosition + delta;
+                        e.Use();
+                    }
+                    break;
+
+                case EventType.MouseUp:
+                    if (GUIUtility.hotControl == dragId || GUIUtility.hotControl == resizeId)
+                    {
+                        GUIUtility.hotControl = 0;
+                        e.Use();
+                    }
+                    break;
+            }
+        }
+
+        // Single source of truth for the grip's hit area and its drawn position, so the two can't drift.
+        private static Rect GetWorldBuildingPanelGripRect(Rect panelRect, bool gripOnRight = false)
+        {
+            float gripSize = 18f * WorldBuildingUiScale;
+            float x = gripOnRight ? panelRect.xMax - gripSize : panelRect.x;
+            return new Rect(x, panelRect.y, gripSize, gripSize);
+        }
+
+        // Draw after the panel body so the grip stays visible on top of it.
+        private static void DrawWorldBuildingPanelGrip(Rect panelRect, bool allowResize, bool gripOnRight = false)
+        {
+            if (!allowResize || Event.current.type != EventType.Repaint)
+                return;
+
+            DrawWorldBuildingResizeGrip(GetWorldBuildingPanelGripRect(panelRect, gripOnRight), gripOnRight);
+        }
+
+        // Classic triangle-of-dots resize grip, right-angled into the panel's top corner so it
+        // points the way the panel grows. On the left the footprint stays inside 14 * s, which
+        // is where the header title starts, so the dots never collide with the title text.
+        private static void DrawWorldBuildingResizeGrip(Rect gripRect, bool gripOnRight)
+        {
+            float s = WorldBuildingUiScale;
+            float dot = 2f * s;
+            float step = 4f * s;
+            Color previous = GUI.color;
+            GUI.color = new Color(1f, 1f, 1f, 0.45f);
+            for (int i = 0; i < 3; i++)
+            {
+                for (int j = 0; j + i < 3; j++)
+                {
+                    float x = gripOnRight
+                        ? gripRect.xMax - 2.5f * s - i * step - dot
+                        : gripRect.x + 2.5f * s + i * step;
+                    float y = gripRect.y + 2.5f * s + j * step;
+                    GUI.DrawTexture(new Rect(x, y, dot, dot), Texture2D.whiteTexture);
+                }
+            }
+            GUI.color = previous;
+        }
+
+        private void DrawSpawnPreviewCard(Rect rect, WorldBuildingSpawnUiRow row)
+        {
+            if (row == null)
+                return;
+
+            float s = WorldBuildingPaletteMetricScale;
             GUI.Box(rect, "");
 
             float pad = 10f * s;
             float buttonHeight = 30f * s;
+            string displayName = string.IsNullOrEmpty(row.DisplayName) ? row.SpawnId : row.DisplayName;
+
+            // Character cards offer both spawn modes, so the name moves to a label and the
+            // button row splits into Static | Moving.
+            bool modeButtons = row.SupportsAgentModes && !row.IsImportedGlb;
+            float nameLabelHeight = modeButtons ? 20f * s : 0f;
+
             Rect previewRect = new Rect(
                 rect.x + pad,
                 rect.y + pad,
                 rect.width - pad * 2f,
-                rect.height - buttonHeight - pad * 3f);
-            DrawWorldBuildingSpawnThumbnail(previewRect, thumbnail);
+                rect.height - buttonHeight - nameLabelHeight - pad * 3f);
+            DrawWorldBuildingSpawnThumbnail(previewRect, row.Thumbnail);
 
-            if (GUI.Button(new Rect(rect.x + pad, rect.yMax - buttonHeight - pad, rect.width - pad * 2f, buttonHeight), $"Add {label}", worldBuildingButtonStyle))
+            if (!modeButtons)
             {
-                if (runtimeEditorManager == null)
-                    runtimeEditorManager = RuntimeEditorManager.Instance;
-                if (runtimeEditorManager != null && !string.IsNullOrEmpty(spawnId))
-                    runtimeEditorManager.SpawnObject(spawnId);
+                string buttonLabel = rect.width < 220f ? displayName : $"Add {displayName}";
+                if (GUI.Button(new Rect(rect.x + pad, rect.yMax - buttonHeight - pad, rect.width - pad * 2f, buttonHeight), buttonLabel, worldBuildingButtonStyle))
+                    SpawnWorldBuildingRow(row);
+                return;
             }
+
+            GUI.Label(
+                new Rect(rect.x + pad, rect.yMax - buttonHeight - nameLabelHeight - pad, rect.width - pad * 2f, nameLabelHeight),
+                displayName,
+                worldBuildingSubtitleStyle);
+
+            float buttonGap = 6f * s;
+            float halfWidth = (rect.width - pad * 2f - buttonGap) / 2f;
+            Rect staticRect = new Rect(rect.x + pad, rect.yMax - buttonHeight - pad, halfWidth, buttonHeight);
+            Rect walkingRect = new Rect(staticRect.xMax + buttonGap, staticRect.y, halfWidth, buttonHeight);
+            if (GUI.Button(staticRect, "Static", worldBuildingButtonStyle))
+                SpawnWorldBuildingRow(row, dynamicAgent: false);
+            if (GUI.Button(walkingRect, "Moving", worldBuildingButtonStyle))
+                SpawnWorldBuildingRow(row, dynamicAgent: true);
+        }
+
+        private void SpawnWorldBuildingRow(WorldBuildingSpawnUiRow row, bool? dynamicAgent = null)
+        {
+            if (row == null)
+                return;
+
+            if (runtimeEditorManager == null)
+                runtimeEditorManager = RuntimeEditorManager.Instance;
+
+            if (row.IsImportedGlb)
+            {
+                if (!File.Exists(row.ImportGlbPath))
+                {
+                    worldBuildingGenerateStatus = $"Generated model file missing: {row.DisplayName}";
+                    Debug.LogWarning($"[WorldBuilding] Meshy GLB missing for palette row '{row.DisplayName}': {row.ImportGlbPath}");
+                    WorldBuildingSpawnLibrary.RefreshFromResources(force: true);
+                    EnsureWorldBuildingSpawnPrefabsConfigured();
+                    return;
+                }
+
+                worldBuildingGenerateStatus = $"Adding generated model \"{row.DisplayName}\".";
+                StartImportSavedGlb(row.ImportGlbPath, row.DisplayName);
+                return;
+            }
+
+            if (runtimeEditorManager != null && !string.IsNullOrEmpty(row.SpawnId))
+                runtimeEditorManager.SpawnObject(row.SpawnId, dynamicAgent);
         }
 
         private static void DrawWorldBuildingSpawnThumbnail(Rect rect, Texture2D thumbnail)
@@ -2372,7 +3406,7 @@ namespace SessionReview
 
             GUI.Label(new Rect(x, y, w, 24f),
                 trialStartReady
-                    ? "Robot, PWD, and cameras are loaded. Start when you are ready."
+                    ? "Robot, human, and cameras are loaded. Start when you are ready."
                     : "Preparing robot, pedestrians, and camera view...");
             y += 40f;
 
@@ -2384,7 +3418,7 @@ namespace SessionReview
             {
                 SetPlayerMode(OnboardingPlayerMode.Robot);
             }
-            if (DrawChipButton(new Rect(x + 182f, y, 172f, 34f), "Human (PWD)",
+            if (DrawChipButton(new Rect(x + 182f, y, 172f, 34f), "Human",
                 selectedPlayerMode == OnboardingPlayerMode.Human))
             {
                 SetPlayerMode(OnboardingPlayerMode.Human);
@@ -2393,7 +3427,7 @@ namespace SessionReview
 
             // Manual / Auto per role, independent of who the human plays.
             GUI.Label(new Rect(x, y, 230f, 26f), "Robot Control", onboardingSectionStyle);
-            GUI.Label(new Rect(x + 254f, y, 230f, 26f), "PWD Control", onboardingSectionStyle);
+            GUI.Label(new Rect(x + 254f, y, 230f, 26f), "Human Control", onboardingSectionStyle);
             y += 32f;
             if (DrawChipButton(new Rect(x, y, 110f, 34f), "Manual",
                 selectedRobotStartupControl == StartupControlMode.Manual))
@@ -2436,7 +3470,9 @@ namespace SessionReview
 
             GUI.enabled = trialStartReady || bypassRosBackendForTrialStart;
             if (GUI.Button(new Rect(x, y, w, 34f),
-                trialStartReady ? $"Start Trial [{startTrialKey}]" : "Loading..."))
+                trialStartReady
+                    ? $"Start Trial [{startTrialKey}{(SEAN.Input.JoystickProfiles.GamepadActive ? " / Y" : "")}]"
+                    : "Loading..."))
             {
                 StartTrialFromPrompt();
             }
@@ -2563,6 +3599,46 @@ namespace SessionReview
             inWorldBuildingMode = true;
 
             CaptureWorldBuildingTaskMarkerBaseline();
+            ShowTaskStartMarkersForWorldBuilding();
+        }
+
+        // Start markers are deactivated on every scene load (Tasks.Base.initStartAndGoal) so
+        // participants never see them mid-trial. World building re-activates them: the start
+        // FLAG is the reliable thing to drag —the robot body usually is not on its start
+        // point when world building opens after a run. Exit re-hides exactly the markers this
+        // activated, so a scene that authors its own always-on marker is left alone.
+        private readonly List<GameObject> worldBuildingShownStartMarkers = new List<GameObject>();
+
+        private void ShowTaskStartMarkersForWorldBuilding()
+        {
+            worldBuildingShownStartMarkers.Clear();
+
+            var sean = SEAN.SEAN.instance;
+            if (sean == null)
+                return;
+            SEAN.Tasks.Base task;
+            try { task = sean.robotTask; }
+            catch (Exception) { return; }
+            if (task == null)
+                return;
+
+            foreach (GameObject marker in new[] { task.robotStart, task.playerStart })
+            {
+                if (marker == null || marker.activeSelf)
+                    continue;
+                marker.SetActive(true);
+                worldBuildingShownStartMarkers.Add(marker);
+            }
+        }
+
+        private void HideTaskStartMarkersAfterWorldBuilding()
+        {
+            foreach (GameObject marker in worldBuildingShownStartMarkers)
+            {
+                if (marker != null)
+                    marker.SetActive(false);
+            }
+            worldBuildingShownStartMarkers.Clear();
         }
 
         // Poses captured when world building opens, so exit can detect a user-moved robot
@@ -2572,6 +3648,9 @@ namespace SessionReview
         private Quaternion worldBuildingRobotGoalBaselineRotation;
         private Vector3 worldBuildingRobotBaseLinkBaselinePosition;
         private Quaternion worldBuildingRobotBaseLinkBaselineRotation;
+        private bool hasWorldBuildingRobotStartBaseline;
+        private Vector3 worldBuildingRobotStartBaselinePosition;
+        private Quaternion worldBuildingRobotStartBaselineRotation;
 
         private void CaptureWorldBuildingTaskMarkerBaseline()
         {
@@ -2594,6 +3673,13 @@ namespace SessionReview
             {
                 worldBuildingRobotBaseLinkBaselinePosition = sean.robot.base_link.transform.position;
                 worldBuildingRobotBaseLinkBaselineRotation = sean.robot.base_link.transform.rotation;
+            }
+
+            hasWorldBuildingRobotStartBaseline = task.robotStart != null;
+            if (hasWorldBuildingRobotStartBaseline)
+            {
+                worldBuildingRobotStartBaselinePosition = task.robotStart.transform.position;
+                worldBuildingRobotStartBaselineRotation = task.robotStart.transform.rotation;
             }
 
             hasWorldBuildingTaskMarkerBaseline = true;
@@ -2643,6 +3729,19 @@ namespace SessionReview
                     Debug.Log($"[SessionReview] World building moved the robot to {baseLink.position}; RobotStartLocation updated to match.");
                 }
             }
+
+            // Checked AFTER the robot body: when both were dragged, the start FLAG wins —it is
+            // the explicit "start here" statement, while the robot may simply sit where the last
+            // run left it (usually nowhere near its start point).
+            if (hasWorldBuildingRobotStartBaseline && task.robotStart != null && custom.RobotStartLocation != null)
+            {
+                Transform start = task.robotStart.transform;
+                if (HasWorldBuildingPoseChanged(worldBuildingRobotStartBaselinePosition, worldBuildingRobotStartBaselineRotation, start))
+                {
+                    custom.RobotStartLocation.transform.SetPositionAndRotation(start.position, start.rotation);
+                    Debug.Log($"[SessionReview] World building moved the start flag to {start.position}; RobotStartLocation updated so the next run starts there.");
+                }
+            }
         }
 
         private static bool HasWorldBuildingPoseChanged(Vector3 basePosition, Quaternion baseRotation, Transform current)
@@ -2654,6 +3753,11 @@ namespace SessionReview
         private void ExitWorldBuildingMode(bool restoreGameplayCameras = false)
         {
             SyncMovedRobotMarkersIntoTask();
+            // A dragged pedestrian start/goal marker must reach the LIVE spawned PWD too —
+            // its waypoints were baked from the markers at spawn time. No teleport here:
+            // only the goal/anchor updates while the participant keeps driving.
+            WorldBuildingScenarioRestorer.SyncPwdSpawnerWaypoints(teleportToStart: false);
+            HideTaskStartMarkersAfterWorldBuilding();
             inWorldBuildingMode = false;
 
             if (runtimeEditorManager != null)
@@ -2740,6 +3844,26 @@ namespace SessionReview
             var manualWheelchair = FindPwdPlayerControllerIncludingInactive();
             if (manualWheelchair != null)
                 manualWheelchair.ResetToSpawn();
+        }
+
+        /// <summary>
+        /// After the "You play: Robot/Human" role is chosen, tell the PWD's RandomAvatar to
+        /// re-select its route (primary vs robot-trial start/end), reposition the pedestrian, and
+        /// hide/show the pedestrian markers. The PWD spawned in Awake before the role existed, so
+        /// this trial-start pass is what actually makes switching the role change the pedestrian.
+        /// </summary>
+        private void ApplyPwdTrialRoute()
+        {
+            bool robotTrial = selectedPlayerMode == OnboardingPlayerMode.Robot;
+            foreach (var ra in FindObjectsOfType<SEAN.Scenario.Agents.RandomAvatar>(true))
+            {
+                if (ra != null && ra.isPwdPlayer)
+                {
+                    ra.ApplyTrialRoute(robotTrial);
+                    return;
+                }
+            }
+            Debug.LogWarning("[PWD] ApplyPwdTrialRoute: no isPwdPlayer RandomAvatar found to apply the trial route.");
         }
 
         private static IVI.ManualWheelchairController FindPwdPlayerControllerIncludingInactive()
@@ -2900,7 +4024,8 @@ namespace SessionReview
         }
 
         /// <summary>
-        /// Sync spawn list from Resources/WorldBuildingSpawns so RuntimeEditorManager and IMGUI palette stay aligned.
+        /// Sync prefab-backed spawns from Resources/WorldBuildingSpawns. Meshy GLB rows stay in
+        /// the IMGUI palette and import through StartImportSavedGlb instead of this prefab list.
         /// </summary>
         private void EnsureWorldBuildingSpawnPrefabsConfigured()
         {
@@ -2911,7 +4036,10 @@ namespace SessionReview
             IReadOnlyList<SpawnableObject> built = WorldBuildingSpawnLibrary.LastSpawnables;
             if (built == null || built.Count == 0)
             {
-                Debug.LogWarning("[SessionReview] World building: no prefabs with UI thumbnails (pair WorldBuildingSpawns prefabs + WorldBuildingUI textures).");
+                IReadOnlyList<WorldBuildingSpawnUiRow> uiRows = WorldBuildingSpawnLibrary.LastUiRows;
+                if (uiRows == null || uiRows.Count == 0)
+                    Debug.LogWarning("[SessionReview] World building: no spawn entries found (pair WorldBuildingSpawns prefabs + WorldBuildingUI textures, or generate Meshy GLBs first).");
+
                 if (runtimeEditorManager.spawnableObjects == null)
                     runtimeEditorManager.spawnableObjects = new List<SpawnableObject>();
                 else
@@ -2944,6 +4072,7 @@ namespace SessionReview
                 runtimeEditorManager = runtimeEditorObject.AddComponent<RuntimeEditorManager>();
             }
 
+            RuntimeEditorManager.DisableStrayEditorComponents(runtimeEditorManager.gameObject);
             if (!runtimeEditorManager.gameObject.activeInHierarchy)
                 runtimeEditorManager.gameObject.SetActive(true);
 
@@ -3315,6 +4444,9 @@ namespace SessionReview
 
             EnableRobotCam(sean.robot.camera_first, "camera_first");
             EnableRobotCam(sean.robot.camera_third, "camera_third");
+            // Optional rear-view mini (Robot.Start creates it); no warning if absent.
+            if (sean.robot.camera_rear != null)
+                EnableRobotCam(sean.robot.camera_rear, "camera_rear");
         }
 
         private void DestroyLegacyStandaloneMainCamera()
@@ -3441,6 +4573,7 @@ namespace SessionReview
                 onboardingSavedTimeScale = Time.timeScale;
                 onboardingPausedTime = false;
                 bypassRosBackendForTrialStart = false;
+                RefreshSavedScenarios();
                 RefreshOnboardingWarmupState();
             }
             else if (onboardingPausedTime)
@@ -3470,11 +4603,35 @@ namespace SessionReview
             float y = panelRect.y + 30f;
             float innerWidth = panelRect.width - 72f;
 
-            GUI.Label(new Rect(x, y, innerWidth, 42f), "Session Onboarding", onboardingTitleStyle);
+            // Session ID sits in the header's top-right corner, out of the scroll view, so
+            // the scrollable content starts with the actual session choices.
+            float sessionIdWidth = Mathf.Clamp(innerWidth * 0.32f, 200f, 320f);
+            float sessionIdX = panelRect.x + panelRect.width - 36f - sessionIdWidth;
+            float headerTextWidth = Mathf.Max(200f, sessionIdX - x - 24f);
+
+            GUI.Label(new Rect(x, y, headerTextWidth, 42f), "Session Onboarding", onboardingTitleStyle);
+
+            if (onboardingTextFieldStyle == null)
+            {
+                onboardingTextFieldStyle = new GUIStyle(GUI.skin.textField)
+                {
+                    fontSize = 18,
+                    alignment = TextAnchor.MiddleLeft,
+                    padding = new RectOffset(12, 12, 8, 8)
+                };
+            }
+
+            GUI.Label(new Rect(sessionIdX, y - 2f, sessionIdWidth, 28f), "Session ID", onboardingSectionStyle);
+            sessionIdInput = GUI.TextField(new Rect(sessionIdX, y + 28f, sessionIdWidth, 44f),
+                sessionIdInput ?? string.Empty, 64, onboardingTextFieldStyle);
+            GUI.Label(new Rect(sessionIdX, y + 74f, sessionIdWidth, 22f),
+                "Saved into each trial's log.",
+                onboardingHintStyle);
+
             y += 50f;
 
-            GUI.Label(new Rect(x, y, innerWidth, 56f),
-                "Choose who is playing, pick the PWD player character when human control is enabled, and select the session scene to launch.",
+            GUI.Label(new Rect(x, y, headerTextWidth, 56f),
+                "Choose who is playing, pick the player character when human control is enabled, and select the session scene to launch.",
                 onboardingBodyStyle);
             y += 72f;
             var sceneChange = FindObjectOfType<SceneChange>();
@@ -3523,36 +4680,56 @@ namespace SessionReview
             }
         }
 
-        private const float CharacterCardWidth = 220f;
+        private const float CharacterCardMaxWidth = 220f;
+        // Below this a card is too narrow to read, so the grid wraps instead of shrinking further.
+        private const float CharacterCardMinWidth = 140f;
         private const float CharacterCardHeight = 196f;
         private const float CharacterCardGapX = 16f;
         private const float CharacterCardGapY = 12f;
 
-        private static int GetCharacterCardsPerRow(float width)
+        private static int GetCharacterCardCount()
         {
-            return Mathf.Max(1, Mathf.FloorToInt((width + CharacterCardGapX) / (CharacterCardWidth + CharacterCardGapX)));
+            return 2 + PlayerCharacterLibrary.OptionsWithPreview.Count; // wheelchair male/female + library entries with preview art
+        }
+
+        /// <summary>
+        /// Player characters are meant to be compared side by side, so they share one row and
+        /// the cards shrink to fit; only a library too wide even at the minimum width wraps.
+        /// </summary>
+        private static void GetCharacterGridLayout(float width, out int cardsPerRow, out float cardWidth)
+        {
+            int count = Mathf.Max(1, GetCharacterCardCount());
+
+            float oneRowWidth = (width - CharacterCardGapX * (count - 1)) / count;
+            if (oneRowWidth >= CharacterCardMinWidth)
+            {
+                cardsPerRow = count;
+                cardWidth = Mathf.Min(CharacterCardMaxWidth, oneRowWidth);
+                return;
+            }
+
+            cardWidth = CharacterCardMinWidth;
+            cardsPerRow = Mathf.Max(1, Mathf.FloorToInt((width + CharacterCardGapX) / (cardWidth + CharacterCardGapX)));
         }
 
         // Height of the wheelchair + walking-character card grid. Must stay in lockstep
         // with the grid drawn in DrawOnboardingContent or the scroll view clips.
         private float GetCharacterGridHeight(float width)
         {
-            int cardCount = 2 + PlayerCharacterLibrary.Options.Count;
-            int rows = Mathf.CeilToInt(cardCount / (float)GetCharacterCardsPerRow(width));
+            GetCharacterGridLayout(width, out int cardsPerRow, out _);
+            int rows = Mathf.CeilToInt(GetCharacterCardCount() / (float)cardsPerRow);
             return rows * (CharacterCardHeight + CharacterCardGapY) - CharacterCardGapY;
         }
 
         private float GetOnboardingContentHeight(float width, SceneChange sceneChange)
         {
-            float height = 0f;
-            height += 42f + 64f;       // Session ID row
-            height += 42f + 46f + 20f;
+            bool pickingCharacter = selectedPwdStartupControl == StartupControlMode.Manual;
 
-            if (selectedPwdStartupControl == StartupControlMode.Manual)
-            {
+            float height = 0f;
+            height += 42f + 46f + 20f; // "Who Is Playing?" row (Session ID lives in the header)
+
+            if (pickingCharacter)
                 height += 42f + GetCharacterGridHeight(width) + 18f;
-                height += 42f + 150f + 22f;
-            }
 
             height += 40f;
 
@@ -3562,7 +4739,66 @@ namespace SessionReview
                 : 160f;
 
             height += 30f + sceneHeight;
+
+            height += 12f + 30f + 34f + GetScenarioGridHeight(width, GetVisibleScenarioIndices(sceneChange).Count);
+
+            if (pickingCharacter)
+                height += 24f + 42f + 150f + 22f; // preview-only characters, last
+
             return height + 8f;
+        }
+
+        private static int GetScenarioCardsPerRow(float width)
+        {
+            return Mathf.Max(1, Mathf.FloorToInt((width + ScenarioCardGapX) / (ScenarioCardWidth + ScenarioCardGapX)));
+        }
+
+        /// <summary>
+        /// Indices into <see cref="savedScenarios"/> of the worlds built on the scene picked
+        /// above: a saved world is a variant of its base scene, so showing worlds from other
+        /// scenes here would offer a pick that silently changes the scene selection. Rebuilt
+        /// every frame into the same list; the height pass and the draw pass must see the same
+        /// set or the scroll view clips.
+        /// </summary>
+        private List<int> GetVisibleScenarioIndices(SceneChange sceneChange)
+        {
+            visibleScenarioIndices.Clear();
+            if (savedScenarios.Count == 0)
+                return visibleScenarioIndices;
+
+            string sceneName = null;
+            if (sceneChange != null && sceneChange.SceneCount > 0)
+                sceneName = sceneChange.SceneNames[Mathf.Clamp(selectedSceneIndex, 0, sceneChange.SceneCount - 1)];
+
+            for (int i = 0; i < savedScenarios.Count; i++)
+            {
+                WorldBuildingScenarioInfo info = savedScenarios[i];
+                if (info == null)
+                    continue;
+
+                // No scene list to compare against: show everything rather than nothing.
+                if (sceneName != null &&
+                    !string.Equals(info.SceneName, sceneName, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                visibleScenarioIndices.Add(i);
+            }
+
+            // A card that scrolled out of view must not stay selected behind the operator's back.
+            if (selectedScenarioIndex >= 0 && !visibleScenarioIndices.Contains(selectedScenarioIndex))
+                selectedScenarioIndex = -1;
+
+            return visibleScenarioIndices;
+        }
+
+        // Height of the saved-scenario card grid. Must stay in lockstep with the grid
+        // drawn in DrawOnboardingContent or the scroll view clips.
+        private float GetScenarioGridHeight(float width, int cardCount)
+        {
+            if (cardCount == 0)
+                return 0f;
+            int rows = Mathf.CeilToInt(cardCount / (float)GetScenarioCardsPerRow(width));
+            return rows * (ScenarioCardHeight + ScenarioCardGapY) - ScenarioCardGapY;
         }
 
         private void DrawOnboardingContent(float width, SceneChange sceneChange)
@@ -3570,40 +4806,21 @@ namespace SessionReview
             float x = 0f;
             float y = 0f;
 
-            GUI.Label(new Rect(x, y, 260f, 30f), "Session ID", onboardingSectionStyle);
-            y += 42f;
-
-            if (onboardingTextFieldStyle == null)
-            {
-                onboardingTextFieldStyle = new GUIStyle(GUI.skin.textField)
-                {
-                    fontSize = 18,
-                    alignment = TextAnchor.MiddleLeft,
-                    padding = new RectOffset(12, 12, 8, 8)
-                };
-            }
-
-            sessionIdInput = GUI.TextField(new Rect(x, y, 340f, 44f), sessionIdInput ?? string.Empty, 64, onboardingTextFieldStyle);
-            GUI.Label(new Rect(x + 356f, y + 6f, width - 356f, 32f),
-                "Kept from the previous session until you change it. Saved into each trial's log.",
-                onboardingHintStyle);
-            y += 64f;
-
             GUI.Label(new Rect(x, y, 260f, 30f), "Who Is Playing?", onboardingSectionStyle);
             y += 42f;
 
-            if (DrawChipButton(new Rect(x, y, 180f, 46f), "Robot", selectedPlayerMode == OnboardingPlayerMode.Robot))
-                ApplyRecommendedStartupControlsForPlayerMode(OnboardingPlayerMode.Robot);
-            if (DrawChipButton(new Rect(x + 196f, y, 180f, 46f), "Human", selectedPlayerMode == OnboardingPlayerMode.Human))
+            if (DrawChipButton(new Rect(x, y, 180f, 46f), "Human", selectedPlayerMode == OnboardingPlayerMode.Human))
                 ApplyRecommendedStartupControlsForPlayerMode(OnboardingPlayerMode.Human);
+            if (DrawChipButton(new Rect(x + 196f, y, 180f, 46f), "Robot", selectedPlayerMode == OnboardingPlayerMode.Robot))
+                ApplyRecommendedStartupControlsForPlayerMode(OnboardingPlayerMode.Robot);
             y += 66f;
 
             if (selectedPwdStartupControl == StartupControlMode.Manual)
             {
-                GUI.Label(new Rect(x, y, width, 30f), "PWD Player Character", onboardingSectionStyle);
+                GUI.Label(new Rect(x, y, width, 30f), "Player Character", onboardingSectionStyle);
                 y += 42f;
 
-                int cardsPerRow = GetCharacterCardsPerRow(width);
+                GetCharacterGridLayout(width, out int cardsPerRow, out float cardWidth);
                 int cardIndex = 0;
 
                 Rect NextCardRect()
@@ -3611,9 +4828,9 @@ namespace SessionReview
                     int col = cardIndex % cardsPerRow;
                     int row = cardIndex / cardsPerRow;
                     cardIndex++;
-                    return new Rect(x + col * (CharacterCardWidth + CharacterCardGapX),
+                    return new Rect(x + col * (cardWidth + CharacterCardGapX),
                                     y + row * (CharacterCardHeight + CharacterCardGapY),
-                                    CharacterCardWidth, CharacterCardHeight);
+                                    cardWidth, CharacterCardHeight);
                 }
 
                 bool wheelchairSelected = string.IsNullOrEmpty(selectedPlayerCharacterId);
@@ -3634,7 +4851,7 @@ namespace SessionReview
                         selectedPwdGender = SEAN.Scenario.Agents.PwdGender.Female;
                     });
 
-                foreach (var option in PlayerCharacterLibrary.Options)
+                foreach (var option in PlayerCharacterLibrary.OptionsWithPreview)
                 {
                     if (option == null) continue;
                     string optionId = option.Id;
@@ -3644,7 +4861,59 @@ namespace SessionReview
                 }
 
                 y += GetCharacterGridHeight(width) + 18f;
+            }
 
+            GUI.Label(new Rect(x, y, width, 30f), "Session To Play", onboardingSectionStyle);
+            y += 40f;
+
+            int sceneCount = sceneChange != null ? sceneChange.SceneCount : 0;
+            float sceneHeight = sceneCount > 0
+                ? Mathf.Max(160f, sceneCount * 48f + 8f)
+                : 160f;
+            DrawSceneSelection(new Rect(x, y, width, sceneHeight));
+            y += sceneHeight;
+
+            // Saved worlds belong to the scene above, so they sit directly under it and only
+            // the ones built on the picked scene are listed.
+            y += 12f;
+            GUI.Label(new Rect(x, y, width - 210f, 30f), "Saved World Building Scenes (optional)", onboardingSectionStyle);
+            // Default lists only this session's saved worlds; toggle on to browse every session.
+            if (DrawChipButton(new Rect(x + width - 200f, y - 2f, 200f, 32f), "Show all sessions", showAllSessionScenarios))
+            {
+                showAllSessionScenarios = !showAllSessionScenarios;
+                RefreshSavedScenarios();
+            }
+            y += 30f;
+
+            // Computed after the toggle so a scope change this frame indexes the fresh list,
+            // never a stale (possibly longer) one.
+            List<int> visible = GetVisibleScenarioIndices(sceneChange);
+            GUI.Label(new Rect(x, y, width, 26f),
+                visible.Count > 0
+                    ? "Worlds you built on the scene above. Pick one to rebuild it; leave unselected to start that scene clean."
+                    : "No saved worlds for the scene above yet —build one in World Building and save it to see it here.",
+                onboardingHintStyle);
+            y += 34f;
+
+            int perRow = GetScenarioCardsPerRow(width);
+            for (int slot = 0; slot < visible.Count; slot++)
+            {
+                int index = visible[slot];
+                int col = slot % perRow;
+                int row = slot / perRow;
+                Rect cardRect = new Rect(
+                    x + col * (ScenarioCardWidth + ScenarioCardGapX),
+                    y + row * (ScenarioCardHeight + ScenarioCardGapY),
+                    ScenarioCardWidth, ScenarioCardHeight);
+                DrawScenarioCard(cardRect, savedScenarios[index], index);
+            }
+
+            y += GetScenarioGridHeight(width, visible.Count);
+
+            // Preview-only characters: nothing here is selectable, so it goes last.
+            if (selectedPwdStartupControl == StartupControlMode.Manual)
+            {
+                y += 24f;
                 GUI.Label(new Rect(x, y, width, 30f), "Other Community-Informed Characters", onboardingSectionStyle);
                 y += 42f;
 
@@ -3656,15 +4925,70 @@ namespace SessionReview
                     "Additional characters coming soon.");
                 y += 172f;
             }
+        }
 
-            GUI.Label(new Rect(x, y, width, 30f), "Session To Play", onboardingSectionStyle);
-            y += 40f;
+        private void DrawScenarioCard(Rect rect, WorldBuildingScenarioInfo info, int index)
+        {
+            bool active = index == selectedScenarioIndex;
+            GUI.Box(rect, GUIContent.none, active ? onboardingSceneActiveButtonStyle : onboardingSceneButtonStyle);
 
-            int sceneCount = sceneChange != null ? sceneChange.SceneCount : 0;
-            float sceneHeight = sceneCount > 0
-                ? Mathf.Max(160f, sceneCount * 48f + 8f)
-                : 160f;
-            DrawSceneSelection(new Rect(x, y, width, sceneHeight));
+            Rect imageRect = new Rect(rect.x + 10f, rect.y + 10f, rect.width - 20f, rect.height - 76f);
+            if (info.Thumbnail != null)
+                GUI.DrawTexture(imageRect, info.Thumbnail, ScaleMode.ScaleToFit, true);
+            else
+                GUI.Label(imageRect, "(no snapshot)", onboardingHintStyle);
+
+            GUI.Label(new Rect(rect.x + 10f, rect.yMax - 60f, rect.width - 20f, 24f), info.Name, onboardingPreviewLabelStyle);
+            string owner = string.Equals(info.SessionId ?? string.Empty, ParticipantSession.Id ?? string.Empty, StringComparison.Ordinal)
+                ? string.Empty
+                : $" · session {(string.IsNullOrEmpty(info.SessionId) ? "unassigned" : info.SessionId)}";
+            GUI.Label(new Rect(rect.x + 10f, rect.yMax - 34f, rect.width - 20f, 24f),
+                $"{info.SceneName} · {info.ObjectCount} change(s){owner}", onboardingHintStyle);
+
+            if (GUI.Button(rect, GUIContent.none, GUIStyle.none))
+            {
+                if (active)
+                {
+                    // Toggle back to the default: preset scene without the saved world.
+                    selectedScenarioIndex = -1;
+                }
+                else
+                {
+                    selectedScenarioIndex = index;
+                    // Keep the preset list in sync so the warmup/target scene matches the card.
+                    int sceneIdx = IndexOfSceneName(FindObjectOfType<SceneChange>(), info.SceneName);
+                    if (sceneIdx >= 0 && sceneIdx != selectedSceneIndex)
+                    {
+                        selectedSceneIndex = sceneIdx;
+                        RefreshOnboardingWarmupState();
+                    }
+                }
+            }
+        }
+
+        private static int IndexOfSceneName(SceneChange sceneChange, string sceneName)
+        {
+            if (sceneChange == null || string.IsNullOrEmpty(sceneName))
+                return -1;
+            for (int i = 0; i < sceneChange.SceneCount; i++)
+            {
+                if (string.Equals(sceneChange.SceneNames[i], sceneName, StringComparison.OrdinalIgnoreCase))
+                    return i;
+            }
+            return -1;
+        }
+
+        private void RefreshSavedScenarios()
+        {
+            foreach (WorldBuildingScenarioInfo old in savedScenarios)
+            {
+                if (old?.Thumbnail != null)
+                    Destroy(old.Thumbnail);
+            }
+
+            savedScenarios = WorldBuildingScenarioStore.ListScenarios(showAllSessionScenarios);
+            if (selectedScenarioIndex >= savedScenarios.Count)
+                selectedScenarioIndex = -1;
         }
 
         private void DrawSceneSelection(Rect rect)
@@ -3682,17 +5006,23 @@ namespace SessionReview
             if (selectedSceneIndex < 0 || selectedSceneIndex >= sceneChange.SceneCount)
                 selectedSceneIndex = sceneChange.CurrentSceneIndex;
 
+            // Display order is shuffled per session id (same id -> same order); the
+            // stored selection is still a real scene index, so play logic is untouched.
+            int[] displayOrder = SessionSceneOrder.Permutation(sessionIdInput, sceneChange.SceneCount);
+
             float totalHeight = sceneChange.SceneCount * 48f;
             if (totalHeight <= rect.height)
             {
-                for (int i = 0; i < sceneChange.SceneCount; i++)
+                for (int pos = 0; pos < displayOrder.Length; pos++)
                 {
-                    Rect rowRect = new Rect(rect.x, rect.y + i * 48f, rect.width, 40f);
-                    bool isActive = i == selectedSceneIndex;
-                    string label = $"{i + 1}. {sceneChange.SceneNames[i]}";
+                    int sceneIdx = displayOrder[pos];
+                    Rect rowRect = new Rect(rect.x, rect.y + pos * 48f, rect.width, 40f);
+                    bool isActive = sceneIdx == selectedSceneIndex;
+                    string label = $"{pos + 1}. {sceneChange.SceneNames[sceneIdx]}";
                     if (GUI.Button(rowRect, label, isActive ? onboardingSceneActiveButtonStyle : onboardingSceneButtonStyle))
                     {
-                        selectedSceneIndex = i;
+                        selectedSceneIndex = sceneIdx;
+                        selectedScenarioIndex = -1;
                         RefreshOnboardingWarmupState();
                     }
                 }
@@ -3703,14 +5033,16 @@ namespace SessionReview
             Rect viewRect = new Rect(0f, 0f, rect.width - 18f, totalHeight);
             onboardingSceneScroll = GUI.BeginScrollView(rect, onboardingSceneScroll, viewRect);
 
-            for (int i = 0; i < sceneChange.SceneCount; i++)
+            for (int pos = 0; pos < displayOrder.Length; pos++)
             {
-                Rect rowRect = new Rect(0f, i * 48f, viewRect.width, 40f);
-                bool isActive = i == selectedSceneIndex;
-                string label = $"{i + 1}. {sceneChange.SceneNames[i]}";
+                int sceneIdx = displayOrder[pos];
+                Rect rowRect = new Rect(0f, pos * 48f, viewRect.width, 40f);
+                bool isActive = sceneIdx == selectedSceneIndex;
+                string label = $"{pos + 1}. {sceneChange.SceneNames[sceneIdx]}";
                 if (GUI.Button(rowRect, label, isActive ? onboardingSceneActiveButtonStyle : onboardingSceneButtonStyle))
                 {
-                    selectedSceneIndex = i;
+                    selectedSceneIndex = sceneIdx;
+                    selectedScenarioIndex = -1;
                     RefreshOnboardingWarmupState();
                 }
             }
@@ -3763,9 +5095,205 @@ namespace SessionReview
 
         private void ApplyOnboardingSelection()
         {
+            // Commit the typed session id BEFORE anything can write to disk: a scenario saved
+            // from the prompt below must land in the session folder the onboarding page will
+            // then read its card list from, not in the previous session's folder.
+            ParticipantSession.Id = sessionIdInput;
+            sessionIdInput = ParticipantSession.Id; // re-read trimmed value
+
+            // Reloading tears down every runtime-placed World Building object. Before that
+            // happens, offer to save the built world as a reusable scenario (snapshot + name).
+            if (ShouldOfferWorldBuildingSave())
+            {
+                OpenWorldBuildingSavePrompt(WorldBuildingSaveFollowUp.ContinueApply);
+                return;
+            }
+
+            CompleteOnboardingApply();
+        }
+
+        /// <summary>How the live world compares to the base scene and to what is on disk.</summary>
+        private enum WorldBuildingChangeState
+        {
+            /// <summary>Untouched by World Building -- this is the base scene.</summary>
+            None,
+            /// <summary>Edited, and those edits are not saved as a scenario yet.</summary>
+            Unsaved,
+            /// <summary>Edited, but identical to the scenario it was saved to / restored from.</summary>
+            Saved
+        }
+
+        private static WorldBuildingChangeState ClassifyWorldBuildingChanges()
+        {
+            string signature = WorldBuildingScenarioStore.ComputeCurrentSignature();
+            if (string.IsNullOrEmpty(signature))
+                return WorldBuildingChangeState.None;
+
+            return signature == WorldBuildingScenarioStore.RestoredSignature
+                ? WorldBuildingChangeState.Saved
+                : WorldBuildingChangeState.Unsaved;
+        }
+
+        /// <summary>
+        /// Reloads the base scene and lands back on the trial-start prompt, so the next run uses
+        /// the original world instead of whatever World Building left behind.
+        /// </summary>
+        private void RestartTrialWithCleanScene()
+        {
+            string sceneName = SceneManager.GetActiveScene().name;
+            if (!Application.CanStreamedLevelBeLoaded(sceneName))
+            {
+                Debug.LogWarning($"[SessionReview] Scene '{sceneName}' is not in Build Settings; restarting in place, so World Building changes stay in the world.");
+                StartNextTrialInPlace();
+                return;
+            }
+
+            SessionReviewLog.Log($"[SessionReview] Run Again: reloading '{sceneName}' for a clean world. Saved World Building scenes stay available as cards on the session page.");
+
+            showReviewCompletionPrompt = false;
+            if (inRewindMode)
+                ExitReviewMode();
+            ExitWorldBuildingMode(true);
+            HidePostTrialPrompt();
+            latestTrialEndInfo = null;
+            sessionFullyComplete = false;
+
+            // Nothing to restore after the load: a card launch is the only thing that arms this.
+            WorldBuildingScenarioStore.PendingLoadFolder = null;
+            // Marks PendingTrialStart so the reloaded scene opens the trial-start prompt (Start()).
+            SessionOnboardingSettings.UpdateStartupControls(
+                selectedPlayerMode,
+                selectedRobotStartupControl,
+                selectedPwdStartupControl);
+
+            // The prompt/review paused time and timeScale survives a load -- unfreeze first or
+            // the fresh scene comes up stopped.
+            if (trialStartPromptPausedTime)
+            {
+                trialStartPromptPausedTime = false;
+                Time.timeScale = savedTimeScale > 0f ? savedTimeScale : 1f;
+            }
+            else if (Time.timeScale <= 0f)
+            {
+                Time.timeScale = savedTimeScale > 0f ? savedTimeScale : 1f;
+            }
+
+            SceneManager.LoadScene(sceneName);
+        }
+
+        private bool ShouldOfferWorldBuildingSave()
+        {
+            if (showWorldBuildingSavePrompt)
+                return false;
+
+            // Untouched, or already on disk (just restored from / saved to a scenario).
+            if (ClassifyWorldBuildingChanges() != WorldBuildingChangeState.Unsaved)
+                return false;
+
+            if (!OnboardingApplyWillReloadScene())
+            {
+                // Nothing is torn down, so nothing is at risk. The World Building "Save World"
+                // button covers saving in this case.
+                SessionReviewLog.Log("[SessionReview] World Building changes exist but this apply does not reload the scene; no save prompt (use \"Save World\" in World Building).");
+                return false;
+            }
+
+            return true;
+        }
+
+        private bool OnboardingApplyWillReloadScene()
+        {
+            if (GetSelectedScenario() != null)
+                return true; // scenario launches always reload
+
             var sceneChange = FindObjectOfType<SceneChange>();
             string currentSceneName = SceneManager.GetActiveScene().name;
-            string targetSceneName = SceneManager.GetActiveScene().name;
+            string targetSceneName = currentSceneName;
+            if (sceneChange != null && sceneChange.SceneCount > 0)
+                targetSceneName = sceneChange.SceneNames[Mathf.Clamp(selectedSceneIndex, 0, sceneChange.SceneCount - 1)];
+
+            if (!string.Equals(targetSceneName, currentSceneName, StringComparison.Ordinal))
+                return true;
+
+            if (!Application.CanStreamedLevelBeLoaded(currentSceneName))
+                return false;
+
+            // Same scene: reload when the player character changed (mirrors
+            // TryReloadForPlayerSelectionChange), or when World Building edited this world --
+            // no card picked means "start the preset scene clean", which needs the base scene
+            // back.
+            return !SpawnedPlayerMatchesSelection() ||
+                   ClassifyWorldBuildingChanges() != WorldBuildingChangeState.None;
+        }
+
+        private WorldBuildingScenarioInfo GetSelectedScenario()
+        {
+            return selectedScenarioIndex >= 0 && selectedScenarioIndex < savedScenarios.Count
+                ? savedScenarios[selectedScenarioIndex]
+                : null;
+        }
+
+        /// <summary>
+        /// Shows the save modal. <paramref name="followUp"/> says what happens once it is
+        /// answered -- see <see cref="WorldBuildingSaveFollowUp"/>.
+        /// </summary>
+        private void OpenWorldBuildingSavePrompt(WorldBuildingSaveFollowUp followUp)
+        {
+            if (worldBuildingSaveThumbnail != null)
+                Destroy(worldBuildingSaveThumbnail);
+            worldBuildingSaveThumbnail = WorldBuildingScenarioStore.CaptureThumbnail();
+            worldBuildingSaveNameInput = SceneManager.GetActiveScene().name + " " + DateTime.Now.ToString("MM-dd HH:mm");
+            worldBuildingSaveFollowUp = followUp;
+            showWorldBuildingSavePrompt = true;
+            GUIUtility.keyboardControl = 0;
+        }
+
+        /// <summary>Called by the World Building overlay's "Save World" button.</summary>
+        private void OpenWorldBuildingSavePromptFromEditor()
+        {
+            if (string.IsNullOrEmpty(WorldBuildingScenarioStore.ComputeCurrentSignature()))
+            {
+                worldBuildingSaveStatus = "Nothing to save yet —place, move or delete something first.";
+                return;
+            }
+
+            worldBuildingSaveStatus = null;
+            OpenWorldBuildingSavePrompt(WorldBuildingSaveFollowUp.None);
+        }
+
+        private void ConfirmWorldBuildingSavePrompt(bool save)
+        {
+            WorldBuildingSaveFollowUp followUp = worldBuildingSaveFollowUp;
+
+            if (save)
+            {
+                string folder = WorldBuildingScenarioStore.SaveCurrentScenario(
+                    worldBuildingSaveNameInput, worldBuildingSaveThumbnail);
+                worldBuildingSaveStatus = $"Saved \"{worldBuildingSaveNameInput}\" —pick it on the session page to rebuild this world.";
+                SessionReviewLog.Log($"[SessionReview] World Building scenario saved to '{folder}'.");
+
+                // Only refresh when staying: the list is sorted newest-first, so rebuilding it
+                // mid-apply would shift selectedScenarioIndex onto the scenario just saved
+                // instead of the card the operator picked.
+                if (followUp == WorldBuildingSaveFollowUp.None)
+                    RefreshSavedScenarios();
+            }
+
+            showWorldBuildingSavePrompt = false;
+            worldBuildingSaveFollowUp = WorldBuildingSaveFollowUp.None;
+            GUIUtility.keyboardControl = 0;
+
+            if (followUp == WorldBuildingSaveFollowUp.ContinueApply)
+                CompleteOnboardingApply();
+            else if (followUp == WorldBuildingSaveFollowUp.RestartTrial)
+                RestartTrialWithCleanScene();
+        }
+
+        private void CompleteOnboardingApply()
+        {
+            var sceneChange = FindObjectOfType<SceneChange>();
+            string currentSceneName = SceneManager.GetActiveScene().name;
+            string targetSceneName = currentSceneName;
             int targetSceneIndex = selectedSceneIndex;
 
             if (sceneChange != null && sceneChange.SceneCount > 0)
@@ -3776,6 +5304,26 @@ namespace SessionReview
             else
             {
                 targetSceneIndex = 0;
+            }
+
+            // A selected saved scenario overrides the preset target: its base scene is loaded
+            // and the recorded objects are respawned after the load.
+            WorldBuildingScenarioInfo scenario = GetSelectedScenario();
+            if (scenario != null)
+            {
+                int scenarioSceneIndex = IndexOfSceneName(sceneChange, scenario.SceneName);
+                if (scenarioSceneIndex < 0 && !Application.CanStreamedLevelBeLoaded(scenario.SceneName))
+                {
+                    Debug.LogWarning($"[SessionReview] Saved scenario scene '{scenario.SceneName}' is not in Build Settings; launching the preset scene instead.");
+                    scenario = null;
+                    selectedScenarioIndex = -1;
+                }
+                else
+                {
+                    targetSceneName = scenario.SceneName;
+                    if (scenarioSceneIndex >= 0)
+                        targetSceneIndex = scenarioSceneIndex;
+                }
             }
 
             ParticipantSession.Id = sessionIdInput;
@@ -3795,11 +5343,27 @@ namespace SessionReview
                 selectedPwdStartupControl);
             SetOnboardingVisible(false);
 
+            if (scenario != null)
+            {
+                // Always reload, even into the same scene: restore needs a clean base world.
+                WorldBuildingScenarioStore.PendingLoadFolder = scenario.Folder;
+                SessionReviewLog.Log($"[SessionReview] Launching saved scenario '{scenario.Name}' (scene '{scenario.SceneName}') from '{scenario.Folder}'.");
+                selectedScenarioIndex = -1;
+                int scenarioSceneIndex = IndexOfSceneName(sceneChange, scenario.SceneName);
+                if (sceneChange != null && scenarioSceneIndex >= 0)
+                    sceneChange.LoadSceneAtIndex(scenarioSceneIndex);
+                else
+                    SceneManager.LoadScene(scenario.SceneName);
+                return;
+            }
+
             if (sceneChange != null && sceneChange.SceneCount > 0)
             {
                 if (targetSceneName == currentSceneName)
                 {
                     if (TryReloadForPlayerSelectionChange(currentSceneName))
+                        return;
+                    if (TryReloadForCleanBaseWorld(currentSceneName))
                         return;
                     ShowTrialStartPrompt();
                     return;
@@ -3813,11 +5377,114 @@ namespace SessionReview
             {
                 if (TryReloadForPlayerSelectionChange(currentSceneName))
                     return;
+                if (TryReloadForCleanBaseWorld(currentSceneName))
+                    return;
                 ShowTrialStartPrompt();
                 return;
             }
 
             SceneManager.LoadScene(targetSceneName);
+        }
+
+        /// <summary>
+        /// No scenario card picked means "start the preset scene clean", so a world that World
+        /// Building edited has to be reloaded away. Returns true when a reload was started.
+        /// </summary>
+        private bool TryReloadForCleanBaseWorld(string currentSceneName)
+        {
+            if (ClassifyWorldBuildingChanges() == WorldBuildingChangeState.None)
+                return false;
+
+            if (!Application.CanStreamedLevelBeLoaded(currentSceneName))
+            {
+                Debug.LogWarning($"[SessionReview] Scene '{currentSceneName}' is not in Build Settings; cannot reload, so World Building changes stay in the world.");
+                return false;
+            }
+
+            SessionReviewLog.Log($"[SessionReview] No saved scene picked; reloading '{currentSceneName}' so the preset starts clean.");
+            SceneManager.LoadScene(currentSceneName);
+            return true;
+        }
+
+        private void DrawWorldBuildingSavePrompt()
+        {
+            GUI.color = new Color(0f, 0f, 0f, 0.6f);
+            GUI.DrawTexture(new Rect(0f, 0f, ReviewUiScale.Width, ReviewUiScale.Height), Texture2D.whiteTexture);
+            GUI.color = Color.white;
+
+            float panelWidth = Mathf.Min(680f, ReviewUiScale.Width - 60f);
+            float innerWidth = panelWidth - 72f;
+            float thumbHeight = Mathf.Min(innerWidth * 9f / 16f, ReviewUiScale.Height * 0.4f);
+            float panelHeight = Mathf.Min(ReviewUiScale.Height - 40f, 330f + thumbHeight);
+            Rect panelRect = new Rect(
+                (ReviewUiScale.Width - panelWidth) * 0.5f,
+                (ReviewUiScale.Height - panelHeight) * 0.5f,
+                panelWidth, panelHeight);
+            GUI.Box(panelRect, GUIContent.none, onboardingPanelStyle);
+
+            float x = panelRect.x + 36f;
+            float y = panelRect.y + 26f;
+
+            GUI.Label(new Rect(x, y, innerWidth, 40f), "Save This Scene?", onboardingTitleStyle);
+            y += 46f;
+            string promptBody = worldBuildingSaveFollowUp == WorldBuildingSaveFollowUp.None
+                ? "You changed this scene with World Building (placed, moved or deleted objects). Save the whole scene and it appears on the session page as a world you can reload later."
+                : "You changed this scene with World Building (placed, moved or deleted objects). The next run starts from the original scene —save this one to keep it as a pickable world on the session page.";
+            GUI.Label(new Rect(x, y, innerWidth, 48f), promptBody, onboardingBodyStyle);
+            y += 56f;
+
+            Rect thumbRect = new Rect(x, y, innerWidth, thumbHeight);
+            GUI.color = new Color(0.12f, 0.15f, 0.19f, 0.95f);
+            GUI.DrawTexture(thumbRect, Texture2D.whiteTexture);
+            GUI.color = Color.white;
+            if (worldBuildingSaveThumbnail != null)
+                GUI.DrawTexture(thumbRect, worldBuildingSaveThumbnail, ScaleMode.ScaleToFit, true);
+            else
+                GUI.Label(thumbRect, "(no snapshot available)", onboardingHintStyle);
+            y += thumbHeight + 14f;
+
+            if (onboardingTextFieldStyle == null)
+            {
+                onboardingTextFieldStyle = new GUIStyle(GUI.skin.textField)
+                {
+                    fontSize = 18,
+                    alignment = TextAnchor.MiddleLeft,
+                    padding = new RectOffset(12, 12, 8, 8)
+                };
+            }
+
+            GUI.Label(new Rect(x, y, 90f, 40f), "Name", onboardingSectionStyle);
+            worldBuildingSaveNameInput = GUI.TextField(new Rect(x + 100f, y, innerWidth - 100f, 40f),
+                worldBuildingSaveNameInput ?? string.Empty, 64, onboardingTextFieldStyle);
+
+            bool continues = worldBuildingSaveFollowUp != WorldBuildingSaveFollowUp.None;
+
+            float buttonY = panelRect.y + panelRect.height - 66f;
+            if (GUI.Button(new Rect(x, buttonY, 120f, 46f), "Cancel", onboardingSecondaryButtonStyle))
+            {
+                // Cancel always means "go back to what I was doing" -- it must not run the
+                // follow-up, or the scene would reload behind the operator's back.
+                showWorldBuildingSavePrompt = false;
+                worldBuildingSaveFollowUp = WorldBuildingSaveFollowUp.None;
+                GUIUtility.keyboardControl = 0;
+            }
+
+            float saveW = 200f;
+            float saveX = panelRect.x + panelRect.width - 36f - saveW;
+
+            // Opened by a scene/character switch or a Run Again: offer to go on without saving.
+            // Opened by the World Building "Save World" button: there is nothing to continue to,
+            // so Cancel (above) is the only way out besides saving.
+            if (continues)
+            {
+                float skipW = 230f;
+                if (GUI.Button(new Rect(saveX - 12f - skipW, buttonY, skipW, 46f), "Continue Without Saving", onboardingSecondaryButtonStyle))
+                    ConfirmWorldBuildingSavePrompt(false);
+            }
+
+            string saveLabel = continues ? "Save & Continue" : "Save World";
+            if (GUI.Button(new Rect(saveX, buttonY, saveW, 46f), saveLabel, onboardingPrimaryButtonStyle))
+                ConfirmWorldBuildingSavePrompt(true);
         }
 
         /// <summary>

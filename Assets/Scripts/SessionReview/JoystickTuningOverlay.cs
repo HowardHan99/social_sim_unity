@@ -9,10 +9,23 @@ using SEAN.Input;
 namespace SessionReview
 {
     /// <summary>
-    /// One shared set of joystick response values applied to BOTH the player character
-    /// (ManualWheelchairController -- wheelchair or walking avatar) and the robot
-    /// (VelocityController). Persisted as a PER-SESSION config file next to that
-    /// session's trial logs: SessionLogs/&lt;sessionId&gt;/joystick_config.json.
+    /// The handful of driving-feel values a participant may need to change, applied to BOTH
+    /// the player character (ManualWheelchairController -- wheelchair or walking avatar) and
+    /// the robot (VelocityController), plus the gamepad camera look. Persisted as a
+    /// PER-SESSION config file next to that session's trial logs:
+    /// SessionLogs/&lt;sessionId&gt;/joystick_config.json.
+    ///
+    /// Deliberately a handful of knobs, not a controller-engineering panel. They split into
+    /// two groups, and the panel lists them in that order because it is the thing people get
+    /// wrong: max speed / max turn rate are the CAPS (felt immediately), while the two
+    /// sensitivity values only reshape the stick curve on the way to those caps -- at full
+    /// deflection they change nothing at all. A panel of curve-shaping knobs alone reads as
+    /// "these sliders do nothing" to anyone who drives with the stick pushed fully over,
+    /// which is why the turn-rate cap is exposed alongside the speed cap.
+    ///
+    /// "Sensitivity" is one number -- how far the stick must travel to command full output --
+    /// and drives the underlying full-throw value; the per-axis sensitivity multipliers stay
+    /// at 1 so there is a single thing to reason about.
     ///
     /// Rules: values only take over once a slider is touched (enabled flag); a session
     /// without a config file inherits the current live values ("defaults to the previous
@@ -21,14 +34,12 @@ namespace SessionReview
     /// </summary>
     public static class JoystickTuning
     {
-        // Defaults mirror the shared controller defaults (ManualWheelchairController and
-        // VelocityController ship with identical joystick response values).
-        public const float DefaultLinearSensitivity = 1.0f;
-        public const float DefaultAngularSensitivity = 1.0f;
-        public const float DefaultLinearFullThrow = 0.1f;
-        public const float DefaultAngularFullThrow = 1.0f;
-        public const float DefaultDeadzone = 0.03f;
+        public const float DefaultDriveSensitivity = 0.5f;
+        public const float DefaultTurnSensitivity = 0.5f;
         public const float DefaultMaxSpeed = 0.8f;
+        public const float DefaultTurnRate = 240f; // ManualWheelchairController.rotationSpeed default
+        public const float DefaultDeadzone = 0.03f;
+        public const float DefaultLookSpeed = 45f;
 
         private const string ConfigFileName = "joystick_config.json";
 
@@ -36,19 +47,31 @@ namespace SessionReview
         private class TuningData
         {
             public bool enabled;
-            public float linearSensitivity = DefaultLinearSensitivity;
-            public float angularSensitivity = DefaultAngularSensitivity;
-            public float linearFullThrow = DefaultLinearFullThrow;
-            public float angularFullThrow = DefaultAngularFullThrow;
-            public float deadzone = DefaultDeadzone;
+            // 0 = must push the stick all the way for full output, 1 = a tenth of the travel
+            // is already full output. Drive and turn are separate: they are different
+            // motions and rarely feel right at the same setting.
+            public float driveSensitivity = DefaultDriveSensitivity;
+            public float turnSensitivity = DefaultTurnSensitivity;
             public float maxSpeed = DefaultMaxSpeed;
-            // Input device profile (0 = Auto). Auto follows the connected device names,
-            // so it matches whatever controller the participant is actually using.
+            // Turn rate cap (deg/s). The sensitivity knobs above only reshape the stick
+            // curve, so at full deflection they change nothing -- this is the knob that
+            // actually makes turning faster or slower.
+            public float turnRate = DefaultTurnRate;
+            public float deadzone = DefaultDeadzone;
+            // Gamepad right-stick camera yaw speed, deg/s.
+            public float lookSpeed = DefaultLookSpeed;
+            // Input device profile (0 = Auto). Auto prefers a connected gamepad.
             public int profile = (int)JoystickProfileType.Auto;
         }
 
         private static TuningData data = new TuningData();
         private static string loadedForSession; // null until the first load
+
+        /// <summary>Stick travel that already commands full output, from the 0..1 sensitivity.</summary>
+        public static float FullThrowFor(float sensitivity)
+        {
+            return Mathf.Lerp(1.0f, 0.1f, Mathf.Clamp01(sensitivity));
+        }
 
         /// <summary>Config file path for a session (lives beside its trial folders).</summary>
         public static string ConfigPath(string sessionId)
@@ -87,7 +110,7 @@ namespace SessionReview
 
             // A fresh session (no saved file) follows whatever device is connected (Auto),
             // never a stray manual profile left over from a previous participant. A saved
-            // session restores the input profile that participant confirmed while practicing.
+            // session restores the input device that participant confirmed while practicing.
             if (!loadedFromFile)
                 data.profile = (int)JoystickProfileType.Auto;
 
@@ -115,35 +138,18 @@ namespace SessionReview
             get { EnsureLoaded(); return data.enabled; }
         }
 
-        public static float LinearSensitivity
+        /// <summary>0..1: how little stick travel is needed for full forward/back speed.</summary>
+        public static float DriveSensitivity
         {
-            get { EnsureLoaded(); return data.linearSensitivity; }
-            set { EnsureLoaded(); data.linearSensitivity = value; data.enabled = true; Save(); }
+            get { EnsureLoaded(); return data.driveSensitivity; }
+            set { EnsureLoaded(); data.driveSensitivity = value; data.enabled = true; Save(); }
         }
 
-        public static float AngularSensitivity
+        /// <summary>0..1: how little stick travel is needed for the full turn rate.</summary>
+        public static float TurnSensitivity
         {
-            get { EnsureLoaded(); return data.angularSensitivity; }
-            set { EnsureLoaded(); data.angularSensitivity = value; data.enabled = true; Save(); }
-        }
-
-        /// <summary>Stick travel fraction that already commands full speed (smaller = reach max sooner).</summary>
-        public static float LinearFullThrow
-        {
-            get { EnsureLoaded(); return data.linearFullThrow; }
-            set { EnsureLoaded(); data.linearFullThrow = value; data.enabled = true; Save(); }
-        }
-
-        public static float AngularFullThrow
-        {
-            get { EnsureLoaded(); return data.angularFullThrow; }
-            set { EnsureLoaded(); data.angularFullThrow = value; data.enabled = true; Save(); }
-        }
-
-        public static float Deadzone
-        {
-            get { EnsureLoaded(); return data.deadzone; }
-            set { EnsureLoaded(); data.deadzone = value; data.enabled = true; Save(); }
+            get { EnsureLoaded(); return data.turnSensitivity; }
+            set { EnsureLoaded(); data.turnSensitivity = value; data.enabled = true; Save(); }
         }
 
         /// <summary>Max manual speed (m/s) for the player character and the robot.</summary>
@@ -153,11 +159,55 @@ namespace SessionReview
             set { EnsureLoaded(); data.maxSpeed = value; data.enabled = true; Save(); }
         }
 
+        /// <summary>Max turn rate (deg/s) at full stick, for the wheelchair. Other
+        /// controllers scale from their own baseline by the same ratio.</summary>
+        public static float TurnRate
+        {
+            get { EnsureLoaded(); return data.turnRate; }
+            set { EnsureLoaded(); data.turnRate = value; data.enabled = true; Save(); }
+        }
+
+        public static float Deadzone
+        {
+            get { EnsureLoaded(); return data.deadzone; }
+            set { EnsureLoaded(); data.deadzone = value; data.enabled = true; Save(); }
+        }
+
+        // Turn rate is applied as a RATIO of each controller's own baseline rather than
+        // written flat: the walking player deliberately turns slower than the wheelchair
+        // (RandomAvatar.walkerTurnSpeed) and the robot's angular scale is an order of
+        // magnitude below both. Scaling preserves those relationships; a flat write would
+        // erase them the moment any slider was touched.
+        private static readonly Dictionary<int, float> turnBaselines = new Dictionary<int, float>();
+
+        private static float TurnBaseline(int instanceId, float current)
+        {
+            if (!turnBaselines.TryGetValue(instanceId, out float baseline))
+            {
+                baseline = current;
+                turnBaselines[instanceId] = baseline;
+            }
+            return baseline;
+        }
+
+        /// <summary>Restores a controller's authored turn rate (used by Reset Defaults).</summary>
+        public static float TurnBaselineFor(int instanceId, float current)
+        {
+            return TurnBaseline(instanceId, current);
+        }
+
+        /// <summary>Gamepad right-stick camera yaw speed (deg/s); pitch follows at ~60%.</summary>
+        public static float LookSpeed
+        {
+            get { EnsureLoaded(); return data.lookSpeed; }
+            set { EnsureLoaded(); data.lookSpeed = value; data.enabled = true; Save(); }
+        }
+
         /// <summary>
-        /// Input device profile for this session. Auto follows the connected controller;
-        /// an explicit choice is remembered and re-applied when the session's real scene
-        /// loads, so the input method confirmed in practice carries into the study.
-        /// Independent of the slider-override <see cref="Enabled"/> flag.
+        /// Input device for this session. Auto prefers a connected gamepad; an explicit
+        /// choice is remembered and re-applied when the session's real scene loads, so the
+        /// input method confirmed in practice carries into the study. Independent of the
+        /// slider-override <see cref="Enabled"/> flag.
         /// </summary>
         public static JoystickProfileType Profile
         {
@@ -176,15 +226,25 @@ namespace SessionReview
             if (controller == null || !Enabled)
                 return;
 
-            controller.joystickLinearSensitivity = LinearSensitivity;
-            controller.joystickAngularSensitivity = AngularSensitivity;
-            controller.joystickLinearFullThrow = LinearFullThrow;
-            controller.joystickAngularFullThrow = AngularFullThrow;
+            controller.joystickLinearFullThrow = FullThrowFor(DriveSensitivity);
+            controller.joystickAngularFullThrow = FullThrowFor(TurnSensitivity);
+            // The multipliers stay neutral so each sensitivity means exactly "how far do I
+            // push for full output", with nothing else scaling on top.
+            controller.joystickLinearSensitivity = 1f;
+            controller.joystickAngularSensitivity = 1f;
+            // Stick POSITION commands speed. Under the acceleration model the stick only set
+            // how quickly you reach top speed, so holding it always ended at the same speed
+            // and the sensitivity sliders felt like they did nothing.
+            controller.manualInertiaDrive = false;
+            controller.angularDirectDrive = true;
             // EffectiveJoystickDeadzone() takes max(joystickDeadzone, joystickStartupDeadzone),
             // so both must be written or the slider is a no-op below the startup value.
             controller.joystickDeadzone = Deadzone;
             controller.joystickStartupDeadzone = Deadzone;
             controller.moveSpeed = MaxSpeed;
+            controller.rotationSpeed =
+                TurnBaseline(controller.GetInstanceID(), controller.rotationSpeed)
+                * (TurnRate / DefaultTurnRate);
         }
 
         public static void ApplyTo(VelocityController controller)
@@ -192,20 +252,32 @@ namespace SessionReview
             if (controller == null || !Enabled)
                 return;
 
-            controller.joystickLinearSensitivity = LinearSensitivity;
-            controller.joystickAngularSensitivity = AngularSensitivity;
-            controller.joystickLinearFullThrow = LinearFullThrow;
-            controller.joystickAngularFullThrow = AngularFullThrow;
+            controller.joystickLinearFullThrow = FullThrowFor(DriveSensitivity);
+            controller.joystickAngularFullThrow = FullThrowFor(TurnSensitivity);
+            controller.joystickLinearSensitivity = 1f;
+            controller.joystickAngularSensitivity = 1f;
+            controller.manualInertiaDrive = false; // stick position commands speed (see above)
             controller.joystickLinearDeadzone = Deadzone;
             controller.joystickAngularDeadzone = Deadzone;
             controller.manualLinearSpeed = MaxSpeed;
             controller.manualMaxPlanarSpeed = MaxSpeed;
+            controller.manualAngularSpeed =
+                TurnBaseline(controller.GetInstanceID(), controller.manualAngularSpeed)
+                * (TurnRate / DefaultTurnRate);
+        }
+
+        public static void ApplyTo(GamepadCameraLook look)
+        {
+            if (look == null || !Enabled)
+                return;
+
+            look.yawSpeed = LookSpeed;
+            look.pitchSpeed = LookSpeed * 0.62f;
         }
 
         /// <summary>Resets THIS session's tuning to defaults and hands the joystick fields
         /// back to the controllers' own Inspector/Start defaults (until a slider is touched
-        /// again). The input profile returns to Auto (follow the connected device). The
-        /// session's config file records the disabled state.</summary>
+        /// again). The input profile returns to Auto (follow the connected device).</summary>
         public static void ResetToDefaults()
         {
             EnsureLoaded();
@@ -216,14 +288,15 @@ namespace SessionReview
     }
 
     /// <summary>
-    /// Runtime IMGUI panel ([U] toggles) with sliders for joystick sensitivity, full-throw
-    /// (how far the stick must be pushed for max speed) and deadzone. One set of values is
-    /// applied to the player character AND the robot together.
+    /// Runtime IMGUI panel ([U] toggles; the TestScene opens it automatically once driving
+    /// starts) with the input-device row and six sliders: max speed, max turn rate, the two
+    /// stick-travel sensitivities, deadzone and look speed. Values apply to the player
+    /// character AND the robot together.
     ///
-    /// Values are re-applied to every live controller once per second: this survives
-    /// ApplyJoystickResponseDefaults() rewriting fields in each controller's Start(),
-    /// scene loads, and player respawns. Self-bootstraps; no scene wiring needed. Works in
-    /// scenes without a SessionReviewManager (e.g. TestScene).
+    /// They are re-applied to every live controller once per second: this survives
+    /// ApplyJoystickResponseDefaults() rewriting fields in each controller's Start(), scene
+    /// loads, and player respawns. Self-bootstraps; works without a SessionReviewManager
+    /// (e.g. in the TestScene).
     /// </summary>
     public class JoystickTuningOverlay : MonoBehaviour
     {
@@ -242,18 +315,21 @@ namespace SessionReview
 
         private const float RescanInterval = 1.0f;
 
-        // Slider ranges stay inside the clamps in ApplyJoystickResponseDefaults()
-        // (linear sensitivity > 2 and angular sensitivity > 1.5 get reset to 1 there).
-        private const float MinSensitivity = 0.1f;
-        private const float MaxLinearSensitivity = 2.0f;
-        private const float MaxAngularSensitivity = 1.5f;
-        private const float MinLinearFullThrow = 0.02f;
-        private const float MinAngularFullThrow = 0.05f;
-        private const float MaxFullThrow = 1.0f;
+        private const float MinDeadzone = 0f;
         private const float MaxDeadzone = 0.3f;
+        private const float MinSpeed = 0.2f;
+        private const float MaxSpeed = 2.0f;
+        private const float MinTurnRate = 60f;
+        private const float MaxTurnRate = 360f;
+        private const float MinLookSpeed = 15f;
+        private const float MaxLookSpeed = 120f;
 
         private readonly List<ManualWheelchairController> playerControllers = new List<ManualWheelchairController>();
         private VelocityController robotController;
+        private GamepadCameraLook cameraLook;
+        // The panel is a practice-scene tool: it only appears where TestSceneFlowManager
+        // lives. The values keep applying everywhere else.
+        private TestSceneFlowManager practiceFlow;
         private float nextRescanTime;
         private bool visible;
         private GUIStyle titleStyle;
@@ -295,10 +371,6 @@ namespace SessionReview
 
         void Update()
         {
-            bool typing = GUIUtility.keyboardControl != 0 && IsSessionTextEntryOpen();
-            if (Input.GetKeyDown(toggleKey) && !typing)
-                visible = !visible;
-
             if (Time.unscaledTime >= nextRescanTime)
             {
                 Rescan();
@@ -306,13 +378,28 @@ namespace SessionReview
 
                 // Continuous ownership: newly spawned controllers and Start()-time
                 // ApplyJoystickResponseDefaults() rewrites are corrected within a second.
+                // This runs in every scene -- only the panel is practice-scene-only.
                 ApplyToAll();
             }
+
+            // Tuning is done during practice; in the study scene the panel stays away so a
+            // participant can neither see it nor open it by accident.
+            if (practiceFlow == null)
+            {
+                visible = false;
+                return;
+            }
+
+            bool typing = GUIUtility.keyboardControl != 0 && IsSessionTextEntryOpen();
+            if (Input.GetKeyDown(toggleKey) && !typing)
+                visible = !visible;
         }
 
         private void Rescan()
         {
             robotController = FindObjectOfType<VelocityController>();
+            cameraLook = FindObjectOfType<GamepadCameraLook>();
+            practiceFlow = FindObjectOfType<TestSceneFlowManager>();
             playerControllers.Clear();
             playerControllers.AddRange(FindObjectsOfType<ManualWheelchairController>(true));
         }
@@ -323,6 +410,7 @@ namespace SessionReview
                 return;
 
             JoystickTuning.ApplyTo(robotController);
+            JoystickTuning.ApplyTo(cameraLook);
             foreach (var pwd in playerControllers)
                 JoystickTuning.ApplyTo(pwd);
         }
@@ -331,28 +419,41 @@ namespace SessionReview
         // immediately (they would otherwise keep the last tuned values until respawn).
         private void ApplyDefaultsToAll()
         {
+            float driveThrow = JoystickTuning.FullThrowFor(JoystickTuning.DefaultDriveSensitivity);
+            float turnThrow = JoystickTuning.FullThrowFor(JoystickTuning.DefaultTurnSensitivity);
+
             if (robotController != null)
             {
-                robotController.joystickLinearSensitivity = JoystickTuning.DefaultLinearSensitivity;
-                robotController.joystickAngularSensitivity = JoystickTuning.DefaultAngularSensitivity;
-                robotController.joystickLinearFullThrow = JoystickTuning.DefaultLinearFullThrow;
-                robotController.joystickAngularFullThrow = JoystickTuning.DefaultAngularFullThrow;
+                robotController.joystickLinearFullThrow = driveThrow;
+                robotController.joystickAngularFullThrow = turnThrow;
+                robotController.joystickLinearSensitivity = 1f;
+                robotController.joystickAngularSensitivity = 1f;
                 robotController.joystickLinearDeadzone = JoystickTuning.DefaultDeadzone;
                 robotController.joystickAngularDeadzone = JoystickTuning.DefaultDeadzone;
                 robotController.manualLinearSpeed = JoystickTuning.DefaultMaxSpeed;
                 robotController.manualMaxPlanarSpeed = JoystickTuning.DefaultMaxSpeed;
+                robotController.manualAngularSpeed = JoystickTuning.TurnBaselineFor(
+                    robotController.GetInstanceID(), robotController.manualAngularSpeed);
             }
 
             foreach (var pwd in playerControllers)
             {
                 if (pwd == null) continue;
-                pwd.joystickLinearSensitivity = JoystickTuning.DefaultLinearSensitivity;
-                pwd.joystickAngularSensitivity = JoystickTuning.DefaultAngularSensitivity;
-                pwd.joystickLinearFullThrow = JoystickTuning.DefaultLinearFullThrow;
-                pwd.joystickAngularFullThrow = JoystickTuning.DefaultAngularFullThrow;
+                pwd.joystickLinearFullThrow = driveThrow;
+                pwd.joystickAngularFullThrow = turnThrow;
+                pwd.joystickLinearSensitivity = 1f;
+                pwd.joystickAngularSensitivity = 1f;
                 pwd.joystickDeadzone = JoystickTuning.DefaultDeadzone;
                 pwd.joystickStartupDeadzone = JoystickTuning.DefaultDeadzone;
                 pwd.moveSpeed = JoystickTuning.DefaultMaxSpeed;
+                pwd.rotationSpeed = JoystickTuning.TurnBaselineFor(
+                    pwd.GetInstanceID(), pwd.rotationSpeed);
+            }
+
+            if (cameraLook != null)
+            {
+                cameraLook.yawSpeed = JoystickTuning.DefaultLookSpeed;
+                cameraLook.pitchSpeed = JoystickTuning.DefaultLookSpeed * 0.62f;
             }
         }
 
@@ -366,7 +467,7 @@ namespace SessionReview
 
         void OnGUI()
         {
-            if (!visible || ShouldHide()) return;
+            if (!visible || practiceFlow == null || ShouldHide()) return;
 
             // Never shown during review, so the RewindController scrubber-docking
             // convention (TryGetProgressBarRect) is satisfied without a dock check.
@@ -383,17 +484,20 @@ namespace SessionReview
             const float margin = 16f;
             const float pad = 14f;
             const float gap = 12f;
-            const float rowH = 34f;
+            const float rowH = 38f;
             const float headerH = 28f;
-            const float hintH = 34f;
+            const float profileRowH = 40f;
+            // Two lines: the device name plus the both-connected note wrap on narrow panels.
+            const float deviceRowH = 36f;
+            // Four wrapped lines: the hint has to explain why the two "stick travel" rows
+            // feel like nothing when you drive with the stick pushed all the way over.
+            const float hintH = 76f;
             const float buttonH = 30f;
-            const float labelW = 170f;
-            const float valueW = 56f;
+            const float labelW = 208f;
+            const float valueW = 96f;
 
             const int rowCount = 6;
-            const float profileRowH = 34f;
-            const float deviceRowH = 20f;
-            float barW = Mathf.Min(430f, ReviewUiScale.Width - 2f * margin);
+            float barW = Mathf.Min(520f, ReviewUiScale.Width - 2f * margin);
             float barH = pad * 2f + headerH + profileRowH + deviceRowH + rowCount * rowH + hintH + buttonH + 8f;
             // Docked mid-left so participants can tune while driving: clear of the
             // top-left driving HUD / overhead mini-cam and the bottom-right F8 overlay.
@@ -406,59 +510,71 @@ namespace SessionReview
             float rw = barW - 2f * pad;
             string sessionLabel = string.IsNullOrEmpty(ParticipantSession.Id) ? "unassigned" : ParticipantSession.Id;
             GUI.Label(new Rect(rx, y + pad, rw, headerH),
-                $"Joystick Tuning -- session {sessionLabel}   ([{toggleKey}] hide)", titleStyle);
+                $"Controls -- session {sessionLabel}   ([{toggleKey}] hide)", titleStyle);
 
             float sliderW = rw - labelW - gap - valueW - gap;
             float rowY = y + pad + headerH;
 
-            // Input-device profile: Auto follows the connected controller; an explicit pick
-            // is remembered for this session and carried into the real study scene.
+            // Which physical controller drives. Auto prefers a connected gamepad; the
+            // flight stick stays available even while both are plugged in.
             DrawProfileRow(new Rect(rx, rowY, rw, profileRowH), labelW, gap);
             rowY += profileRowH;
-            string device = SEAN.Input.JoystickProfiles.DetectedDeviceName;
-            GUI.Label(new Rect(rx, rowY, rw, deviceRowH),
-                string.IsNullOrEmpty(device) ? "No controller detected" : $"Detected: {device}", hintStyle);
+
+            string device = JoystickProfiles.DetectedDeviceName;
+            string both = JoystickProfiles.BothDevicesConnected ? "  (the other one is ignored)" : string.Empty;
+            GUI.Label(new Rect(rx, rowY + 2f, rw, deviceRowH - 4f),
+                string.IsNullOrEmpty(device)
+                    ? "Using: nothing connected"
+                    : $"Using: {device}{both}",
+                hintStyle);
             rowY += deviceRowH;
 
-            float linSens = DrawSliderRow(new Rect(rx, rowY, rw, rowH), "Linear sensitivity",
-                JoystickTuning.LinearSensitivity, MinSensitivity, MaxLinearSensitivity,
-                labelW, sliderW, valueW, gap);
+            // Ordered so the two rows you feel immediately come first: these set the CAPS.
+            // The two "stick travel" rows below only reshape the curve on the way to those
+            // caps, which is why they seem to do nothing if you always shove the stick over.
+            float maxSpd = DrawSliderRow(new Rect(rx, rowY, rw, rowH), "Fastest it can drive",
+                JoystickTuning.MaxSpeed, MinSpeed, MaxSpeed, labelW, sliderW, valueW, gap,
+                $"{JoystickTuning.MaxSpeed:F2} m/s");
             rowY += rowH;
-            float angSens = DrawSliderRow(new Rect(rx, rowY, rw, rowH), "Turn sensitivity",
-                JoystickTuning.AngularSensitivity, MinSensitivity, MaxAngularSensitivity,
-                labelW, sliderW, valueW, gap);
+            float turnRate = DrawSliderRow(new Rect(rx, rowY, rw, rowH), "Fastest it can turn",
+                JoystickTuning.TurnRate, MinTurnRate, MaxTurnRate, labelW, sliderW, valueW, gap,
+                $"{JoystickTuning.TurnRate:F0}°/s");
             rowY += rowH;
-            float linThrow = DrawSliderRow(new Rect(rx, rowY, rw, rowH), "Full speed at throw",
-                JoystickTuning.LinearFullThrow, MinLinearFullThrow, MaxFullThrow,
-                labelW, sliderW, valueW, gap);
+            float driveSens = DrawSliderRow(new Rect(rx, rowY, rw, rowH), "Push needed: full speed",
+                JoystickTuning.DriveSensitivity, 0f, 1f, labelW, sliderW, valueW, gap,
+                $"{JoystickTuning.FullThrowFor(JoystickTuning.DriveSensitivity) * 100f:F0}% of the way");
             rowY += rowH;
-            float angThrow = DrawSliderRow(new Rect(rx, rowY, rw, rowH), "Full turn at throw",
-                JoystickTuning.AngularFullThrow, MinAngularFullThrow, MaxFullThrow,
-                labelW, sliderW, valueW, gap);
+            float turnSens = DrawSliderRow(new Rect(rx, rowY, rw, rowH), "Push needed: full turn",
+                JoystickTuning.TurnSensitivity, 0f, 1f, labelW, sliderW, valueW, gap,
+                $"{JoystickTuning.FullThrowFor(JoystickTuning.TurnSensitivity) * 100f:F0}% of the way");
             rowY += rowH;
-            float dz = DrawSliderRow(new Rect(rx, rowY, rw, rowH), "Deadzone",
-                JoystickTuning.Deadzone, 0f, MaxDeadzone,
-                labelW, sliderW, valueW, gap);
+            float dz = DrawSliderRow(new Rect(rx, rowY, rw, rowH), "Hand-wobble ignored near center",
+                JoystickTuning.Deadzone, MinDeadzone, MaxDeadzone, labelW, sliderW, valueW, gap,
+                $"under {JoystickTuning.Deadzone * 100f:F0}%");
             rowY += rowH;
-            float maxSpd = DrawSliderRow(new Rect(rx, rowY, rw, rowH), "Max speed (m/s)",
-                JoystickTuning.MaxSpeed, 0.2f, 2.0f,
-                labelW, sliderW, valueW, gap);
+            float look = DrawSliderRow(new Rect(rx, rowY, rw, rowH), "Camera look-around speed",
+                JoystickTuning.LookSpeed, MinLookSpeed, MaxLookSpeed, labelW, sliderW, valueW, gap,
+                $"{JoystickTuning.LookSpeed:F0}°/s");
             rowY += rowH;
 
             bool changed =
-                ApplyIfChanged(linSens, JoystickTuning.LinearSensitivity, v => JoystickTuning.LinearSensitivity = v) |
-                ApplyIfChanged(angSens, JoystickTuning.AngularSensitivity, v => JoystickTuning.AngularSensitivity = v) |
-                ApplyIfChanged(linThrow, JoystickTuning.LinearFullThrow, v => JoystickTuning.LinearFullThrow = v) |
-                ApplyIfChanged(angThrow, JoystickTuning.AngularFullThrow, v => JoystickTuning.AngularFullThrow = v) |
+                ApplyIfChanged(driveSens, JoystickTuning.DriveSensitivity, v => JoystickTuning.DriveSensitivity = v) |
+                ApplyIfChanged(turnSens, JoystickTuning.TurnSensitivity, v => JoystickTuning.TurnSensitivity = v) |
+                ApplyIfChanged(maxSpd, JoystickTuning.MaxSpeed, v => JoystickTuning.MaxSpeed = v) |
+                ApplyIfChanged(turnRate, JoystickTuning.TurnRate, v => JoystickTuning.TurnRate = v) |
                 ApplyIfChanged(dz, JoystickTuning.Deadzone, v => JoystickTuning.Deadzone = v) |
-                ApplyIfChanged(maxSpd, JoystickTuning.MaxSpeed, v => JoystickTuning.MaxSpeed = v);
+                ApplyIfChanged(look, JoystickTuning.LookSpeed, v => JoystickTuning.LookSpeed = v);
 
             if (changed)
                 ApplyToAll();
 
             string status = JoystickTuning.Enabled
-                ? "Tuning active: applied to player + robot, saved to this session's config file."
-                : "Move a slider to take over; controllers keep their Inspector values until then.";
+                ? "The top two rows are the LIMITS -- you feel those change straight away. "
+                  + "The two \"push needed\" rows only change how the stick feels on the way there: "
+                  + "lower = you hit the limit with a smaller push (twitchier). Held all the way over, "
+                  + "you always get the limits above, so those two feel like nothing if you never "
+                  + "feather the stick.  The D-pad works like W/A/S/D."
+                : "Move a slider to take over the defaults.  The D-pad works like W/A/S/D.";
             GUI.Label(new Rect(rx, rowY, rw, hintH), status, hintStyle);
             rowY += hintH;
 
@@ -469,10 +585,10 @@ namespace SessionReview
             }
         }
 
-        // Input-device profile selector: Auto (follow the connected device) / Stick / Gamepad.
+        // Input-device selector: Auto (prefer a connected gamepad) / Gamepad / Stick.
         private void DrawProfileRow(Rect rect, float labelW, float gap)
         {
-            GUI.Label(new Rect(rect.x, rect.y, labelW, rect.height), "Input device", rowStyle);
+            GUI.Label(new Rect(rect.x, rect.y, labelW, rect.height), "Controller", rowStyle);
 
             float bx = rect.x + labelW + gap;
             float bw = (rect.xMax - bx - 2f * 6f) / 3f;
@@ -482,13 +598,13 @@ namespace SessionReview
                     current == JoystickProfileType.Auto))
                 JoystickTuning.Profile = JoystickProfileType.Auto;
             bx += bw + 6f;
-            if (DrawProfileButton(new Rect(bx, rect.y + 2f, bw, rect.height - 4f), "Stick",
-                    current == JoystickProfileType.LogitechExtreme3D))
-                JoystickTuning.Profile = JoystickProfileType.LogitechExtreme3D;
-            bx += bw + 6f;
             if (DrawProfileButton(new Rect(bx, rect.y + 2f, bw, rect.height - 4f), "Gamepad",
                     current == JoystickProfileType.XInputGamepad))
                 JoystickTuning.Profile = JoystickProfileType.XInputGamepad;
+            bx += bw + 6f;
+            if (DrawProfileButton(new Rect(bx, rect.y + 2f, bw, rect.height - 4f), "Stick",
+                    current == JoystickProfileType.LogitechExtreme3D))
+                JoystickTuning.Profile = JoystickProfileType.LogitechExtreme3D;
         }
 
         private bool DrawProfileButton(Rect rect, string label, bool active)
@@ -501,7 +617,7 @@ namespace SessionReview
         }
 
         private float DrawSliderRow(Rect rowRect, string label, float value, float min, float max,
-            float labelW, float sliderW, float valueW, float gap)
+            float labelW, float sliderW, float valueW, float gap, string readout)
         {
             GUI.Label(new Rect(rowRect.x, rowRect.y, labelW, rowRect.height), label, rowStyle);
             float sliderX = rowRect.x + labelW + gap;
@@ -509,7 +625,7 @@ namespace SessionReview
                 new Rect(sliderX, rowRect.y + rowRect.height * 0.5f - 4f, sliderW, 18f),
                 value, min, max);
             GUI.Label(new Rect(sliderX + sliderW + gap, rowRect.y, valueW, rowRect.height),
-                slider.ToString("F2"), valueStyle);
+                readout, valueStyle);
             return slider;
         }
 

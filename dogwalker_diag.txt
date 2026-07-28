@@ -1,0 +1,324 @@
+=== Dog Walker diagnostics, 2026-07-28 15:01:01 ===
+Unity 2020.3.48f1, project social_sim_unity
+
+--- Assets/Resources/PlayerCharacters/Dog_Walker.prefab ---
+  Hierarchy:
+    Dog_Walker  pos=(-27.6, 0.0, 0.5) scale=(1.0, 1.0, 1.0)  <TrackedObject>  <ManualWheelchairController>  <Rigidbody>  <CapsuleCollider>  <AttachPropToHand>(prop=NULL, bone=RightHand, autoTag='Bip01 R Hand')
+      Ch22_nonPBR@Holding Walk  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)  <Animator>(controller=HoldingController 1, avatar=Ch22_nonPBR@Holding WalkAvatar)
+        Ch22_Body  pos=(0.0, 1.2, 0.0) scale=(1.0, 1.0, 1.0)  <SkinnedMeshRenderer>
+        Ch22_Eyelashes  pos=(0.0, 1.3, 0.0) scale=(1.0, 1.0, 1.0)  <SkinnedMeshRenderer>
+        Ch22_Hair  pos=(0.0, 1.3, 0.0) scale=(1.0, 1.0, 1.0)  <SkinnedMeshRenderer>
+        Ch22_Pants  pos=(0.0, 1.0, 0.0) scale=(1.0, 1.0, 1.0)  <SkinnedMeshRenderer>
+        Ch22_Shirt  pos=(0.0, 1.0, 0.0) scale=(1.0, 1.0, 1.0)  <SkinnedMeshRenderer>
+        Ch22_Sneakers  pos=(0.1, 0.5, 0.1) scale=(1.0, 1.0, 1.0)  <SkinnedMeshRenderer>
+        mixamorig2:RightHand  pos=(0.3, 0.9, 0.0) scale=(1.0, 1.0, 1.0)
+      cur  pos=(0.3, -0.1, 0.5) scale=(1.0, 1.0, 1.0)  <Animator>(controller=NULL, avatar=curAvatar)
+        cur_ready  pos=(0.0, 0.4, -0.2) scale=(1.0, 1.0, 1.0)  <SkinnedMeshRenderer>
+  Renderer count: 7
+    R 'Ch22_nonPBR@Holding Walk/Ch22_Body' type=SkinnedMeshRenderer enabled=True mesh=Ch22_Body verts=10186 mats=Ch22_body [Standard]; 
+    R 'Ch22_nonPBR@Holding Walk/Ch22_Eyelashes' type=SkinnedMeshRenderer enabled=True mesh=Ch22_Eyelashes verts=552 mats=Ch22_hair [Standard]; 
+    R 'Ch22_nonPBR@Holding Walk/Ch22_Hair' type=SkinnedMeshRenderer enabled=True mesh=Ch22_Hair verts=8795 mats=Ch22_hair [Standard]; 
+    R 'Ch22_nonPBR@Holding Walk/Ch22_Pants' type=SkinnedMeshRenderer enabled=True mesh=Ch22_Pants verts=4462 mats=Ch22_body [Standard]; 
+    R 'Ch22_nonPBR@Holding Walk/Ch22_Shirt' type=SkinnedMeshRenderer enabled=True mesh=Ch22_Shirt verts=4892 mats=Ch22_body [Standard]; 
+    R 'Ch22_nonPBR@Holding Walk/Ch22_Sneakers' type=SkinnedMeshRenderer enabled=True mesh=Ch22_Sneakers verts=5277 mats=Ch22_body [Standard]; 
+    R 'cur/cur_ready' type=SkinnedMeshRenderer enabled=True mesh=cur_ready verts=3872 mats=_3D_Stylized_Animated_Dogs_Kit [Standard]; 
+  Sub-assets: 0 mesh(es) (0 verts), 0 clip(s), 38 other(s), total 38
+
+--- Assets/Resources/Prefabs/Community-informed Model/Dog Walker/Ch22_nonPBR@Holding Walk.fbx ---
+  Hierarchy:
+    Ch22_nonPBR@Holding Walk  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)  <Animator>(controller=NULL, avatar=Ch22_nonPBR@Holding WalkAvatar)
+      Ch22_Body  pos=(0.0, 1.2, 0.0) scale=(1.0, 1.0, 1.0)  <SkinnedMeshRenderer>
+      Ch22_Eyelashes  pos=(0.0, 1.3, 0.0) scale=(1.0, 1.0, 1.0)  <SkinnedMeshRenderer>
+      Ch22_Hair  pos=(0.0, 1.3, 0.0) scale=(1.0, 1.0, 1.0)  <SkinnedMeshRenderer>
+      Ch22_Pants  pos=(0.0, 1.0, 0.0) scale=(1.0, 1.0, 1.0)  <SkinnedMeshRenderer>
+      Ch22_Shirt  pos=(0.0, 1.0, 0.0) scale=(1.0, 1.0, 1.0)  <SkinnedMeshRenderer>
+      Ch22_Sneakers  pos=(0.1, 0.5, 0.1) scale=(1.0, 1.0, 1.0)  <SkinnedMeshRenderer>
+      mixamorig2:RightHand  pos=(0.3, 0.9, 0.0) scale=(1.0, 1.0, 1.0)
+  Renderer count: 6
+    R 'Ch22_Body' type=SkinnedMeshRenderer enabled=True mesh=Ch22_Body verts=10186 mats=Ch22_body [Standard]; 
+    R 'Ch22_Eyelashes' type=SkinnedMeshRenderer enabled=True mesh=Ch22_Eyelashes verts=552 mats=Ch22_hair [Standard]; 
+    R 'Ch22_Hair' type=SkinnedMeshRenderer enabled=True mesh=Ch22_Hair verts=8795 mats=Ch22_hair [Standard]; 
+    R 'Ch22_Pants' type=SkinnedMeshRenderer enabled=True mesh=Ch22_Pants verts=4462 mats=Ch22_body [Standard]; 
+    R 'Ch22_Shirt' type=SkinnedMeshRenderer enabled=True mesh=Ch22_Shirt verts=4892 mats=Ch22_body [Standard]; 
+    R 'Ch22_Sneakers' type=SkinnedMeshRenderer enabled=True mesh=Ch22_Sneakers verts=5277 mats=Ch22_body [Standard]; 
+  Mesh sub-asset: 'Ch22_Eyelashes' verts=552 bounds=Center: (0.0, 1.6, 0.1), Extents: (0.1, 0.0, 0.0)
+  Mesh sub-asset: 'Ch22_Shirt' verts=4892 bounds=Center: (0.0, 1.3, 0.1), Extents: (0.3, 0.2, 0.1)
+  Mesh sub-asset: 'Ch22_Body' verts=10186 bounds=Center: (0.0, 0.9, 0.0), Extents: (0.8, 0.8, 0.1)
+  Mesh sub-asset: 'Ch22_Hair' verts=8795 bounds=Center: (0.0, 1.6, 0.0), Extents: (0.1, 0.1, 0.1)
+  Mesh sub-asset: 'Ch22_Sneakers' verts=5277 bounds=Center: (0.0, 0.1, 0.0), Extents: (0.2, 0.1, 0.1)
+  Mesh sub-asset: 'Ch22_Pants' verts=4462 bounds=Center: (0.0, 0.6, 0.0), Extents: (0.2, 0.5, 0.1)
+  Sub-assets: 6 mesh(es) (34164 verts), 2 clip(s), 24 other(s), total 32
+
+--- Assets/Resources/Prefabs/Community-informed Model/Dog Walker/cur.fbx ---
+  Hierarchy:
+    cur  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)  <Animator>(controller=NULL, avatar=curAvatar)
+      cur_ready  pos=(0.0, 0.4, -0.2) scale=(1.0, 1.0, 1.0)  <SkinnedMeshRenderer>
+  Renderer count: 1
+    R 'cur_ready' type=SkinnedMeshRenderer enabled=True mesh=cur_ready verts=3872 mats=_3D_Stylized_Animated_Dogs_Kit [Standard]; 
+  Mesh sub-asset: 'cur_ready' verts=3872 bounds=Center: (0.0, -0.1, 0.3), Extents: (0.1, 0.3, 0.3)
+  Sub-assets: 1 mesh(es) (3872 verts), 0 clip(s), 8 other(s), total 9
+
+--- Assets/Resources/PlayerCharacters/Phone_User.prefab ---
+  Hierarchy:
+    Phone_User  pos=(0.0, -0.1, 0.0) scale=(1.0, 1.0, 1.0)  <CapsuleCollider>  <TrackedObject>  <Rigidbody>  <AttachPropToHand>(prop=Apple iphone 12 pro max, bone=RightHand, autoTag='Bip01 R Hand')  <ManualWheelchairController>  <PhoneUserArmPose>(animTarget='')
+      Female_Adult_05 1  pos=(0.0, -0.1, 0.0) scale=(1.0, 1.0, 1.0)  <Animator>(controller=PhoneUserPoseController, avatar=Female_Adult_05 1Avatar)
+        Bip01  pos=(0.0, 0.9, 0.0) scale=(1.0, 1.0, 1.0)
+          Bip01 Footsteps  pos=(0.0, 0.0, -0.9) scale=(1.0, 1.0, 1.0)
+          Bip01 Pelvis  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+            Bip01 L Thigh  pos=(0.0, 0.0, 0.1) scale=(1.0, 1.0, 1.0)
+              Bip01 L Calf  pos=(-0.4, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                Bip01 L Foot  pos=(-0.4, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                  Bip01 L Toe0  pos=(-0.1, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+            Bip01 R Thigh  pos=(0.0, 0.0, -0.1) scale=(1.0, 1.0, 1.0)
+              Bip01 R Calf  pos=(-0.4, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                Bip01 R Foot  pos=(-0.4, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                  Bip01 R Toe0  pos=(-0.1, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+            Bip01 Spine  pos=(-0.1, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+              Bip01 Spine1  pos=(-0.1, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                Bip01 Spine2  pos=(-0.1, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                  Bip01 L Clavicle  pos=(-0.1, 0.0, 0.1) scale=(1.0, 1.0, 1.0)
+                    Bip01 L UpperArm  pos=(-0.1, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                      Bip01 L Forearm  pos=(-0.3, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                        Bip01 L Hand  pos=(-0.2, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                          Bip01 L Finger0  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                            Bip01 L Finger01  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                              Bip01 L Finger02  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                          Bip01 L Finger1  pos=(-0.1, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                            Bip01 L Finger11  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                              Bip01 L Finger12  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                          Bip01 L Finger2  pos=(-0.1, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                            Bip01 L Finger21  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                              Bip01 L Finger22  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                          Bip01 L Finger3  pos=(-0.1, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                            Bip01 L Finger31  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                              Bip01 L Finger32  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                          Bip01 L Finger4  pos=(-0.1, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                            Bip01 L Finger41  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                              Bip01 L Finger42  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                  Bip01 Neck  pos=(-0.2, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                    Bip01 Head  pos=(-0.1, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                      Bip01 LCaninus  pos=(-0.1, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                      Bip01 LCheek  pos=(-0.1, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                      Bip01 LEye  pos=(-0.1, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                      Bip01 LEyeBlinkBottom  pos=(-0.1, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                      Bip01 LEyeBlinkTop  pos=(-0.1, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                      Bip01 LInnerEyebrow  pos=(-0.1, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                      Bip01 LMasseter  pos=(0.0, 0.1, 0.1) scale=(1.0, 1.0, 1.0)
+                      Bip01 LMouthCorner  pos=(0.0, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                      Bip01 LOuterEyebrow  pos=(-0.1, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                      Bip01 LUpperlip  pos=(0.0, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                      Bip01 MJaw  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                        Bip01 LMouthBottom  pos=(-0.1, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                        Bip01 MBottomLip  pos=(-0.1, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                        Bip01 MTongue  pos=(-0.1, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                        Bip01 RMouthBottom  pos=(-0.1, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                      Bip01 MMiddleEyebrow  pos=(-0.1, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                      Bip01 MNose  pos=(-0.1, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                      Bip01 MUpperLip  pos=(0.0, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                      Bip01 RCaninus  pos=(-0.1, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                      Bip01 RCheek  pos=(-0.1, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                      Bip01 REye  pos=(-0.1, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                      Bip01 REyeBlinkBottom  pos=(-0.1, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                      Bip01 REyeBlinkTop  pos=(-0.1, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                      Bip01 RInnerEyebrow  pos=(-0.1, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                      Bip01 RMasseter  pos=(0.0, 0.1, -0.1) scale=(1.0, 1.0, 1.0)
+                      Bip01 RMouthCorner  pos=(0.0, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                      Bip01 ROuterEyebrow  pos=(-0.1, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                      Bip01 RUpperlip  pos=(0.0, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                  Bip01 R Clavicle  pos=(-0.1, 0.0, -0.1) scale=(1.0, 1.0, 1.0)
+                    Bip01 R UpperArm  pos=(-0.1, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                      Bip01 R Forearm  pos=(-0.3, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                        Bip01 R Hand  pos=(-0.2, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                          Bip01 R Finger0  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                            Bip01 R Finger01  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                              Bip01 R Finger02  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                          Bip01 R Finger1  pos=(-0.1, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                            Bip01 R Finger11  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                              Bip01 R Finger12  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                          Bip01 R Finger2  pos=(-0.1, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                            Bip01 R Finger21  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                              Bip01 R Finger22  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                          Bip01 R Finger3  pos=(-0.1, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                            Bip01 R Finger31  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                              Bip01 R Finger32  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                          Bip01 R Finger4  pos=(-0.1, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                            Bip01 R Finger41  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                              Bip01 R Finger42  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+        f005_hipoly_81_bones_opacity  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)  <SkinnedMeshRenderer>
+      Apple iphone 12 pro max  pos=(0.3, 1.0, 0.6) scale=(4.0, 4.0, 4.0)  <MeshFilter>  <MeshRenderer>
+        camera  pos=(0.0, 0.0, 0.0) scale=(0.3, 0.3, 0.3)  <MeshFilter>  <MeshRenderer>
+        camera glass  pos=(0.0, 0.0, 0.0) scale=(0.3, 0.3, 0.3)  <MeshFilter>  <MeshRenderer>
+        flash  pos=(0.0, 0.0, 0.0) scale=(0.3, 0.3, 0.3)  <MeshFilter>  <MeshRenderer>
+        lenses  pos=(0.0, 0.0, 0.0) scale=(0.3, 0.3, 0.3)  <MeshFilter>  <MeshRenderer>
+        screen  pos=(0.0, 0.0, 0.0) scale=(0.3, 0.3, 0.3)  <MeshFilter>  <MeshRenderer>
+  Renderer count: 7
+    R 'Female_Adult_05 1/f005_hipoly_81_bones_opacity' type=SkinnedMeshRenderer enabled=True mesh=f005_hipoly_81_bones_opacity verts=5580 mats=f005_body [Standard]; f005_head [Standard]; f005_opacity [Standard]; 
+    R 'Apple iphone 12 pro max' type=MeshRenderer enabled=True mesh=main verts=9039 mats=mettalic 1 [Standard]; matte back 1 [Standard]; white 1 [Standard]; 
+    R 'Apple iphone 12 pro max/camera' type=MeshRenderer enabled=True mesh=camera verts=756 mats=matte finish 1 [Standard]; mettalic 3 [Standard]; 
+    R 'Apple iphone 12 pro max/camera glass' type=MeshRenderer enabled=True mesh=camera glass verts=801 mats=normal glass 1 [Standard]; matte black 1 [Standard]; LİDAR 1 [Standard]; 
+    R 'Apple iphone 12 pro max/flash' type=MeshRenderer enabled=True mesh=flash verts=663 mats=magic texture 1 [Standard]; emission 1 [Standard]; 
+    R 'Apple iphone 12 pro max/lenses' type=MeshRenderer enabled=True mesh=lenses verts=3578 mats=matte black 1 [Standard]; mettalic 1 [Standard]; optimizied glass 1 [Standard]; screen frame 1 [Standard]; lens 1 [Standard]; 
+    R 'Apple iphone 12 pro max/screen' type=MeshRenderer enabled=True mesh=screen verts=1063 mats=screen frame 1 [Standard]; screen 1 [Standard]; optimizied glass 1 [Standard]; 
+  Sub-assets: 0 mesh(es) (0 verts), 0 clip(s), 204 other(s), total 204
+
+--- Assets/Resources/PlayerCharacters/Walker_User.prefab ---
+  Hierarchy:
+    Walker_User  pos=(0.0, -0.6, 0.6) scale=(1.0, 1.0, 1.0)  <CapsuleCollider>  <TrackedObject>  <ManualWheelchairController>  <Rigidbody>  <WalkerSpineLean>
+      man  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)  <Animator>(controller=WalkerController, avatar=manAvatar)
+        Armature  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+          Hips  pos=(0.0, 0.0, 0.8) scale=(1.0, 1.0, 1.0)
+            LeftUpLeg  pos=(-0.1, 0.0, 0.1) scale=(1.0, 1.0, 1.0)
+              LeftLeg  pos=(0.0, 0.3, 0.0) scale=(1.0, 1.0, 1.0)
+                LeftFoot  pos=(0.0, 0.3, 0.0) scale=(1.0, 1.0, 1.0)
+                  LeftToeBase  pos=(0.0, 0.2, 0.0) scale=(1.0, 1.0, 1.0)
+            RightUpLeg  pos=(0.0, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+              RightLeg  pos=(0.0, 0.3, 0.0) scale=(1.0, 1.0, 1.0)
+                RightFoot  pos=(0.0, 0.3, 0.0) scale=(1.0, 1.0, 1.0)
+                  RightToeBase  pos=(0.0, 0.2, 0.0) scale=(1.0, 1.0, 1.0)
+            Spine02  pos=(0.0, -0.1, -0.1) scale=(1.0, 1.0, 1.0)
+              Spine01  pos=(0.0, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                Spine  pos=(0.0, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                  LeftShoulder  pos=(0.0, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                    LeftArm  pos=(0.0, 0.2, 0.0) scale=(1.0, 1.0, 1.0)
+                      LeftForeArm  pos=(0.0, 0.2, 0.0) scale=(1.0, 1.0, 1.0)
+                        LeftHand  pos=(0.0, 0.2, 0.0) scale=(1.0, 1.0, 1.0)
+                  neck  pos=(0.0, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                    Head  pos=(0.0, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                      head_end  pos=(0.0, 0.3, -0.1) scale=(1.0, 1.0, 1.0)
+                      headfront  pos=(0.0, 0.1, 0.1) scale=(1.0, 1.0, 1.0)
+                  RightShoulder  pos=(0.0, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                    RightArm  pos=(0.0, 0.2, 0.0) scale=(1.0, 1.0, 1.0)
+                      RightForeArm  pos=(0.0, 0.2, 0.0) scale=(1.0, 1.0, 1.0)
+                        RightHand  pos=(0.0, 0.2, 0.0) scale=(1.0, 1.0, 1.0)
+        char1  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)  <SkinnedMeshRenderer>
+      SM_FoldingWalker  pos=(0.0, 0.0, 0.3) scale=(10.0, 10.0, 10.0)
+        Object001  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)  <MeshFilter>  <MeshRenderer>
+  Renderer count: 2
+    R 'man/char1' type=SkinnedMeshRenderer enabled=True mesh=char1 verts=9927 mats=Material_1 [Standard]; 
+    R 'SM_FoldingWalker/Object001' type=MeshRenderer enabled=True mesh=Object001 verts=2294 mats=Object001Mat [Standard]; 
+  Sub-assets: 0 mesh(es) (0 verts), 0 clip(s), 71 other(s), total 71
+
+--- Assets/Resources/Prefabs/Community-informed Model/Phone User/Female_Adult_05 1.fbx ---
+  Hierarchy:
+    Female_Adult_05 1  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)  <Animator>(controller=NULL, avatar=Female_Adult_05 1Avatar)
+      Bip01  pos=(0.0, 0.9, 0.0) scale=(1.0, 1.0, 1.0)
+        Bip01 Footsteps  pos=(0.0, 0.0, -0.9) scale=(1.0, 1.0, 1.0)
+        Bip01 Pelvis  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+          Bip01 L Thigh  pos=(0.0, 0.0, 0.1) scale=(1.0, 1.0, 1.0)
+            Bip01 L Calf  pos=(-0.4, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+              Bip01 L Foot  pos=(-0.4, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                Bip01 L Toe0  pos=(-0.1, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+          Bip01 R Thigh  pos=(0.0, 0.0, -0.1) scale=(1.0, 1.0, 1.0)
+            Bip01 R Calf  pos=(-0.4, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+              Bip01 R Foot  pos=(-0.4, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                Bip01 R Toe0  pos=(-0.1, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+          Bip01 Spine  pos=(-0.1, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+            Bip01 Spine1  pos=(-0.1, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+              Bip01 Spine2  pos=(-0.1, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                Bip01 L Clavicle  pos=(-0.1, 0.0, 0.1) scale=(1.0, 1.0, 1.0)
+                  Bip01 L UpperArm  pos=(-0.1, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                    Bip01 L Forearm  pos=(-0.3, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                      Bip01 L Hand  pos=(-0.2, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                        Bip01 L Finger0  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                          Bip01 L Finger01  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                            Bip01 L Finger02  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                        Bip01 L Finger1  pos=(-0.1, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                          Bip01 L Finger11  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                            Bip01 L Finger12  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                        Bip01 L Finger2  pos=(-0.1, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                          Bip01 L Finger21  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                            Bip01 L Finger22  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                        Bip01 L Finger3  pos=(-0.1, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                          Bip01 L Finger31  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                            Bip01 L Finger32  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                        Bip01 L Finger4  pos=(-0.1, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                          Bip01 L Finger41  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                            Bip01 L Finger42  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                Bip01 Neck  pos=(-0.2, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                  Bip01 Head  pos=(-0.1, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                    Bip01 LCaninus  pos=(-0.1, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                    Bip01 LCheek  pos=(-0.1, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                    Bip01 LEye  pos=(-0.1, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                    Bip01 LEyeBlinkBottom  pos=(-0.1, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                    Bip01 LEyeBlinkTop  pos=(-0.1, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                    Bip01 LInnerEyebrow  pos=(-0.1, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                    Bip01 LMasseter  pos=(0.0, 0.1, 0.1) scale=(1.0, 1.0, 1.0)
+                    Bip01 LMouthCorner  pos=(0.0, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                    Bip01 LOuterEyebrow  pos=(-0.1, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                    Bip01 LUpperlip  pos=(0.0, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                    Bip01 MJaw  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                      Bip01 LMouthBottom  pos=(-0.1, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                      Bip01 MBottomLip  pos=(-0.1, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                      Bip01 MTongue  pos=(-0.1, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                      Bip01 RMouthBottom  pos=(-0.1, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                    Bip01 MMiddleEyebrow  pos=(-0.1, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                    Bip01 MNose  pos=(-0.1, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                    Bip01 MUpperLip  pos=(0.0, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                    Bip01 RCaninus  pos=(-0.1, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                    Bip01 RCheek  pos=(-0.1, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                    Bip01 REye  pos=(-0.1, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                    Bip01 REyeBlinkBottom  pos=(-0.1, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                    Bip01 REyeBlinkTop  pos=(-0.1, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                    Bip01 RInnerEyebrow  pos=(-0.1, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                    Bip01 RMasseter  pos=(0.0, 0.1, -0.1) scale=(1.0, 1.0, 1.0)
+                    Bip01 RMouthCorner  pos=(0.0, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                    Bip01 ROuterEyebrow  pos=(-0.1, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                    Bip01 RUpperlip  pos=(0.0, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                Bip01 R Clavicle  pos=(-0.1, 0.0, -0.1) scale=(1.0, 1.0, 1.0)
+                  Bip01 R UpperArm  pos=(-0.1, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                    Bip01 R Forearm  pos=(-0.3, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                      Bip01 R Hand  pos=(-0.2, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                        Bip01 R Finger0  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                          Bip01 R Finger01  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                            Bip01 R Finger02  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                        Bip01 R Finger1  pos=(-0.1, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                          Bip01 R Finger11  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                            Bip01 R Finger12  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                        Bip01 R Finger2  pos=(-0.1, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                          Bip01 R Finger21  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                            Bip01 R Finger22  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                        Bip01 R Finger3  pos=(-0.1, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                          Bip01 R Finger31  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                            Bip01 R Finger32  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                        Bip01 R Finger4  pos=(-0.1, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                          Bip01 R Finger41  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+                            Bip01 R Finger42  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+      f005_hipoly_81_bones_opacity  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)  <SkinnedMeshRenderer>
+  Renderer count: 1
+    R 'f005_hipoly_81_bones_opacity' type=SkinnedMeshRenderer enabled=True mesh=f005_hipoly_81_bones_opacity verts=5580 mats=f005_body [Standard]; f005_head [Standard]; f005_opacity [Standard]; 
+  Mesh sub-asset: 'f005_hipoly_81_bones_opacity' verts=5580 bounds=Center: (0.0, 0.0, 0.9), Extents: (0.6, 0.1, 0.9)
+  Sub-assets: 1 mesh(es) (5580 verts), 2 clip(s), 174 other(s), total 177
+
+--- Assets/Resources/Prefabs/Community-informed Model/Walker User/man.fbx ---
+  Hierarchy:
+    man  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)  <Animator>(controller=NULL, avatar=manAvatar)
+      Armature  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)
+        Hips  pos=(0.0, 0.0, 0.8) scale=(1.0, 1.0, 1.0)
+          LeftUpLeg  pos=(-0.1, 0.0, 0.1) scale=(1.0, 1.0, 1.0)
+            LeftLeg  pos=(0.0, 0.3, 0.0) scale=(1.0, 1.0, 1.0)
+              LeftFoot  pos=(0.0, 0.3, 0.0) scale=(1.0, 1.0, 1.0)
+                LeftToeBase  pos=(0.0, 0.2, 0.0) scale=(1.0, 1.0, 1.0)
+          RightUpLeg  pos=(0.0, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+            RightLeg  pos=(0.0, 0.3, 0.0) scale=(1.0, 1.0, 1.0)
+              RightFoot  pos=(0.0, 0.3, 0.0) scale=(1.0, 1.0, 1.0)
+                RightToeBase  pos=(0.0, 0.2, 0.0) scale=(1.0, 1.0, 1.0)
+          Spine02  pos=(0.0, -0.1, -0.1) scale=(1.0, 1.0, 1.0)
+            Spine01  pos=(0.0, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+              Spine  pos=(0.0, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                LeftShoulder  pos=(0.0, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                  LeftArm  pos=(0.0, 0.2, 0.0) scale=(1.0, 1.0, 1.0)
+                    LeftForeArm  pos=(0.0, 0.2, 0.0) scale=(1.0, 1.0, 1.0)
+                      LeftHand  pos=(0.0, 0.2, 0.0) scale=(1.0, 1.0, 1.0)
+                neck  pos=(0.0, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                  Head  pos=(0.0, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                    head_end  pos=(0.0, 0.3, -0.1) scale=(1.0, 1.0, 1.0)
+                    headfront  pos=(0.0, 0.1, 0.1) scale=(1.0, 1.0, 1.0)
+                RightShoulder  pos=(0.0, 0.1, 0.0) scale=(1.0, 1.0, 1.0)
+                  RightArm  pos=(0.0, 0.2, 0.0) scale=(1.0, 1.0, 1.0)
+                    RightForeArm  pos=(0.0, 0.2, 0.0) scale=(1.0, 1.0, 1.0)
+                      RightHand  pos=(0.0, 0.2, 0.0) scale=(1.0, 1.0, 1.0)
+      char1  pos=(0.0, 0.0, 0.0) scale=(1.0, 1.0, 1.0)  <SkinnedMeshRenderer>
+  Renderer count: 1
+    R 'char1' type=SkinnedMeshRenderer enabled=True mesh=char1 verts=9927 mats=Material_1 [Standard]; 
+  Mesh sub-asset: 'char1' verts=9927 bounds=Center: (0.0, 0.9, 0.0), Extents: (0.8, 0.9, 0.2)
+  Sub-assets: 1 mesh(es) (9927 verts), 2 clip(s), 58 other(s), total 61

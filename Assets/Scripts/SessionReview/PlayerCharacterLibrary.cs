@@ -19,9 +19,11 @@ namespace SessionReview
     /// <summary>
     /// Enumerates walking player character prefabs dropped into
     /// <c>Resources/PlayerCharacters</c> (thumbnails, optional, from
-    /// <c>Resources/PlayerCharactersUI</c> matched by prefab name). Unlike
-    /// <see cref="WorldBuildingSpawnLibrary"/>, a prefab without a thumbnail is still
-    /// listed so a freshly dropped avatar is selectable before its preview art exists.
+    /// <c>Resources/PlayerCharactersUI</c> matched by prefab name). A prefab without
+    /// preview art stays in <see cref="Options"/> (World Building and
+    /// <see cref="FindPrefab"/> must see every prefab) but is left out of
+    /// <see cref="OptionsWithPreview"/>, which the character-select pages list so no
+    /// "(no preview)" cards appear there.
     /// The built-in wheelchair pair is NOT listed here; it stays the default choice
     /// (SelectedPlayerCharacterId empty).
     /// </summary>
@@ -31,6 +33,7 @@ namespace SessionReview
         private const string ThumbnailFolder = "PlayerCharactersUI";
 
         private static List<PlayerCharacterOption> _options;
+        private static List<PlayerCharacterOption> _optionsWithPreview;
 
         public static IReadOnlyList<PlayerCharacterOption> Options
         {
@@ -42,9 +45,21 @@ namespace SessionReview
             }
         }
 
+        /// <summary>Only the options that have preview art; the character-select pages list these.</summary>
+        public static IReadOnlyList<PlayerCharacterOption> OptionsWithPreview
+        {
+            get
+            {
+                if (_optionsWithPreview == null)
+                    Refresh();
+                return _optionsWithPreview;
+            }
+        }
+
         public static void Refresh()
         {
             _options = new List<PlayerCharacterOption>();
+            _optionsWithPreview = new List<PlayerCharacterOption>();
 
             GameObject[] prefabs = Resources.LoadAll<GameObject>(PrefabFolder);
             if (prefabs == null || prefabs.Length == 0)
@@ -62,13 +77,16 @@ namespace SessionReview
                 if (prefab == null)
                     continue;
 
-                _options.Add(new PlayerCharacterOption
+                var option = new PlayerCharacterOption
                 {
                     Id = prefab.name,
                     DisplayName = WorldBuildingSpawnLibrary.HumanizePrefabName(prefab.name),
                     Prefab = prefab,
                     Thumbnail = FindThumbnail(prefab.name, textures)
-                });
+                };
+                _options.Add(option);
+                if (option.Thumbnail != null)
+                    _optionsWithPreview.Add(option);
             }
         }
 
@@ -96,6 +114,15 @@ namespace SessionReview
                     return t;
             }
 
+            // Art is often named without the prefab's separators (dogwalker.png for
+            // Dog_Walker), so also compare with underscores/dashes/spaces stripped.
+            string target = NormalizeName(prefabName);
+            foreach (Texture2D t in textures)
+            {
+                if (t != null && string.Equals(NormalizeName(t.name), target, StringComparison.OrdinalIgnoreCase))
+                    return t;
+            }
+
             foreach (Texture2D t in textures)
             {
                 if (t == null) continue;
@@ -105,6 +132,14 @@ namespace SessionReview
             }
 
             return null;
+        }
+
+        private static string NormalizeName(string name)
+        {
+            return name
+                .Replace("_", string.Empty)
+                .Replace("-", string.Empty)
+                .Replace(" ", string.Empty);
         }
     }
 }

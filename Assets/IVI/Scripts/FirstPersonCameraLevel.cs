@@ -19,6 +19,12 @@ namespace IVI
 
         private Transform followTarget;
 
+        /// <summary>
+        /// Avatar root this camera follows. Falls back to the current parent before
+        /// <see cref="Start"/> has cached (and un-parented from) it.
+        /// </summary>
+        public Transform FollowTarget => followTarget != null ? followTarget : transform.parent;
+
         void Start()
         {
             followTarget = transform.parent;

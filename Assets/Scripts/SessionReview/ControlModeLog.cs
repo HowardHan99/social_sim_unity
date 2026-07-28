@@ -152,12 +152,31 @@ namespace SessionReview
 
         public List<ControlModeEntry> GetEntriesInRange(float startTime, float endTime)
         {
-            var result = new List<ControlModeEntry>();
+            // Modes are recorded as transitions, so an agent whose last change happened
+            // before the window (a robot driven manually since onboarding, say) would fall
+            // out of the window entirely, and a saved trial could not tell who was driving.
+            // Each agent's pre-window state is carried in as an entry at the window start.
+            var carried = new Dictionary<string, ControlMode>();
+            var inWindow = new List<ControlModeEntry>();
             foreach (var entry in Entries)
             {
-                if (entry.timestamp >= startTime && entry.timestamp <= endTime)
-                    result.Add(entry);
+                if (entry.timestamp < startTime)
+                    carried[entry.agentId] = entry.mode;
+                else if (entry.timestamp <= endTime)
+                    inWindow.Add(entry);
             }
+
+            var result = new List<ControlModeEntry>();
+            foreach (var kvp in carried)
+            {
+                result.Add(new ControlModeEntry
+                {
+                    timestamp = startTime,
+                    agentId = kvp.Key,
+                    mode = kvp.Value
+                });
+            }
+            result.AddRange(inWindow);
             return result;
         }
 

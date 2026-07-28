@@ -34,8 +34,38 @@ public class SignalUIManager : MonoBehaviour
     private SignalFlowType activeFlow = SignalFlowType.None;
     private bool isSignalSequenceActive;
 
+    // Scene-local instance so IMGUI overlays (SessionReviewManager's End Interaction
+    // button) can dodge the canvas-space Send Signal button without a per-frame find.
+    private static SignalUIManager activeInstance;
+    private static readonly Vector3[] signalButtonCorners = new Vector3[4];
+
+    /// <summary>
+    /// Screen-pixel rect (origin bottom-left, same space as Input.mousePosition) of the
+    /// Send Signal button while it is visible. False when hidden or absent from the scene.
+    /// </summary>
+    public static bool TryGetVisibleSendSignalRect(out Rect screenRect)
+    {
+        screenRect = default;
+        Button button = activeInstance != null ? activeInstance.sendSignalButton : null;
+        if (button == null || !button.gameObject.activeInHierarchy)
+            return false;
+
+        if (!(button.transform is RectTransform rectTransform))
+            return false;
+
+        // Screen Space - Overlay canvas: world corners are already screen pixels
+        // (index 0 = bottom-left, 2 = top-right).
+        rectTransform.GetWorldCorners(signalButtonCorners);
+        screenRect = Rect.MinMaxRect(
+            signalButtonCorners[0].x, signalButtonCorners[0].y,
+            signalButtonCorners[2].x, signalButtonCorners[2].y);
+        return true;
+    }
+
     private void Awake()
     {
+        activeInstance = this;
+
         if (sendSignalButton != null)
             sendSignalButton.onClick.AddListener(OpenSignalSelection);
 
@@ -95,6 +125,9 @@ public class SignalUIManager : MonoBehaviour
 
     private void OnDestroy()
     {
+        if (activeInstance == this)
+            activeInstance = null;
+
         if (sendSignalButton != null)
             sendSignalButton.onClick.RemoveListener(OpenSignalSelection);
 
