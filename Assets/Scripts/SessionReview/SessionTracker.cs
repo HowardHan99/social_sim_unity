@@ -32,7 +32,11 @@ namespace SessionReview
         // trial log (trial_info.json roles, trajectory_*_worldbuildingped.json filenames)
         // shows which trajectories came out of world building. Append-only: serialized as
         // its int value, so new members must stay at the end.
-        WorldBuildingPed
+        WorldBuildingPed,
+        // Generic scene object (e.g. a parked car) the operator drove via the Agent
+        // Control panel (AgentPossessOverlay). Registered so its motion lands in the
+        // trial trajectory log and replays like any agent's.
+        ControlledObject
     }
 
     public class TrialEndInfo
@@ -48,6 +52,17 @@ namespace SessionReview
         public bool hasPlayerGoalPosition;
         public Dictionary<string, AgentArrivalInfo> agentArrivals = new Dictionary<string, AgentArrivalInfo>();
         public Dictionary<string, AgentRole> agentRoles = new Dictionary<string, AgentRole>();
+
+        // Condition provenance, captured at trial START: the world-building state
+        // and the drawn route (if any) this run began with. Distinguishes draw runs
+        // and world-edited re-runs without post-hoc geometry heuristics.
+        public string worldEditSignature;
+        public int worldEditObjectCount;
+        public int worldEditDeltaCount;
+        public bool hadDrawnTrajectory;
+        public int drawnTrajectoryPointCount;
+        public float drawnTrajectoryLength;
+        public string drawnTrajectoryFile;
     }
 
     public delegate void OnTrialEnded(TrialEndInfo info);
@@ -68,11 +83,24 @@ namespace SessionReview
         private ushort trialNumber;
         private string trialName;
 
+        // Trial-start provenance (see TrialEndInfo).
+        private string startWorldSignature = "";
+        private int startWorldObjectCount;
+        private int startWorldDeltaCount;
+        private bool startHadDrawnTraj;
+        private int startDrawnPointCount;
+        private float startDrawnLength;
+        private string startDrawnFile = "";
+
         private Dictionary<string, AgentArrivalInfo> agentArrivals = new Dictionary<string, AgentArrivalInfo>();
         private Dictionary<string, AgentRole> agentRoles = new Dictionary<string, AgentRole>();
 
         private List<SEAN.Scenario.Trajectory.TrackedAgent> trackedPedestrians = new List<SEAN.Scenario.Trajectory.TrackedAgent>();
         private List<WorldBuildingWanderPedestrian> wanderPedestrians = new List<WorldBuildingWanderPedestrian>();
+        // Generic objects the operator has driven via the Agent Control panel. Kept for
+        // the whole session (not reset per trial) so a car possessed in trial N is still
+        // tracked when trial N+1 begins.
+        private readonly List<GameObject> controlledObjects = new List<GameObject>();
         private ManualWheelchairController pwdController;
         private LiveTrajectoryRecorder trajectoryRecorder;
         private IVI.INavigable pwdNavigable;
@@ -141,6 +169,7 @@ namespace SessionReview
             trialStartTime = Time.time;
             trialNumber = sean.robotTask.number;
             trialName = sean.pedestrianBehavior.name + "_" + sean.robotTask.name;
+            CaptureConditionProvenance();
 
             agentArrivals.Clear();
             agentRoles.Clear();
@@ -207,6 +236,7 @@ namespace SessionReview
             }
 
             RegisterWorldBuildingPedestrians();
+            RegisterControlledObjectRoles();
 
             tracking = true;
             trialArchived = false;
@@ -264,6 +294,51 @@ namespace SessionReview
                 RegisterAllWithRecorder();
         }
 
+        private bool RegisterControlledObjectRoles()
+        {
+            bool addedAny = false;
+            controlledObjects.RemoveAll(o => o == null);
+            foreach (GameObject go in controlledObjects)
+            {
+                string id = GetObjectId(go);
+                if (string.IsNullOrEmpty(id) || agentRoles.ContainsKey(id))
+                    continue;
+
+                agentRoles[id] = AgentRole.ControlledObject;
+                agentArrivals[id] = new AgentArrivalInfo
+                {
+                    objectId = id,
+                    agentName = go.name,
+                    role = AgentRole.ControlledObject,
+                    arrived = false,
+                    arrivalTime = -1f
+                };
+                addedAny = true;
+            }
+            return addedAny;
+        }
+
+        /// <summary>
+        /// Registers a generic object the operator took control of (AgentPossessOverlay)
+        /// so its motion is recorded into the trial trajectory log and replayed like any
+        /// agent's. Mirrors RegisterLateWorldBuildingPedestrian: if a trial is already
+        /// running, recording starts at the moment of possession; the object also stays
+        /// registered for every following trial. Safe to call repeatedly.
+        /// </summary>
+        public void RegisterControlledObject(GameObject go)
+        {
+            if (go == null)
+                return;
+            if (!controlledObjects.Contains(go))
+                controlledObjects.Add(go);
+
+            if (!tracking)
+                return;   // next BeginTracking picks it up
+
+            if (RegisterControlledObjectRoles())
+                RegisterAllWithRecorder();
+        }
+
         private void RegisterAllWithRecorder()
         {
             if (trajectoryRecorder == null) return;
@@ -300,6 +375,17 @@ namespace SessionReview
                 string id = GetObjectId(wander.gameObject);
                 if (!string.IsNullOrEmpty(id))
                     trajectoryRecorder.TrackAgent(id, ResolveTrackingTransform(wander.gameObject));
+            }
+
+            // Operator-controlled objects (Agent Control panel): track the root transform —
+            // that is the transform the possession controller drives, and the transform
+            // review playback resolves by name.
+            foreach (GameObject go in controlledObjects)
+            {
+                if (go == null) continue;
+                string id = GetObjectId(go);
+                if (!string.IsNullOrEmpty(id))
+                    trajectoryRecorder.TrackAgent(id, go.transform);
             }
 
             SessionReview.SessionReviewLog.Log($"[SessionReview] Registered {agentRoles.Count} agents with trajectory recorder.");
@@ -491,10 +577,53 @@ namespace SessionReview
                 playerGoalPosition = playerGoalPosition,
                 hasPlayerGoalPosition = hasPlayerGoalPosition,
                 agentArrivals = new Dictionary<string, AgentArrivalInfo>(agentArrivals),
-                agentRoles = new Dictionary<string, AgentRole>(agentRoles)
+                agentRoles = new Dictionary<string, AgentRole>(agentRoles),
+                worldEditSignature = startWorldSignature,
+                worldEditObjectCount = startWorldObjectCount,
+                worldEditDeltaCount = startWorldDeltaCount,
+                hadDrawnTrajectory = startHadDrawnTraj,
+                drawnTrajectoryPointCount = startDrawnPointCount,
+                drawnTrajectoryLength = startDrawnLength,
+                drawnTrajectoryFile = startDrawnFile
             };
 
             TrialEnded?.Invoke(info);
+        }
+
+        /// <summary>
+        /// Snapshot the world-building state (signature of placed objects + scene
+        /// deltas) and the drawn route loaded in TrajectoryManager when the trial
+        /// begins. Comparing signatures across trials tells post-hoc analysis which
+        /// runs happened in an edited world; the drawn file name tells which runs
+        /// executed a participant drawing.
+        /// </summary>
+        private void CaptureConditionProvenance()
+        {
+            startWorldSignature = "";
+            startWorldObjectCount = 0;
+            startWorldDeltaCount = 0;
+            startHadDrawnTraj = false;
+            startDrawnPointCount = 0;
+            startDrawnLength = 0f;
+            startDrawnFile = "";
+            try
+            {
+                startWorldSignature = WorldBuildingScenarioStore.ComputeCurrentSignature();
+                startWorldObjectCount = WorldBuildingScenarioStore.CollectCurrentObjects().Count;
+                startWorldDeltaCount = WorldBuildingScenarioStore.CollectSceneObjectDeltas().Count;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[SessionTracker] Could not capture world signature: {ex.Message}");
+            }
+            var tm = FindObjectOfType<TrajectoryManager>();
+            if (tm != null)
+            {
+                startHadDrawnTraj = tm.HasFollowTrajectory;
+                startDrawnPointCount = tm.FollowTrajectoryPointCount;
+                startDrawnLength = tm.FollowTrajectoryLength;
+            }
+            startDrawnFile = TrajectoryManager.LastSavedDrawnFile ?? "";
         }
 
         private void MarkArrived(string id)

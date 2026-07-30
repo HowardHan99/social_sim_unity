@@ -30,8 +30,9 @@ namespace SEAN.Control
         // Manual control variables
         private bool manualControlActive = false;
         public bool ManualControlActive => manualControlActive;
-        public float manualLinearSpeed = 0.8f;
-        public float manualAngularSpeed = 20.0f;
+        public float manualLinearSpeed = 1.0f;
+        [Tooltip("Manual turn speed in radians/second. 2.094395 rad/s = 120 deg/s.")]
+        public float manualAngularSpeed = 2.094395f;
 
         [Header("Speed Scaling (live scenario tuning)")]
         [Tooltip("Live speed multiplier for this robot. Scales the commanded linear+angular velocity (auto ROS cmd_vel and manual) so the same path is driven faster/slower. 1 = unchanged. Set live from the Agent Speed overlay.")]
@@ -66,16 +67,16 @@ namespace SEAN.Control
         public bool manualInertiaDrive = true;
         [Tooltip("Linear velocity added per second at full stick deflection or held W (m/s^2).")]
         [FormerlySerializedAs("gamepadLinearAcceleration")]
-        public float inertiaLinearAcceleration = 1.2f;
+        public float inertiaLinearAcceleration = 1.0f;
         [Tooltip("Passive coasting decay while no input is held (m/s^2). Lower = more inertia.")]
         [FormerlySerializedAs("gamepadCoastDeceleration")]
         public float inertiaCoastDeceleration = 0.35f;
         [Tooltip("Angular velocity added per second at full steering deflection or held A/D (same units as manualAngularSpeed, per second).")]
         [FormerlySerializedAs("gamepadAngularAcceleration")]
-        public float inertiaAngularAcceleration = 40f;
+        public float inertiaAngularAcceleration = 4.18879f;
         [Tooltip("Passive turn decay while no steering input is held.")]
         [FormerlySerializedAs("gamepadAngularCoastDeceleration")]
-        public float inertiaAngularCoastDeceleration = 30f;
+        public float inertiaAngularCoastDeceleration = 4.18879f;
 
         [Header("Debug Manual Brake (Read-Only)")]
         public int DebugSBrakePressCount;
@@ -89,11 +90,11 @@ namespace SEAN.Control
         public bool bypassUnityVelocityPostProcessing = true;
         public bool preserveManualVelocitySmoothing = false;
         public float manualVelocityDamping = 0.85f;
-        public float manualAcceleration = 4.0f;
-        public float manualDeceleration = 3.0f;
-        public float manualAngularAcceleration = 20.0f;
+        public float manualAcceleration = 1.0f;
+        public float manualDeceleration = 1.5f;
+        public float manualAngularAcceleration = 4.18879f;
         public bool enforceManualSpeedLimit = true;
-        public float manualMaxPlanarSpeed = 0.8f;
+        public float manualMaxPlanarSpeed = 1.0f;
         public bool useDirectManualRotation = true;
 
         [Tooltip("Read Arrow keys instead of WASD for manual driving. Set automatically so the human's role uses WASD and the other manual role uses arrows.")]
@@ -202,8 +203,8 @@ namespace SEAN.Control
         public bool enableCommandShaping = true;
         public float linearCommandDeadband = 0.01f;
         public float angularCommandDeadband = 0.03f;
-        public float maxLinearCommand = 0.8f;
-        public float maxAngularCommand = 0.7f;
+        public float maxLinearCommand = 1.0f;
+        public float maxAngularCommand = 2.094395f;
 
         [Header("Path Reacquisition")]
         public bool enablePathReacquisition = true;
@@ -631,6 +632,13 @@ namespace SEAN.Control
             float effectiveSpeedScale = Mathf.Max(0f, speedScale);
             appliedLinVelocity *= effectiveSpeedScale;
             appliedAngVelocity *= effectiveSpeedScale;
+            // The speed panel sets speedScale from an absolute m/s target using
+            // maxLinearCommand as the base. Clamp after scaling even when Unity
+            // velocity post-processing is bypassed, so ROS/manual commands cannot
+            // exceed the operator-selected target speed.
+            float scaledMaxLinearCommand = Mathf.Max(0f, maxLinearCommand) * effectiveSpeedScale;
+            if (scaledMaxLinearCommand > 0f)
+                appliedLinVelocity = Mathf.Clamp(appliedLinVelocity, -scaledMaxLinearCommand, scaledMaxLinearCommand);
 
             DebugAppliedLinSpeed = appliedLinVelocity;
             DebugAppliedAngSpeed = appliedAngVelocity;

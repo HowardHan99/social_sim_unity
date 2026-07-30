@@ -150,6 +150,12 @@ public class TrajectoryManager : MonoBehaviour
     public bool IsDrawMode { get; private set; }
     public bool IsFollowMode { get; private set; }
     public bool HasFollowTrajectory => _followTrajectoryPoints.Count >= 2 && _followTrajectoryLength > 0.01f;
+    public int FollowTrajectoryPointCount => _followTrajectoryPoints.Count;
+    public float FollowTrajectoryLength => _followTrajectoryLength;
+    /// <summary>File name of the most recent drawn_trajectory_*.json written into a
+    /// trial folder this session ("" if none). SessionTracker stamps it into the next
+    /// trial's provenance so draw runs are identifiable without geometry heuristics.</summary>
+    public static string LastSavedDrawnFile { get; private set; } = "";
     public float EffectiveFollowSpeed => Mathf.Max(0f, followRobotSpeed * followSpeedMultiplier);
 
     public float FollowSpeedMultiplier
@@ -1637,6 +1643,7 @@ public class TrajectoryManager : MonoBehaviour
             string stamp = System.DateTime.Now.ToString("yyyyMMdd_HHmmss");
             string path = System.IO.Path.Combine(folder, $"drawn_trajectory_{stamp}.json");
             System.IO.File.WriteAllText(path, JsonUtility.ToJson(collection, prettyPrint: true));
+            LastSavedDrawnFile = System.IO.Path.GetFileName(path);
             Debug.Log($"[Trajectory] Drawn trajectory also saved to trial folder: {path}");
         }
         catch (System.Exception ex)

@@ -165,6 +165,9 @@ namespace SessionReview
 
         void Update()
         {
+            if (SessionReviewInputFocus.IsTextEntryActive())
+                return;
+
             bool modifier = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl) ||
                             Input.GetKey(KeyCode.LeftCommand) || Input.GetKey(KeyCode.RightCommand);
             if (!modifier) return;

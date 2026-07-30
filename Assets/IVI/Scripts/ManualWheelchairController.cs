@@ -8,10 +8,10 @@ namespace IVI
     public class ManualWheelchairController : MonoBehaviour
     {
         [Header("Control Settings")]
-        public float moveSpeed = 0.8f;
+        public float moveSpeed = 1.0f;
         [Tooltip("Live speed multiplier for manual driving. Scales moveSpeed so the Agent Speed overlay can retune this pedestrian live. 1 = unchanged.")]
         public float speedScale = 1.0f;
-        public float rotationSpeed = 240f;
+        public float rotationSpeed = 120f;
         public KeyCode toggleModeKey = KeyCode.RightShift;
         public bool useWASD = true;
 
@@ -40,9 +40,9 @@ namespace IVI
         public float sPressWindowSec = 0.6f;
 
         [Header("Manual Smoothing")]
-        public float manualAcceleration = 4.0f;
-        public float manualDeceleration = 3.0f;
-        public float manualAngularAcceleration = 1200f;
+        public float manualAcceleration = 1.0f;
+        public float manualDeceleration = 1.5f;
+        public float manualAngularAcceleration = 240f;
 
         [Header("Manual Inertia Drive")]
         [Tooltip("Manual driving commands acceleration instead of target velocity, for every input device: stick/W accelerates, releasing all input coasts, S/H brakes. Off = original direct-velocity behavior.")]
@@ -50,16 +50,16 @@ namespace IVI
         public bool manualInertiaDrive = true;
         [Tooltip("m/s^2 at full stick deflection or held W.")]
         [FormerlySerializedAs("gamepadLinearAcceleration")]
-        public float inertiaLinearAcceleration = 1.2f;
+        public float inertiaLinearAcceleration = 1.0f;
         [Tooltip("m/s^2 of passive coasting decay while no input is held. Lower = more inertia.")]
         [FormerlySerializedAs("gamepadCoastDeceleration")]
         public float inertiaCoastDeceleration = 0.35f;
         [Tooltip("deg/s^2 at full steering deflection or held A/D.")]
         [FormerlySerializedAs("gamepadAngularAcceleration")]
-        public float inertiaAngularAcceleration = 420f;
+        public float inertiaAngularAcceleration = 240f;
         [Tooltip("deg/s^2 of passive turn decay while no steering input is held. Only used when angularDirectDrive is off.")]
         [FormerlySerializedAs("gamepadAngularCoastDeceleration")]
-        public float inertiaAngularCoastDeceleration = 320f;
+        public float inertiaAngularCoastDeceleration = 240f;
 
         [Tooltip("Steer by stick POSITION (stick angle = turn rate) instead of by acceleration. Turning a body in place has no real momentum; the acceleration model reads as 'slow to start, then keeps turning after you let go'. Off = legacy inertia steering.")]
         public bool angularDirectDrive = true;

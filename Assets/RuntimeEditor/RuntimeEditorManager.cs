@@ -1769,18 +1769,15 @@ public class RuntimeEditorManager : MonoBehaviour
     /// player-control components, swaps the Animator onto the shared walking controller
     /// (the same Forward/Strafe/Idling blend tree RandomAvatar assigns to walking players
     /// and background agents), attaches an IVI social-force agent to the rig and the wander
-    /// driver to the root. Returns false —leaving the object untouched —when the prefab
-    /// has no usable rig (no Animator / no SkinnedMeshRenderer, which SEAN.Agents.Base
-    /// requires); the caller then falls back to the static prop pipeline.
+    /// driver to the root. Returns false when the prefab has no usable Animator rig;
+    /// the caller then falls back to the static prop pipeline.
     /// </summary>
     bool PrepareDynamicCharacterSpawn(GameObject obj, Vector3 spawnPoint, string prefabName)
     {
         Animator animator = obj.GetComponentInChildren<Animator>(true);
-        // Base.Start reads GetComponentInChildren<SkinnedMeshRenderer>() (active only) for the
-        // capsule height, so gate on the same lookup or the agent would throw on its first frame.
-        if (animator == null || animator.GetComponentInChildren<SkinnedMeshRenderer>() == null)
+        if (animator == null)
         {
-            Debug.LogWarning($"[RuntimeEditor] '{prefabName}' has no Animator/SkinnedMeshRenderer rig; spawning it as a static prop instead of a moving agent.");
+            Debug.LogWarning($"[RuntimeEditor] '{prefabName}' has no Animator rig; spawning it as a static prop instead of a moving agent.");
             return false;
         }
 

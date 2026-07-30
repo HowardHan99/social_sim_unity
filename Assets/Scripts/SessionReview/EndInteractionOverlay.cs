@@ -7,7 +7,7 @@ namespace SessionReview
     /// <summary>
     /// Operator-side "End Interaction" button, rendered on the secondary display
     /// (Display 2) so the control stays out of the participant's main view. Visibility
-    /// and the click action are owned by SessionReviewManager — this is only the
+    /// and the click action are owned by SessionReviewManager - this is only the
     /// Display-2 face of the same button.
     ///
     /// Mirrors the AgentSpeedOverlay conventions: uGUI Canvas with targetDisplay
@@ -93,9 +93,8 @@ namespace SessionReview
 
         private void EnsureUi()
         {
-            if (canvas != null) return;
-
             EnsureEventSystem();
+            if (canvas != null) return;
 
             var canvasGo = new GameObject("EndInteractionCanvas",
                 typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
@@ -154,9 +153,40 @@ namespace SessionReview
 
         private static void EnsureEventSystem()
         {
-            if (EventSystem.current != null) return;
-            if (FindObjectOfType<EventSystem>() != null) return;
-            var es = new GameObject("EventSystem", typeof(EventSystem), typeof(StandaloneInputModule));
+            const string overlayEventSystemName = "SessionReviewOverlayEventSystem";
+            EventSystem[] systems = FindObjectsOfType<EventSystem>();
+            EventSystem sceneSystem = null;
+            EventSystem fallback = null;
+
+            foreach (EventSystem system in systems)
+            {
+                if (system == null) continue;
+                if (fallback == null) fallback = system;
+                if (system.gameObject.scene.name != "DontDestroyOnLoad")
+                {
+                    sceneSystem = system;
+                    break;
+                }
+            }
+
+            if (sceneSystem != null)
+            {
+                foreach (EventSystem system in systems)
+                {
+                    if (system == null || ReferenceEquals(system, sceneSystem)) continue;
+                    bool oldOverlaySystem = system.gameObject.scene.name == "DontDestroyOnLoad" &&
+                                            (system.gameObject.name == overlayEventSystemName ||
+                                             system.gameObject.name == "EventSystem") &&
+                                            system.GetComponent<StandaloneInputModule>() != null;
+                    if (oldOverlaySystem)
+                        Destroy(system.gameObject);
+                }
+                return;
+            }
+
+            if (fallback != null) return;
+
+            var es = new GameObject(overlayEventSystemName, typeof(EventSystem), typeof(StandaloneInputModule));
             DontDestroyOnLoad(es);
         }
 

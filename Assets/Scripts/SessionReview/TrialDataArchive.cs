@@ -87,6 +87,18 @@ namespace SessionReview
         public List<VLMCaptureEvent> vlmCaptures = new List<VLMCaptureEvent>();
         public List<SignalAnnotation> signalAnnotations = new List<SignalAnnotation>();
 
+        // Condition provenance captured at trial start (empty/zero for trials saved
+        // before these fields existed): world-building state signature + the drawn
+        // route the run began with. Lets analysis separate draw runs from teleop
+        // and world-edited re-runs directly instead of via geometry heuristics.
+        public string worldEditSignature = "";
+        public int worldEditObjectCount;
+        public int worldEditDeltaCount;
+        public bool hadDrawnTrajectory;
+        public int drawnTrajectoryPointCount;
+        public float drawnTrajectoryLength;
+        public string drawnTrajectoryFile = "";
+
         // Absolute SessionLogs folder this trial was archived to this session. Not
         // serialized: for a loaded record the folder is where it was loaded FROM.
         [NonSerialized] public string archiveFolder;
@@ -145,7 +157,14 @@ namespace SessionReview
                 hasRobotGoalPosition = info.hasRobotGoalPosition,
                 playerGoalPosition = info.playerGoalPosition,
                 hasPlayerGoalPosition = info.hasPlayerGoalPosition,
-                metrics = CaptureMetrics()
+                metrics = CaptureMetrics(),
+                worldEditSignature = info.worldEditSignature ?? "",
+                worldEditObjectCount = info.worldEditObjectCount,
+                worldEditDeltaCount = info.worldEditDeltaCount,
+                hadDrawnTrajectory = info.hadDrawnTrajectory,
+                drawnTrajectoryPointCount = info.drawnTrajectoryPointCount,
+                drawnTrajectoryLength = info.drawnTrajectoryLength,
+                drawnTrajectoryFile = info.drawnTrajectoryFile ?? ""
             };
 
             foreach (var kvp in info.agentRoles)

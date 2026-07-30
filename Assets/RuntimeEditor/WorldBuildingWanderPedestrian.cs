@@ -19,6 +19,10 @@ public class WorldBuildingWanderPedestrian : MonoBehaviour
     IVI.INavigable agent;
     bool active;
 
+    [Header("World Building Defaults")]
+    [Tooltip("Default autonomous speed multiplier for moving characters placed from World Building.")]
+    public float defaultSpeedScale = 1.25f;
+
     IEnumerator Start()
     {
         // RandomAvatar builds the avatar + SFAgent in Awake, but the agent's own Start
@@ -40,6 +44,7 @@ public class WorldBuildingWanderPedestrian : MonoBehaviour
             yield break;
         }
 
+        ApplyDefaultSpeedScale(agent);
         active = RetargetToRandomPoint();
 
         // Placed while a trial is already running: SessionTracker's roster was built at
@@ -58,6 +63,18 @@ public class WorldBuildingWanderPedestrian : MonoBehaviour
         // Re-issue a fresh random destination on arrival for perpetual wandering.
         if (agent.CloseEnough())
             active = RetargetToRandomPoint();
+    }
+
+    void ApplyDefaultSpeedScale(IVI.INavigable navigable)
+    {
+        float scale = Mathf.Max(0f, defaultSpeedScale);
+        if (scale <= 0f)
+            return;
+
+        if (navigable is IVI.SFAgent walker)
+            walker.speedScale = scale;
+        else if (navigable is IVI.SFPWDAgent pwd)
+            pwd.autoSpeedScale = scale;
     }
 
     bool RetargetToRandomPoint()

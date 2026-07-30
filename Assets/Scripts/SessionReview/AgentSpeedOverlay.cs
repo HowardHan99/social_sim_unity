@@ -22,10 +22,10 @@ namespace SessionReview
     ///
     /// Editor note: like ResearcherDisplay, the Editor never reports a second display, so
     /// the panel still targets Display 2 there and only shows in a second Game view window
-    /// set to "Display 2" — press Ctrl+F8 to pull it onto the main Game view instead.
+    /// set to "Display 2" - press Ctrl+F8 to pull it onto the main Game view instead.
     ///
     /// Uses uGUI (a Canvas with <c>targetDisplay</c>) rather than IMGUI because Unity's
-    /// OnGUI can only render on Display 1 — there is no OnGUI equivalent of
+    /// OnGUI can only render on Display 1 - there is no OnGUI equivalent of
     /// Canvas.targetDisplay. Self-bootstraps at runtime so no scene wiring is needed and
     /// ensures an EventSystem exists so the sliders are clickable on the second display.
     /// </summary>
@@ -128,13 +128,14 @@ namespace SessionReview
         {
             EnsureUi();
 
-            if (Input.GetKeyDown(toggleKey))
+            bool textEntryActive = SessionReviewInputFocus.IsTextEntryActive();
+            if (!textEntryActive && Input.GetKeyDown(toggleKey))
             {
                 bool ctrl = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl) ||
                             Input.GetKey(KeyCode.LeftCommand) || Input.GetKey(KeyCode.RightCommand);
                 if (ctrl)
                 {
-                    // Ctrl+F8: pull the panel onto the other display (and show it) — the
+                    // Ctrl+F8: pull the panel onto the other display (and show it) - the
                     // escape hatch when nothing is previewing or connected as Display 2.
                     // Ctrl rather than Shift so it can't trip the Shift manual-control
                     // toggles while the panel is still hidden.
@@ -169,7 +170,13 @@ namespace SessionReview
                     Vector3 p = t.tform.position;
                     Vector3 delta = p - t.lastPos;
                     delta.y = 0f;
-                    t.speed = Mathf.Lerp(t.speed, delta.magnitude / dt, lerp);
+                    float measuredSpeed = delta.magnitude / dt;
+                    // The operator-facing control is a target/cap in m/s. Keep the
+                    // Display-2 readout aligned with that cap so one-frame transform
+                    // corrections do not appear as a faster commanded speed.
+                    if (t.target > 0f)
+                        measuredSpeed = Mathf.Min(measuredSpeed, t.target);
+                    t.speed = Mathf.Min(Mathf.Lerp(t.speed, measuredSpeed, lerp), t.target);
                     t.lastPos = p;
                 }
             }
@@ -194,6 +201,7 @@ namespace SessionReview
         private void HandleSpeedHotkeys()
         {
             if (!visible || ShouldHide() || tracked.Count == 0) return;
+            if (SessionReviewInputFocus.IsTextEntryActive()) return;
 
             selected = Mathf.Clamp(selected, 0, tracked.Count - 1);
 
@@ -309,7 +317,7 @@ namespace SessionReview
         // multiplier, so convert against that controller's own base speed. A PWD row gets
         // its target applied to BOTH modes: auto walking (social-force DESIRED_SPEED) and
         // manual driving (moveSpeed), so the pedestrian moves at the set speed either way.
-        // For the robot the base is maxLinearCommand — the commanded-velocity cap — so the
+        // For the robot the base is maxLinearCommand - the commanded-velocity cap - so the
         // slider reads as the robot's cruise/max speed.
         private static float RobotBaseSpeed(VelocityController robot)
             => Mathf.Max(0.05f, robot.maxLinearCommand);
@@ -349,9 +357,8 @@ namespace SessionReview
 
         private void EnsureUi()
         {
-            if (canvas != null) return;
-
             EnsureEventSystem();
+            if (canvas != null) return;
             uiFont = LoadUiFont();
 
             var canvasGo = new GameObject("AgentSpeedCanvas",
@@ -368,7 +375,7 @@ namespace SessionReview
                       $"Ctrl+{toggleKey} moves it between displays; Shift+-/= steps the selected " +
                       "agent's target speed (m/s), Shift+0 resets it to the agent's default. " +
                       "In the Editor it appears in a Game view " +
-                      $"set to \"Display 2\" — press Ctrl+{toggleKey} to pull it onto the main view.");
+                      $"set to \"Display 2\" - press Ctrl+{toggleKey} to pull it onto the main view.");
 
             var scaler = canvasGo.GetComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
@@ -401,10 +408,10 @@ namespace SessionReview
             rowObjects.Clear();
 
             panel.sizeDelta = new Vector2(PanelW, Pad * 2f + HeaderH + HintH + tracked.Count * RowH);
-            titleText.text = $"Agent Speed   [{toggleKey}] hide · [Ctrl+{toggleKey}] display";
-            hintText.text = $"[{KeyLabel(selectAgentKey)}] pick agent  ·  " +
-                            $"[{KeyLabel(speedDownKey)}] / Shift+- slower  ·  " +
-                            $"[{KeyLabel(speedUpKey)}] / Shift+= faster  ·  Shift+0 reset";
+            titleText.text = $"Agent Speed   [{toggleKey}] hide | [Ctrl+{toggleKey}] display";
+            hintText.text = $"[{KeyLabel(selectAgentKey)}] pick agent  |  " +
+                            $"[{KeyLabel(speedDownKey)}] / Shift+- slower  |  " +
+                            $"[{KeyLabel(speedUpKey)}] / Shift+= faster  |  Shift+0 reset";
 
             for (int i = 0; i < tracked.Count; i++)
             {
@@ -499,9 +506,40 @@ namespace SessionReview
 
         private static void EnsureEventSystem()
         {
-            if (EventSystem.current != null) return;
-            if (FindObjectOfType<EventSystem>() != null) return;
-            var es = new GameObject("EventSystem", typeof(EventSystem), typeof(StandaloneInputModule));
+            const string overlayEventSystemName = "SessionReviewOverlayEventSystem";
+            EventSystem[] systems = FindObjectsOfType<EventSystem>();
+            EventSystem sceneSystem = null;
+            EventSystem fallback = null;
+
+            foreach (EventSystem system in systems)
+            {
+                if (system == null) continue;
+                if (fallback == null) fallback = system;
+                if (system.gameObject.scene.name != "DontDestroyOnLoad")
+                {
+                    sceneSystem = system;
+                    break;
+                }
+            }
+
+            if (sceneSystem != null)
+            {
+                foreach (EventSystem system in systems)
+                {
+                    if (system == null || ReferenceEquals(system, sceneSystem)) continue;
+                    bool oldOverlaySystem = system.gameObject.scene.name == "DontDestroyOnLoad" &&
+                                            (system.gameObject.name == overlayEventSystemName ||
+                                             system.gameObject.name == "EventSystem") &&
+                                            system.GetComponent<StandaloneInputModule>() != null;
+                    if (oldOverlaySystem)
+                        Destroy(system.gameObject);
+                }
+                return;
+            }
+
+            if (fallback != null) return;
+
+            var es = new GameObject(overlayEventSystemName, typeof(EventSystem), typeof(StandaloneInputModule));
             DontDestroyOnLoad(es);
         }
 

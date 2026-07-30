@@ -50,8 +50,12 @@ namespace SEAN.Scenario.Agents
             rb.mass = MASS;
             rb.constraints = RigidbodyConstraints.FreezeRotation;
 
-            var agentMeshBounds = GetComponentInChildren<SkinnedMeshRenderer>().bounds;
-            var agentHeight = agentMeshBounds.extents.y * 2;
+            float agentHeight = 1.8f;
+            if (TryGetAgentBounds(gameObject, out Bounds agentBounds))
+                agentHeight = Mathf.Max(0.1f, agentBounds.extents.y * 2f);
+            else
+                Debug.LogWarning($"{name}: no Renderer/Collider bounds found; using default agent height.", this);
+
             collisionCapsule = gameObject.GetComponent<CapsuleCollider>();
             if (collisionCapsule == null)
             {
@@ -82,6 +86,49 @@ namespace SEAN.Scenario.Agents
                 Debug.LogWarning($"{name}: no Animator on the avatar prefab or its children; agent will move but not animate.", this);
             }
             base.Start();
+        }
+
+        static bool TryGetAgentBounds(GameObject root, out Bounds bounds)
+        {
+            bounds = default;
+            bool hasBounds = false;
+
+            foreach (Renderer renderer in root.GetComponentsInChildren<Renderer>(true))
+            {
+                if (renderer == null)
+                    continue;
+
+                if (!hasBounds)
+                {
+                    bounds = renderer.bounds;
+                    hasBounds = true;
+                }
+                else
+                {
+                    bounds.Encapsulate(renderer.bounds);
+                }
+            }
+
+            if (hasBounds)
+                return true;
+
+            foreach (Collider collider in root.GetComponentsInChildren<Collider>(true))
+            {
+                if (collider == null)
+                    continue;
+
+                if (!hasBounds)
+                {
+                    bounds = collider.bounds;
+                    hasBounds = true;
+                }
+                else
+                {
+                    bounds.Encapsulate(collider.bounds);
+                }
+            }
+
+            return hasBounds;
         }
 
         void Update()

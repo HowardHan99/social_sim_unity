@@ -74,6 +74,40 @@ public class TTSManager : MonoBehaviour
             yield break;
         }
 
+        string requestCacheKey = BuildCacheKey(text);
+
+        // Session cache first (covers ConvertTextToSpeech, which skips PlaySpeech's check).
+        if (clipCache.TryGetValue(requestCacheKey, out AudioClip sessionClip) && sessionClip != null)
+        {
+            savedAudioClip = sessionClip;
+            if (playWhenReady)
+            {
+                ConfigureAudioSource();
+                audioSource.Stop();
+                audioSource.clip = sessionClip;
+                audioSource.Play();
+            }
+            yield break;
+        }
+
+        // Disk cache next: the same text/voice/style was already synthesized in an
+        // earlier run — load the saved wav instead of calling the API again.
+        AudioClip diskClip = TryLoadCachedClip(requestCacheKey);
+        if (diskClip != null)
+        {
+            savedAudioClip = diskClip;
+            clipCache[requestCacheKey] = diskClip;
+            Debug.Log("[TTSManager] Loaded cached TTS from disk (no API call). Duration: " + diskClip.length + " seconds");
+            if (playWhenReady)
+            {
+                ConfigureAudioSource();
+                audioSource.Stop();
+                audioSource.clip = diskClip;
+                audioSource.Play();
+            }
+            yield break;
+        }
+
         if (string.IsNullOrWhiteSpace(geminiApiKey))
         {
             Debug.LogError("[TTSManager] Gemini API key is missing.");
@@ -113,8 +147,8 @@ public class TTSManager : MonoBehaviour
 
             if (savedAudioClip != null)
             {
-                SaveAudioFile(processedPcmData);
-                clipCache[BuildCacheKey(text)] = savedAudioClip;
+                SaveAudioFile(processedPcmData, requestCacheKey);
+                clipCache[requestCacheKey] = savedAudioClip;
                 Debug.Log("[TTSManager] AudioClip created successfully. Duration: " + savedAudioClip.length + " seconds");
                 if (playWhenReady)
                 {
@@ -217,21 +251,97 @@ public class TTSManager : MonoBehaviour
         return string.Empty;
     }
 
-    private string SaveAudioFile(byte[] pcmData)
+    // Saves under a deterministic name derived from the cache key (voice + style +
+    // speed + text), so the next run finds and reuses it instead of re-synthesizing.
+    // The stored PCM is the PROCESSED audio (silences removed, sped up) — on load it
+    // is played back as-is, no re-processing.
+    private string SaveAudioFile(byte[] pcmData, string cacheKey)
     {
-        string folderPath = Path.Combine(Application.persistentDataPath, "TTSAudio");
-        if (!Directory.Exists(folderPath))
-            Directory.CreateDirectory(folderPath);
-
-        string dateTime = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
-        string fileName = $"tts_audio_{dateTime}.wav";
-        string fullPath = Path.Combine(folderPath, fileName);
+        string fullPath = CacheFilePath(cacheKey);
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath));
 
         byte[] wavBytes = ConvertPcmToWav(pcmData, AudioSampleRate, AudioChannels, 16);
         File.WriteAllBytes(fullPath, wavBytes);
-        Debug.Log("[TTSManager] Audio saved at: " + fullPath);
+        Debug.Log("[TTSManager] Audio cached at: " + fullPath);
 
         return fullPath;
+    }
+
+    private string CacheFilePath(string cacheKey)
+    {
+        using (var sha = System.Security.Cryptography.SHA1.Create())
+        {
+            byte[] hash = sha.ComputeHash(Encoding.UTF8.GetBytes(cacheKey));
+            var sb = new StringBuilder(hash.Length * 2);
+            foreach (byte b in hash)
+                sb.Append(b.ToString("x2"));
+            return Path.Combine(Application.persistentDataPath, "TTSAudio", "tts_" + sb + ".wav");
+        }
+    }
+
+    private AudioClip TryLoadCachedClip(string cacheKey)
+    {
+        try
+        {
+            string path = CacheFilePath(cacheKey);
+            if (!File.Exists(path))
+                return null;
+
+            byte[] wav = File.ReadAllBytes(path);
+            float[] samples = ParseWavSamples(wav, out int sampleRate, out short channels);
+            if (samples == null || samples.Length == 0)
+                return null;
+
+            int channelCount = Mathf.Max(1, (int)channels);
+            AudioClip clip = AudioClip.Create("GeminiTTS_Cached",
+                samples.Length / channelCount, channelCount, sampleRate, false);
+            clip.SetData(samples, 0);
+            return clip;
+        }
+        catch (Exception exception)
+        {
+            Debug.LogWarning("[TTSManager] Failed to load cached TTS, will regenerate: " + exception.Message);
+            return null;
+        }
+    }
+
+    // Reads the 16-bit PCM RIFF files this class writes (chunk-scanned, so a manually
+    // replaced recording also loads as long as it is PCM16).
+    private float[] ParseWavSamples(byte[] wav, out int sampleRate, out short channels)
+    {
+        sampleRate = AudioSampleRate;
+        channels = AudioChannels;
+        if (wav == null || wav.Length < 44)
+            return null;
+
+        channels = BitConverter.ToInt16(wav, 22);
+        sampleRate = BitConverter.ToInt32(wav, 24);
+
+        int dataOffset = -1;
+        int dataLength = 0;
+        for (int i = 12; i + 8 <= wav.Length;)
+        {
+            string chunkId = Encoding.ASCII.GetString(wav, i, 4);
+            int chunkSize = BitConverter.ToInt32(wav, i + 4);
+            if (chunkId == "data")
+            {
+                dataOffset = i + 8;
+                dataLength = Mathf.Min(chunkSize, wav.Length - dataOffset);
+                break;
+            }
+            if (chunkSize <= 0)
+                break;
+            i += 8 + chunkSize + (chunkSize & 1);
+        }
+
+        if (dataOffset < 0 || dataLength < 2)
+            return null;
+
+        int count = dataLength / 2;
+        float[] samples = new float[count];
+        for (int i = 0; i < count; i++)
+            samples[i] = BitConverter.ToInt16(wav, dataOffset + i * 2) / 32768f;
+        return samples;
     }
 
     private AudioClip CreateAudioClipFromPcm(byte[] pcmData, out byte[] processedPcmData)

@@ -26,6 +26,10 @@ namespace IVI
         //ROBOT REPULSION
         private float robotRepulsion;
 
+        [Header("Auto Speed Scaling (live scenario tuning)")]
+        [Tooltip("Live speed multiplier for this pedestrian's autonomous (social-force) walking speed. Scales desired and max speed. 1 = default.")]
+        public float speedScale = 1.0f;
+
         [Header("Oscillation Tuning (live)")]
         [Tooltip("Padding (m) added to the radii overlap in agent/robot repulsion. Large values push the repulsion/goal balance point far from the robot and cause back-and-forth pacing (was hardcoded 0.5).")]
         public float personalSpacePad = 0.15f;
@@ -83,7 +87,7 @@ namespace IVI
 
             if (nextVelocity.sqrMagnitude > 0)
             {
-                nextVelocity = nextVelocity.normalized * Mathf.Min(nextVelocity.magnitude, Parameters.MAX_VEL);
+                nextVelocity = nextVelocity.normalized * Mathf.Min(nextVelocity.magnitude, Parameters.MAX_VEL * Mathf.Max(0f, speedScale));
             }
             return SmoothVelocity(nextVelocity);
         }
@@ -199,7 +203,7 @@ namespace IVI
 
             if (forceCapMultiple > 0)
             {
-                float maxForce = forceCapMultiple * MASS * Parameters.DESIRED_SPEED / Parameters.T;
+                float maxForce = forceCapMultiple * MASS * Parameters.DESIRED_SPEED * Mathf.Max(1f, speedScale) / Parameters.T;
                 if (totalForce.force.magnitude > maxForce)
                 {
                     totalForce.force = totalForce.force.normalized * maxForce;
@@ -213,7 +217,7 @@ namespace IVI
         {
             var temp = nearestGoalPoint - transform.position;
             temp.y = 0;
-            var desiredVel = temp.normalized * Parameters.DESIRED_SPEED;
+            var desiredVel = temp.normalized * Parameters.DESIRED_SPEED * Mathf.Max(0f, speedScale);
             return MASS * (desiredVel - velocity) / Parameters.T;
         }
 
