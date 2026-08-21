@@ -49,9 +49,11 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   moveSpeed: 0.8
+  speedScale: 1
   rotationSpeed: 240
   toggleModeKey: 303
   useWASD: 1
+  manualUseArrowKeys: 0
   startInManualMode: 0
   enableJoystick: 1
   joystickHorizontalAxis: LogitechTwist
@@ -74,6 +76,15 @@ MonoBehaviour:
   manualAcceleration: 4
   manualDeceleration: 3
   manualAngularAcceleration: 1200
+  manualInertiaDrive: 1
+  inertiaLinearAcceleration: 1
+  inertiaCoastDeceleration: 0.35
+  inertiaAngularAcceleration: 240
+  inertiaAngularCoastDeceleration: 240
+  angularDirectDrive: 1
+  stepClimb: 1
+  maxStepHeight: 0.35
+  stepClimbSpeed: 3
   debugSBrakePressCount: 0
   isManualMode: 0
   debugJoystickRawHorizontal: 0
@@ -111,7 +122,7 @@ CapsuleCollider:
   m_Radius: 0.6640847
   m_Height: 1.8717828
   m_Direction: 1
-  m_Center: {x: -27.73568, y: 1.2809808, z: 1.4091806}
+  m_Center: {x: 0, y: 0.56806874, z: 0}
 --- !u!114 &245825870076724062
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -145,17 +156,17 @@ PrefabInstance:
     - target: {fileID: 1913861897690298888, guid: ecfd66508ca927842b9666171ef3081e,
         type: 3}
       propertyPath: m_LocalPosition.x
-      value: -27.768
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 1913861897690298888, guid: ecfd66508ca927842b9666171ef3081e,
         type: 3}
       propertyPath: m_LocalPosition.y
-      value: 0.68000007
+      value: 0.013068676
       objectReference: {fileID: 0}
     - target: {fileID: 1913861897690298888, guid: ecfd66508ca927842b9666171ef3081e,
         type: 3}
       propertyPath: m_LocalPosition.z
-      value: 1.3310003
+      value: -0.054999948
       objectReference: {fileID: 0}
     - target: {fileID: 1913861897690298888, guid: ecfd66508ca927842b9666171ef3081e,
         type: 3}
@@ -215,7 +226,7 @@ Animator:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2200105882984671879}
   m_Enabled: 1
-  m_Avatar: {fileID: 9000000, guid: 79060319cc9b0e44f9d4e571ced335f1, type: 3}
+  m_Avatar: {fileID: 9000000, guid: aaa75c2e33a88e84aa834c1283e71289, type: 3}
   m_Controller: {fileID: 9100000, guid: b014d50f52ca713429fdbc23927fd1d0, type: 2}
   m_CullingMode: 0
   m_UpdateMode: 0
@@ -242,17 +253,17 @@ PrefabInstance:
     - target: {fileID: -8679921383154817045, guid: aaa75c2e33a88e84aa834c1283e71289,
         type: 3}
       propertyPath: m_LocalPosition.x
-      value: -27.79
+      value: -0.022001266
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: aaa75c2e33a88e84aa834c1283e71289,
         type: 3}
       propertyPath: m_LocalPosition.y
-      value: 0.73
+      value: 0.06306863
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: aaa75c2e33a88e84aa834c1283e71289,
         type: 3}
       propertyPath: m_LocalPosition.z
-      value: 1.36
+      value: -0.026000261
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: aaa75c2e33a88e84aa834c1283e71289,
         type: 3}
@@ -293,6 +304,11 @@ PrefabInstance:
         type: 3}
       propertyPath: m_Name
       value: Wheelchair (1)
+      objectReference: {fileID: 0}
+    - target: {fileID: 919132149155446097, guid: aaa75c2e33a88e84aa834c1283e71289,
+        type: 3}
+      propertyPath: m_IsActive
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 5866666021909216657, guid: aaa75c2e33a88e84aa834c1283e71289,
         type: 3}
