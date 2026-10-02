@@ -115,3 +115,7 @@ Assets/Rerun
 /SessionLogs
 /Assets/RenderStreaming
 /Assets/SidewalkEnvironment
+
+# Local reconstructed model (exceeds GitHub file limit)
+/Assets/road_rebuild/Optimized_Scene_01 (2).fbx
+/Assets/road_rebuild/Optimized_Scene_01 (2).fbx.meta
