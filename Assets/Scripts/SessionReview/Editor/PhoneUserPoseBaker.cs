@@ -36,7 +36,7 @@ namespace SessionReview.Editor
 
         static void RunIfMissing()
         {
-            if (File.Exists(ControllerPath))
+            if (ControllerLooksHealthy())
                 return;
             Run();
         }
@@ -95,14 +95,20 @@ namespace SessionReview.Editor
             if (File.Exists(ControllerPath))
                 AssetDatabase.DeleteAsset(ControllerPath);
             AnimatorController controller = AnimatorController.CreateAnimatorControllerAtPath(ControllerPath);
-            controller.AddMotion(idleClip, 0);
+            AnimatorControllerLayer[] layers = controller.layers;
+            AnimatorState idleState = layers[0].stateMachine.AddState("HumanoidIdle");
+            idleState.motion = idleClip;
+            layers[0].stateMachine.defaultState = idleState;
 
             controller.AddLayer("PhonePose");
-            AnimatorControllerLayer[] layers = controller.layers;
+            layers = controller.layers;
             layers[1].avatarMask = mask;
             layers[1].defaultWeight = 1f;
             controller.layers = layers;
-            controller.AddMotion(clip, 1);
+            layers = controller.layers;
+            AnimatorState poseState = layers[1].stateMachine.AddState("PhoneTextingPose");
+            poseState.motion = clip;
+            layers[1].stateMachine.defaultState = poseState;
 
             AssetDatabase.SaveAssets();
 
@@ -138,6 +144,28 @@ namespace SessionReview.Editor
             }
 
             return null;
+        }
+
+        static bool ControllerLooksHealthy()
+        {
+            AnimatorController controller = AssetDatabase.LoadAssetAtPath<AnimatorController>(ControllerPath);
+            if (controller == null || controller.layers == null || controller.layers.Length < 2)
+                return false;
+            if (controller.layers[0].stateMachine == null ||
+                controller.layers[0].stateMachine.states == null ||
+                controller.layers[0].stateMachine.states.Length == 0)
+                return false;
+            if (controller.layers[1].stateMachine == null ||
+                controller.layers[1].stateMachine.states == null ||
+                controller.layers[1].stateMachine.states.Length == 0)
+                return false;
+            if (controller.layers[1].avatarMask == null || controller.layers[1].defaultWeight < 0.99f)
+                return false;
+            if (AssetDatabase.LoadAssetAtPath<AnimationClip>(ClipPath) == null)
+                return false;
+            if (AssetDatabase.LoadAssetAtPath<AvatarMask>(MaskPath) == null)
+                return false;
+            return true;
         }
 
         static void SetMuscle(AnimationClip clip, string muscle, float value)

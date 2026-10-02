@@ -25,6 +25,25 @@ namespace SEAN.Scenario.Agents
         public static string LastSpawnedCharacterId { get; private set; } = string.Empty;
         public static PwdGender LastSpawnedGender { get; private set; } = PwdGender.Male;
 
+        /// <summary>The goal object the spawned PWD player is ACTUALLY navigating to — start/end
+        /// on a pedestrian trial, the hidden start2/end2 route on a robot trial. GoalBeacon
+        /// labels this marker so review shows the driven goal, not unconditionally
+        /// goalObjectName's (in scenes where both routes share a sidewalk, e.g.
+        /// sidewalkOutofStore, the wrong-route label makes the replayed pedestrian look like it
+        /// stopped metres short of its destination).</summary>
+        public static GameObject LastPlayerGoalObject { get; private set; }
+
+        /// <summary>Review points the pedestrian-goal label at the REVIEWED trial's own route,
+        /// resolved from the recording's final pedestrian position — the live route this scene
+        /// spawned with can disagree (a loaded replay reviewed in a fresh session, or an
+        /// in-session review after the role and route swapped). The next spawn/ApplyTrialRoute
+        /// re-asserts the live route.</summary>
+        public static void OverridePlayerGoalObject(GameObject goal)
+        {
+            if (goal != null)
+                LastPlayerGoalObject = goal;
+        }
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         static void ResetStatics()
         {
@@ -35,6 +54,7 @@ namespace SEAN.Scenario.Agents
             lastSceneHandle = int.MinValue;
             LastSpawnedCharacterId = string.Empty;
             LastSpawnedGender = PwdGender.Male;
+            LastPlayerGoalObject = null;
         }
 
         [Header("PWD Player")]
@@ -64,8 +84,8 @@ namespace SEAN.Scenario.Agents
         public PwdGender bgPwdGender = PwdGender.Random;
 
         [Header("Walking Player Tuning")]
-        [Tooltip("Max manual turn rate (deg/s) for walking player characters; the wheelchair keeps the controller default (240). Turn acceleration/coast scale down proportionally so the ramp feel stays the same. <= 0 disables the override.")]
-        public float walkerTurnSpeed = 120f;
+        [Tooltip("Max manual turn rate (deg/s) for walking player characters; the wheelchair keeps the shared pedestrian rate (120 deg/s). Turn acceleration/coast scale proportionally so the ramp feel stays the same. <= 0 disables the override.")]
+        public float walkerTurnSpeed = SessionReview.AgentSpeedSettings.DefaultPedestrianTurnRate;
 
         private GameObject avatarPrefab;
         private GameObject avatarObject;
@@ -217,6 +237,7 @@ namespace SEAN.Scenario.Agents
             numPWDSFAgentsInstantiated = 0;
             pwdPlayerSpawned = false;
             autonomousPwdSpawned = false;
+            LastPlayerGoalObject = null;
             lastSceneHandle = sceneHandle;
         }
 
@@ -323,6 +344,7 @@ namespace SEAN.Scenario.Agents
                 Debug.LogWarning($"[PWD] Robot-trial goal '{robotTrialGoalObjectName}' not found; falling back to '{goalObjectName}'.");
                 goalObj = FindByName(goalObjectName);
             }
+            LastPlayerGoalObject = goalObj;
             Debug.Log($"[PWD] Route selection: {(useRobotTrialRoute ? "ROBOT trial (hidden second route)" : "HUMAN/pedestrian trial (primary route)")}");
 
             Vector3 rawPos = startObj != null ? startObj.transform.position : transform.position;
@@ -347,6 +369,8 @@ namespace SEAN.Scenario.Agents
             RuntimeAnimatorController playerAnimController = spawnedWalkingCharacter ? animationController : pwdAnimationController;
             if (animator == null)
                 Debug.LogWarning($"[PWD] Avatar prefab '{avatarPrefab.name}' has no Animator; the player will not animate.", this);
+            else if (SessionReview.AgentControlTuning.ShouldPreserveAuthoredAnimatorController(avatarObject, avatarPrefab, animator))
+                animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
             else if (playerAnimController != null)
                 animator.runtimeAnimatorController = playerAnimController;
             else
@@ -390,16 +414,23 @@ namespace SEAN.Scenario.Agents
             manualCtrl.enabled = true;
             manualCtrl.startInManualMode = SessionReview.SessionOnboardingSettings.PwdStartupControl == SessionReview.StartupControlMode.Manual;
 
-            if (spawnedWalkingCharacter && walkerTurnSpeed > 0f && manualCtrl.rotationSpeed > 0f)
-            {
-                // Walking humans turn slower than the wheelchair. Scale the angular
-                // accelerations by the same ratio so time-to-full-turn feels unchanged.
-                float turnScale = walkerTurnSpeed / manualCtrl.rotationSpeed;
-                manualCtrl.inertiaAngularAcceleration *= turnScale;
-                manualCtrl.inertiaAngularCoastDeceleration *= turnScale;
-                manualCtrl.manualAngularAcceleration *= turnScale;
-                manualCtrl.rotationSpeed = walkerTurnSpeed;
-            }
+            // Classify the riding rig from the PREFAB, whose name is still meaningful:
+            // the instance was just renamed to "PWDPlayer", and the Scooter's Animator
+            // sits on a nested FBX node called "default", so the controller's own
+            // name-based detection cannot see it — it then drove in the root frame
+            // (side-on camera, forward input sliding the rig sideways).
+            manualCtrl.forceVisualDriveFrame =
+                SessionReview.AgentControlTuning.ShouldUseVisualDriveFrame(avatarPrefab, null);
+
+            // Start speed and turn rate come from the session's remembered pedestrian
+            // values, so the character walks at the speed it was practiced at instead of at
+            // the background crowd's social-force speed. Applied to both control modes.
+            SessionReview.AgentSpeedSettings.ApplyPedestrian(manualCtrl, sfpwd);
+
+            // Walking humans may turn slower than the wheelchair; this is the per-scene
+            // override for that.
+            if (spawnedWalkingCharacter)
+                SessionReview.AgentSpeedSettings.ApplyTurnRate(manualCtrl, walkerTurnSpeed);
 
             AttachCameraToHead(avatarObject, spawnedWalkingCharacter);
             AttachPlayerMiniScreens(avatarObject, spawnedWalkingCharacter);
@@ -511,6 +542,7 @@ namespace SEAN.Scenario.Agents
             GameObject goalObj = FindByName(useRobotTrialRoute ? robotTrialGoalObjectName : goalObjectName, false);
             if (useRobotTrialRoute && startObj == null) startObj = FindByName(startObjectName, false);
             if (useRobotTrialRoute && goalObj == null) goalObj = FindByName(goalObjectName, false);
+            LastPlayerGoalObject = goalObj;
 
             Vector3 spawnPos = SampleOnNavMesh(startObj, pwd.transform.position);
             Vector3 goalPos = SampleOnNavMesh(goalObj, spawnPos);
@@ -856,6 +888,10 @@ namespace SEAN.Scenario.Agents
                 if (animator == null)
                 {
                     Debug.LogWarning($"[RandomAvatar] No Animator found on spawned avatar '{avatarPrefab.name}' for '{name}'.", this);
+                }
+                else if (SessionReview.AgentControlTuning.ShouldPreserveAuthoredAnimatorController(avatarObject, avatarPrefab, animator))
+                {
+                    animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
                 }
                 else if (assignedController == LowLevelControl.PWDSF && pwdAnimationController != null)
                 {

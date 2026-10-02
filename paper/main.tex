@@ -1,0 +1,33 @@
+% ---------------------------------------------------------------------
+%  Minimal wrapper so findings.tex compiles standalone on Overleaf.
+%  Drop findings.tex into your real template and delete this file.
+%  The section uses figure*/table*, so the host class must be two-column.
+% ---------------------------------------------------------------------
+\documentclass[10pt,twocolumn,letterpaper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[margin=0.9in]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{microtype}
+\usepackage[hidelinks]{hyperref}
+
+\graphicspath{{figures/}}
+
+\title{\vspace{-2em}Sidewalk Delivery Robots in a Social Navigation
+Simulator:\\Preliminary Findings}
+\author{}
+\date{}
+
+\begin{document}
+\twocolumn[
+  \begin{@twocolumnfalse}
+    \maketitle
+    \vspace{-3em}
+  \end{@twocolumnfalse}
+]
+
+\input{findings}
+
+\end{document}

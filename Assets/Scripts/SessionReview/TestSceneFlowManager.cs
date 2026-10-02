@@ -48,10 +48,10 @@ namespace SessionReview
         public Camera robotViewCamera;
 
         [Header("Robot Driving Feel")]
-        [Tooltip("Max forward speed (m/s) for the practice robot.")]
-        public float robotMoveSpeed = 0.8f;
+        [Tooltip("Forward speed (m/s) the practice robot starts at on a fresh session. A robot speed the operator already set in this session (Agent Speed panel, F8) wins over this.")]
+        public float robotMoveSpeed = AgentSpeedSettings.DefaultRobotSpeed;
         [Tooltip("Max turn rate (deg/s) for the practice robot.")]
-        public float robotTurnSpeed = 120f;
+        public float robotTurnSpeed = AgentSpeedSettings.DefaultRobotTurnRate;
 
         // No terminal phase: reaching a goal never ends the practice, it only updates the
         // banner. The operator leaves via "End Practice -> Session" or R to restart.
@@ -66,6 +66,13 @@ namespace SessionReview
         /// reads this to show the robot goal and hide the pedestrian one, and vice versa before it.
         /// </summary>
         public bool IsDrivingRobot => phase == Phase.DriveRobot;
+
+        /// <summary>
+        /// The controller driving the practice robot. It is the same component type as the
+        /// player's, so the Agent Speed panel asks here which one is the robot instead of
+        /// listing it as a second pedestrian (and handing it the pedestrian's speed).
+        /// </summary>
+        public ManualWheelchairController PracticeRobotController => robotController;
 
         // Arrival is acknowledged (banner) but never freezes control, so participants can
         // keep driving past the goal to practice.
@@ -237,15 +244,12 @@ namespace SessionReview
             robotController.manualUseArrowKeys = false;
             robotController.startInManualMode = true;
             robotController.toggleModeKey = KeyCode.None; // no auto mode: there is no SF agent on the robot
-            robotController.moveSpeed = robotMoveSpeed;
-            if (robotController.rotationSpeed > 0f && robotTurnSpeed > 0f)
-            {
-                float turnScale = robotTurnSpeed / robotController.rotationSpeed;
-                robotController.inertiaAngularAcceleration *= turnScale;
-                robotController.inertiaAngularCoastDeceleration *= turnScale;
-                robotController.manualAngularAcceleration *= turnScale;
-                robotController.rotationSpeed = robotTurnSpeed;
-            }
+
+            // Practice drives at the study's robot speed, and any change the operator makes
+            // here follows the session into the real scene (AgentSpeedSettings).
+            AgentSpeedSettings.SeedRobotSpeed(robotMoveSpeed);
+            AgentSpeedSettings.ApplyPracticeRobot(robotController);
+            AgentSpeedSettings.ApplyTurnRate(robotController, robotTurnSpeed);
         }
 
         #endregion

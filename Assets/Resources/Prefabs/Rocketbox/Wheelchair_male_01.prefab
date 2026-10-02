@@ -2020,9 +2020,11 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   moveSpeed: 0.8
+  speedScale: 1
   rotationSpeed: 240
   toggleModeKey: 303
   useWASD: 1
+  manualUseArrowKeys: 0
   startInManualMode: 1
   enableJoystick: 1
   joystickHorizontalAxis: LogitechTwist
@@ -2039,12 +2041,24 @@ MonoBehaviour:
   joystickAngularResponseExponent: 1
   invertJoystickHorizontal: 0
   invertJoystickVertical: 1
+  forceVisualDriveFrame: 0
+  flipForwardKey: 59
+  cycleForwardKey: 39
   brakeStopThreshold: 0.02
   sPressesToEnableReverse: 2
   sPressWindowSec: 0.6
   manualAcceleration: 4
   manualDeceleration: 3
   manualAngularAcceleration: 1200
+  manualInertiaDrive: 1
+  inertiaLinearAcceleration: 1
+  inertiaCoastDeceleration: 0.35
+  inertiaAngularAcceleration: 240
+  inertiaAngularCoastDeceleration: 240
+  angularDirectDrive: 1
+  stepClimb: 1
+  maxStepHeight: 0.35
+  stepClimbSpeed: 3
   debugSBrakePressCount: 0
   isManualMode: 0
   debugJoystickRawHorizontal: 0

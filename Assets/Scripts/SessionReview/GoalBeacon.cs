@@ -483,15 +483,36 @@ namespace SessionReview
                 Attach(flow.robotEnd, "Robot Goal", RobotColor, Audience.Robot, false);
             }
 
-            foreach (var spawner in FindObjectsOfType<SEAN.Scenario.Agents.RandomAvatar>(true))
+            // The goal the PWD player is ACTUALLY navigating to this trial. Robot trials route
+            // the pedestrian over the hidden second course (start2/end2), so naming
+            // goalObjectName unconditionally pins "Pedestrian Goal" on the OTHER route's marker
+            // -- in scenes where both routes share a sidewalk (sidewalkOutofStore) the replayed
+            // pedestrian then appears to stop metres short of "its" goal. Label the driven
+            // marker and clear the unused route's label; the name lookups below remain the
+            // fallback for scenes with no spawned player.
+            GameObject activeGoal = SEAN.Scenario.Agents.RandomAvatar.LastPlayerGoalObject;
+            if (activeGoal != null)
             {
-                if (spawner == null || string.IsNullOrEmpty(spawner.goalObjectName)) continue;
-                GameObject goal = GameObject.Find(spawner.goalObjectName);
-                if (goal != null) Attach(goal.transform, "Pedestrian Goal", PedestrianColor, Audience.Pedestrian, false);
+                foreach (var spawner in FindObjectsOfType<SEAN.Scenario.Agents.RandomAvatar>(true))
+                {
+                    if (spawner == null || !spawner.isPwdPlayer) continue;
+                    RemoveStaleRouteBeacon(spawner.goalObjectName, activeGoal);
+                    RemoveStaleRouteBeacon(spawner.robotTrialGoalObjectName, activeGoal);
+                }
+                Attach(activeGoal.transform, "Pedestrian Goal", PedestrianColor, Audience.Pedestrian, false);
             }
+            else
+            {
+                foreach (var spawner in FindObjectsOfType<SEAN.Scenario.Agents.RandomAvatar>(true))
+                {
+                    if (spawner == null || string.IsNullOrEmpty(spawner.goalObjectName)) continue;
+                    GameObject goal = GameObject.Find(spawner.goalObjectName);
+                    if (goal != null) Attach(goal.transform, "Pedestrian Goal", PedestrianColor, Audience.Pedestrian, false);
+                }
 
-            GameObject fallback = GameObject.Find(DefaultGoalName);
-            if (fallback != null) Attach(fallback.transform, "Pedestrian Goal", PedestrianColor, Audience.Pedestrian, false);
+                GameObject fallback = GameObject.Find(DefaultGoalName);
+                if (fallback != null) Attach(fallback.transform, "Pedestrian Goal", PedestrianColor, Audience.Pedestrian, false);
+            }
 
             SEAN.Tasks.Base task = FindRobotTask();
             if (task != null)
@@ -504,6 +525,23 @@ namespace SessionReview
                 if (task.robotGoal != null)
                     Attach(task.robotGoal.transform, "Robot Goal", RobotColor, Audience.Robot, true);
             }
+        }
+
+        /// <summary>
+        /// Drops the pedestrian label from a route marker that is NOT the driven goal. The
+        /// route swaps between trials (pedestrian &lt;-&gt; robot) and <see cref="Attach"/> leaves
+        /// existing beacons alone, so without this the label would stay on the previous
+        /// trial's marker.
+        /// </summary>
+        private static void RemoveStaleRouteBeacon(string markerName, GameObject activeGoal)
+        {
+            if (string.IsNullOrEmpty(markerName)) return;
+            GameObject marker = SEAN.Scenario.Agents.RandomAvatar.FindSceneObjectByName(markerName);
+            if (marker == null || marker == activeGoal) return;
+
+            var beacon = marker.GetComponent<GoalBeacon>();
+            if (beacon != null && beacon.audience == Audience.Pedestrian && !beacon.followsRobotGoalVisibility)
+                Destroy(beacon); // OnDestroy tears down the beacon's own label root
         }
 
         private static void Attach(Transform marker, string label, Color color, Audience audience,

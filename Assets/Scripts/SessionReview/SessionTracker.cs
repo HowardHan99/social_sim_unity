@@ -97,6 +97,29 @@ namespace SessionReview
 
         private List<SEAN.Scenario.Trajectory.TrackedAgent> trackedPedestrians = new List<SEAN.Scenario.Trajectory.TrackedAgent>();
         private List<WorldBuildingWanderPedestrian> wanderPedestrians = new List<WorldBuildingWanderPedestrian>();
+
+        // Arrival is latched at CLOSE_ENOUGH_MIN_DIST (1 m for the PWD), but the agent is
+        // still moving there — a participant walks the last metre right up to the marker.
+        // Untracking at that instant clips the trail/replay a metre short of where the agent
+        // really ended up, so instead the trail "settles": sampling continues until the agent
+        // genuinely stops. The walk-away rule preserves what the immediate untrack protected
+        // against — a waypoint PWD that flips back toward its start the moment it arrives.
+        private class SettlingTrail
+        {
+            public Transform transform;
+            public Vector3 goal;
+            public bool hasGoal;
+            public float minGoalDist;
+            public Vector3 lastPosition;
+            public float lastMoveTime;
+            public float startTime;
+        }
+        private readonly Dictionary<string, SettlingTrail> settlingTrails = new Dictionary<string, SettlingTrail>();
+        private readonly List<string> settledTrailIds = new List<string>();
+        private const float SettleStationaryTime = 0.75f; // still for this long = stopped
+        private const float SettleMoveEpsilon = 0.03f;    // displacement below this = still
+        private const float SettleWalkAwaySlack = 0.6f;   // beyond closest approach = leaving
+        private const float SettleMaxSeconds = 8f;
         // Generic objects the operator has driven via the Agent Control panel. Kept for
         // the whole session (not reset per trial) so a car possessed in trial N is still
         // tracked when trial N+1 begins.
@@ -240,6 +263,10 @@ namespace SessionReview
 
             tracking = true;
             trialArchived = false;
+            // Abandon any settle still pending from the previous trial: the roster below
+            // re-registers everyone, and a stale settle firing after that would untrack an
+            // agent for the whole new trial.
+            settlingTrails.Clear();
             RegisterAllWithRecorder();
             pendingRosterRefresh = true;
             rosterRefreshUntilTime = Time.time + 1.0f;
@@ -395,6 +422,10 @@ namespace SessionReview
         {
             TryInitialize();
 
+            // Before the !tracking early-out: the arrival that ends the session starts its
+            // settle in that same frame, and the trail must still run to a stop.
+            UpdateSettlingTrails();
+
             if (!tracking) return;
 
             if (pendingRosterRefresh)
@@ -415,9 +446,9 @@ namespace SessionReview
                 {
                     agentArrivals[id].arrived = true;
                     agentArrivals[id].arrivalTime = Time.time;
-                    // Freeze this agent's trail once it arrives; the rest of the
+                    // Let this agent's trail settle to its true stop; the rest of the
                     // roster keeps being logged and keeps navigating.
-                    trajectoryRecorder?.UntrackAgent(id);
+                    BeginTrailSettle(id, agent.transform, Vector3.zero, hasGoal: false);
                 }
             }
 
@@ -563,7 +594,12 @@ namespace SessionReview
             trialArchived = true;
 
             Vector3 robotGoalPosition = GetGoalPosition(sean != null && sean.robotTask != null ? sean.robotTask.robotGoal : null, out bool hasRobotGoalPosition);
-            Vector3 playerGoalPosition = GetGoalPosition(sean != null && sean.robotTask != null ? sean.robotTask.playerGoal : null, out bool hasPlayerGoalPosition);
+            // The pedestrian's REAL destination, resolved the same way TrackPwdArrival scores it:
+            // the SFPWD waypoint goal RandomAvatar baked in (start/end, or the hidden robot-trial
+            // route), falling back to task.playerGoal. Archiving task.playerGoal directly recorded
+            // the _StartAndGoal rig's never-moved Target (~world origin) for every trial, so ROI
+            // exports drew the pedestrian goal nowhere near the driven route.
+            bool hasPlayerGoalPosition = TryGetPwdGoal(out Vector3 playerGoalPosition);
 
             var info = new TrialEndInfo
             {
@@ -626,14 +662,87 @@ namespace SessionReview
             startDrawnFile = TrajectoryManager.LastSavedDrawnFile ?? "";
         }
 
-        private void MarkArrived(string id)
+        private void MarkArrived(string id, Transform trailTransform = null, Vector3 goal = default, bool hasGoal = false)
         {
             if (string.IsNullOrEmpty(id) || !agentArrivals.ContainsKey(id) || agentArrivals[id].arrived)
                 return;
             agentArrivals[id].arrived = true;
             agentArrivals[id].arrivalTime = Time.time;
-            // Freeze this agent's trail once it arrives; the rest of the roster keeps moving.
-            trajectoryRecorder?.UntrackAgent(id);
+            // Let this agent's trail settle to its true stop; the rest of the roster keeps moving.
+            BeginTrailSettle(id, trailTransform, goal, hasGoal);
+        }
+
+        /// <summary>
+        /// Keep sampling an arrived agent until it genuinely stops — it crossed the arrival
+        /// radius still walking, and the last metre belongs in the trail — then untrack it.
+        /// Ends early if it moves back out past its closest approach to the goal (waypoint
+        /// agents flip toward their start on arrival; that leg must NOT be recorded).
+        /// </summary>
+        private void BeginTrailSettle(string id, Transform trailTransform, Vector3 goal, bool hasGoal)
+        {
+            if (string.IsNullOrEmpty(id))
+                return;
+            if (trailTransform == null || trajectoryRecorder == null)
+            {
+                trajectoryRecorder?.UntrackAgent(id);
+                return;
+            }
+
+            settlingTrails[id] = new SettlingTrail
+            {
+                transform = trailTransform,
+                goal = goal,
+                hasGoal = hasGoal,
+                minGoalDist = hasGoal
+                    ? SEAN.Util.Geometry.GroundPlaneDist(trailTransform.position, goal)
+                    : 0f,
+                lastPosition = trailTransform.position,
+                lastMoveTime = Time.time,
+                startTime = Time.time
+            };
+        }
+
+        private void UpdateSettlingTrails()
+        {
+            if (settlingTrails.Count == 0)
+                return;
+
+            settledTrailIds.Clear();
+            foreach (var kv in settlingTrails)
+            {
+                SettlingTrail s = kv.Value;
+                if (s.transform == null)
+                {
+                    settledTrailIds.Add(kv.Key);
+                    continue;
+                }
+
+                Vector3 pos = s.transform.position;
+                if ((pos - s.lastPosition).sqrMagnitude > SettleMoveEpsilon * SettleMoveEpsilon)
+                {
+                    s.lastPosition = pos;
+                    s.lastMoveTime = Time.time;
+                }
+
+                bool stopped = Time.time - s.lastMoveTime >= SettleStationaryTime;
+                bool timedOut = Time.time - s.startTime >= SettleMaxSeconds;
+                bool walkedAway = false;
+                if (s.hasGoal)
+                {
+                    float dist = SEAN.Util.Geometry.GroundPlaneDist(pos, s.goal);
+                    if (dist < s.minGoalDist) s.minGoalDist = dist;
+                    walkedAway = dist > s.minGoalDist + SettleWalkAwaySlack;
+                }
+
+                if (stopped || timedOut || walkedAway)
+                    settledTrailIds.Add(kv.Key);
+            }
+
+            foreach (string id in settledTrailIds)
+            {
+                settlingTrails.Remove(id);
+                trajectoryRecorder?.UntrackAgent(id);
+            }
         }
 
         private void TrackRobotArrival()
@@ -656,7 +765,7 @@ namespace SessionReview
             float dist = SEAN.Util.Geometry.GroundPlaneDist(robotPos, robotGoal.transform.position);
             dist = RobotGoalObjectBinding.GroundDistanceToGoal(robotPos, dist);
             if (dist <= sean.robotTask.completionDistance)
-                MarkArrived(robotId);
+                MarkArrived(robotId, sean.robot.base_link.transform, robotGoal.transform.position, hasGoal: true);
         }
 
         // The PWD/pedestrian is not reliably classified by its own CloseEnough() (a waypoint
@@ -672,16 +781,19 @@ namespace SessionReview
             if (string.IsNullOrEmpty(pwdId) || !agentArrivals.ContainsKey(pwdId) || agentArrivals[pwdId].arrived)
                 return;
 
+            // Settle watches the transform the recorder actually samples (the avatar's
+            // rigidbody child for spawned players), not the controller root.
+            Transform pwdTrail = ResolveTrackingTransform(pwdController.gameObject);
             if (TryGetPwdGoal(out Vector3 goalPos))
             {
                 float dist = SEAN.Util.Geometry.GroundPlaneDist(pwdController.transform.position, goalPos);
                 if (dist <= Parameters.CLOSE_ENOUGH_MIN_DIST)
-                    MarkArrived(pwdId);
+                    MarkArrived(pwdId, pwdTrail, goalPos, hasGoal: true);
             }
             else if (pwdNavigable != null && pwdNavigable.CloseEnough())
             {
                 // No resolvable goal (e.g. graph-nav PWD): fall back to the agent's own notion.
-                MarkArrived(pwdId);
+                MarkArrived(pwdId, pwdTrail);
             }
         }
 

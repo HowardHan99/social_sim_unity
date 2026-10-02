@@ -8,7 +8,7 @@ namespace SEAN.Input
         Auto = 0,
         /// <summary>Logitech Extreme 3D flight stick: steer = twist (axis 2), throttle = stick Y (axis 1).</summary>
         LogitechExtreme3D = 1,
-        /// <summary>Xbox-layout gamepad in XInput mode (GameSir, Xbox, 8BitDo, ...): steer = right stick X, throttle = right stick Y (the left stick looks around).</summary>
+        /// <summary>Xbox-layout gamepad in XInput mode (GameSir, Xbox, 8BitDo, ...): steer = right stick X, throttle = right stick Y (the left stick looks around). F9 swaps the two sticks.</summary>
         XInputGamepad = 2,
     }
 
@@ -34,6 +34,7 @@ namespace SEAN.Input
         private const string ProfilePrefKey = "SEAN.JoystickProfiles.Selected";
         private const string LinearSignPrefKey = "SEAN.JoystickProfiles.GamepadLinearSign";
         private const string SteerSignPrefKey = "SEAN.JoystickProfiles.GamepadSteerSign";
+        private const string SwapSticksPrefKey = "SEAN.JoystickProfiles.SwapSticks";
         private const float DetectionRefreshSec = 2f;
 
         /// <summary>Joystick slots that InputManager defines JoyNAxisK entries for.</summary>
@@ -47,6 +48,7 @@ namespace SEAN.Input
         private static JoystickProfileType? selectedCache;
         private static float? linearSignCache;
         private static float? steerSignCache;
+        private static bool? swapSticksCache;
 
         // Which slot (1-based) holds each device; 0 = not connected.
         private static int gamepadJoyNum;
@@ -80,9 +82,14 @@ namespace SEAN.Input
         }
 
         /// <summary>
-        /// SelectedProfile with Auto resolved. Auto prefers a connected gamepad -- that is the
-        /// primary study controller -- and falls back to the flight stick, which stays
-        /// available by connecting it alone or by choosing it explicitly.
+        /// SelectedProfile with Auto resolved. Auto means the participant is on the gamepad
+        /// (the primary study controller). The flight stick is the RESEARCHER's
+        /// possessed-agent control and is never auto-assigned to the participant: when the
+        /// gamepad is unplugged the participant drives keyboard-only, instead of the
+        /// researcher's stick feeding the participant's agent (its rest drift, amplified by
+        /// the tiny joystickLinearFullThrow, read as phantom throttle). Choosing
+        /// LogitechExtreme3D explicitly (F10 / tuning panel) still hands the stick to the
+        /// participant.
         /// </summary>
         public static JoystickProfileType EffectiveProfile
         {
@@ -95,10 +102,6 @@ namespace SEAN.Input
                 if (SelectedProfile == JoystickProfileType.LogitechExtreme3D)
                     return JoystickProfileType.LogitechExtreme3D;
 
-                if (gamepadJoyNum > 0)
-                    return JoystickProfileType.XInputGamepad;
-                if (logitechJoyNum > 0)
-                    return JoystickProfileType.LogitechExtreme3D;
                 return JoystickProfileType.XInputGamepad;
             }
         }
@@ -171,6 +174,39 @@ namespace SEAN.Input
         }
 
         /// <summary>
+        /// Swaps which stick does what on the gamepad profile: off (default) = RIGHT stick
+        /// drives and LEFT stick looks; on = LEFT stick drives and RIGHT stick looks, the
+        /// layout most console players expect. Persisted in PlayerPrefs, flipped at runtime
+        /// with F9 (JoystickProfileSwitcher) so a participant who reaches for the wrong stick
+        /// can be accommodated without leaving play mode. Ignored on the Logitech profile,
+        /// which has only one stick.
+        /// </summary>
+        public static bool SwapDriveAndLookSticks
+        {
+            get
+            {
+                if (!swapSticksCache.HasValue)
+                    swapSticksCache = PlayerPrefs.GetInt(SwapSticksPrefKey, 0) != 0;
+                return swapSticksCache.Value;
+            }
+            set
+            {
+                swapSticksCache = value;
+                PlayerPrefs.SetInt(SwapSticksPrefKey, value ? 1 : 0);
+                PlayerPrefs.Save();
+                // The look axes just moved to the other stick, so the old rest position is
+                // meaningless; re-anchor it against the axes we now read.
+                lookCentersCaptured = false;
+            }
+        }
+
+        /// <summary>"LS"/"RS" label for whichever stick currently drives, for on-screen hints.</summary>
+        public static string DriveStickLabel => SwapDriveAndLookSticks ? "LS" : "RS";
+
+        /// <summary>"LS"/"RS" label for whichever stick currently looks, for on-screen hints.</summary>
+        public static string LookStickLabel => SwapDriveAndLookSticks ? "RS" : "LS";
+
+        /// <summary>
         /// Translates a legacy/logical axis name into the concrete InputManager axis of the
         /// ACTIVE device. Names that carry no driving role (buttons such as "L1") pass through.
         /// </summary>
@@ -196,21 +232,27 @@ namespace SEAN.Input
             if (EffectiveProfile != JoystickProfileType.XInputGamepad)
                 return 1f;
 
-            switch (AxisIndexOfResolvedName(resolvedAxisName))
-            {
-                case 3: return GamepadSteerSign;    // right stick X (steer)
-                case 4: return GamepadLinearSign;   // right stick Y (throttle)
-                default: return 1f;
-            }
+            int index = AxisIndexOfResolvedName(resolvedAxisName);
+            if (index < 0)
+                return 1f;
+
+            // Keyed to the ROLE rather than a fixed axis number: SwapDriveAndLookSticks moves
+            // the drive axes to the other stick, and the polarity corrections have to move
+            // with them or flipping the sticks would silently undo the Shift+F9 / F11 fixes.
+            if (index == AxisIndexFor(AxisRole.Steer))
+                return GamepadSteerSign;
+            if (index == AxisIndexFor(AxisRole.Throttle))
+                return GamepadLinearSign;
+            return 1f;
         }
 
-        /// <summary>Right-stick X for camera look, centered + deadzoned. 0 unless a gamepad is active.</summary>
+        /// <summary>Look-stick X (see <see cref="LookStickLabel"/>), centered + deadzoned. 0 unless a gamepad is active.</summary>
         public static float CameraLookX()
         {
             return ReadCameraLookAxis(AxisRole.LookX, true);
         }
 
-        /// <summary>Right-stick Y for camera look, centered + deadzoned. 0 unless a gamepad is active.</summary>
+        /// <summary>Look-stick Y (see <see cref="LookStickLabel"/>), centered + deadzoned. 0 unless a gamepad is active.</summary>
         public static float CameraLookY()
         {
             return ReadCameraLookAxis(AxisRole.LookY, false);
@@ -254,6 +296,61 @@ namespace SEAN.Input
             return UnityEngine.Input.GetKeyDown(
                 (KeyCode)((int)KeyCode.Joystick1Button0 + (joy - 1) * 20 + buttonIndex));
         }
+
+        #region Researcher stick (possessed-agent driving)
+
+        private const float ResearcherStickDeadzone = 0.15f;
+
+        /// <summary>
+        /// True when the Logitech flight stick is plugged in and has not been explicitly
+        /// given to the participant (SelectedProfile == LogitechExtreme3D). Under Auto the
+        /// stick always belongs to the researcher — the participant is on the gamepad or,
+        /// with no gamepad connected, keyboard-only (EffectiveProfile / AxisNameFor keep
+        /// the participant's controllers off the shared axes in that case), so reading it
+        /// here can never move the participant's agent.
+        /// </summary>
+        public static bool ResearcherStickAvailable
+        {
+            get
+            {
+                RefreshDetection();
+                return logitechJoyNum > 0 &&
+                       EffectiveProfile != JoystickProfileType.LogitechExtreme3D;
+            }
+        }
+
+        /// <summary>
+        /// Researcher stick forward/back: +1 = pushed forward. 0 whenever
+        /// <see cref="ResearcherStickAvailable"/> is false, so the participant's device is
+        /// never aliased.
+        /// </summary>
+        public static float ResearcherStickThrottle()
+        {
+            if (!ResearcherStickAvailable)
+                return 0f;
+
+            // Unity reports a flight stick pushed forward as negative Y.
+            float v = -RawAxisOrZero($"Joy{logitechJoyNum}Axis1");
+            return Mathf.Abs(v) >= ResearcherStickDeadzone ? Mathf.Clamp(v, -1f, 1f) : 0f;
+        }
+
+        /// <summary>
+        /// Researcher stick steering: +1 = right. Tilt (axis 0) and twist (axis 2) both
+        /// steer, so it works like the arrow keys AND like the wheelchair's twist habit.
+        /// </summary>
+        public static float ResearcherStickSteer()
+        {
+            if (!ResearcherStickAvailable)
+                return 0f;
+
+            float tilt = RawAxisOrZero($"Joy{logitechJoyNum}Axis0");
+            float twist = RawAxisOrZero($"Joy{logitechJoyNum}Axis2");
+            if (Mathf.Abs(tilt) < ResearcherStickDeadzone) tilt = 0f;
+            if (Mathf.Abs(twist) < ResearcherStickDeadzone) twist = 0f;
+            return Mathf.Clamp(tilt + twist, -1f, 1f);
+        }
+
+        #endregion
 
         public static void CycleSelectedProfile()
         {
@@ -329,16 +426,19 @@ namespace SEAN.Input
         {
             if (EffectiveProfile == JoystickProfileType.XInputGamepad)
             {
+                // Default is hands-swapped: the RIGHT stick drives the agent (forward/back +
+                // turn) and the LEFT stick looks around. SwapDriveAndLookSticks (F9) puts it
+                // back to the conventional left-drives / right-looks layout. Only these two
+                // pairs move; the D-pad is fixed either way.
+                bool swapped = SwapDriveAndLookSticks;
                 switch (role)
                 {
-                    // Hands swapped: the RIGHT stick drives the agent (forward/back + turn) and
-                    // the LEFT stick looks around, instead of the usual left-drives/right-looks.
-                    case AxisRole.Steer: return 3;      // right stick X
-                    case AxisRole.Throttle: return 4;   // right stick Y
-                    case AxisRole.LookX: return 0;      // left stick X
-                    case AxisRole.LookY: return 1;      // left stick Y
-                    case AxisRole.DpadX: return 5;      // D-pad horizontal
-                    case AxisRole.DpadY: return 6;      // D-pad vertical
+                    case AxisRole.Steer: return swapped ? 0 : 3;      // stick X
+                    case AxisRole.Throttle: return swapped ? 1 : 4;   // stick Y
+                    case AxisRole.LookX: return swapped ? 3 : 0;      // other stick X
+                    case AxisRole.LookY: return swapped ? 4 : 1;      // other stick Y
+                    case AxisRole.DpadX: return 5;                    // D-pad horizontal
+                    case AxisRole.DpadY: return 6;                    // D-pad vertical
                 }
                 return -1;
             }
@@ -361,8 +461,13 @@ namespace SEAN.Input
             if (joy >= 1 && joy <= MaxJoySlots)
                 return $"Joy{joy}Axis{index}";
 
-            // The device is not connected (or sits beyond the configured slots): fall back to
-            // the shared any-joystick axes so a single-controller setup still works.
+            // The active device is not connected (or sits beyond the configured slots).
+            // The shared any-joystick axes read EVERY stick, so falling back to them is
+            // only safe when no flight stick is plugged in — otherwise the researcher's
+            // Logitech would leak into the participant's controls (the phantom "initial
+            // velocity" in manual mode with the gamepad unplugged).
+            if (EffectiveProfile == JoystickProfileType.XInputGamepad && logitechJoyNum > 0)
+                return string.Empty;
             return SharedAxisName(index);
         }
 
@@ -433,7 +538,7 @@ namespace SEAN.Input
         /// </summary>
         private static void EnsureLookCentersCaptured()
         {
-            string key = $"{ActiveJoyNum}:{gamepadDeviceName}";
+            string key = $"{ActiveJoyNum}:{gamepadDeviceName}:{SwapDriveAndLookSticks}";
             if (lookCentersCaptured && lookCenterKey == key)
                 return;
 

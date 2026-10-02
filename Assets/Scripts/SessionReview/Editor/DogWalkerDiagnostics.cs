@@ -29,9 +29,17 @@ namespace SessionReview.Editor
             "Assets/Resources/Prefabs/Community-informed Model/Walker User/man.fbx",
         };
 
+        const string ColliderAuditFile = "character_collider_audit.txt";
+        const string CharacterFolder = "Assets/Resources/PlayerCharacters";
+
+        // SEAN background agents run on Base.RADIUS = 0.2; anything much wider than this makes the
+        // character an invisible blob the robot / wheelchair cannot pass.
+        const float HumanRadiusReference = 0.35f;
+
         static DogWalkerDiagnostics()
         {
             EditorApplication.delayCall += Run;
+            EditorApplication.delayCall += RunColliderAudit;
         }
 
         [MenuItem("SessionReview/Dump Dog Walker Diagnostics")]
@@ -55,6 +63,196 @@ namespace SessionReview.Editor
 
             File.WriteAllText(OutputFile, sb.ToString());
             Debug.Log("[DogWalkerDiagnostics] Wrote " + Path.GetFullPath(OutputFile));
+        }
+
+        /// <summary>
+        /// Audits the physics collider of every World Building character prefab against the space its
+        /// meshes actually occupy: a spawned character keeps the prefab's ROOT collider (RuntimeEditor
+        /// only adds one when there is none), so a capsule fitted to a T-posed arm span, or to a
+        /// character plus its prop/animal, becomes an invisible blob that blocks the robot.
+        /// Menu: SessionReview → Dump Character Collider Audit
+        /// </summary>
+        [MenuItem("SessionReview/Dump Character Collider Audit")]
+        public static void RunColliderAudit()
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("=== Character collider audit, " + System.DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " ===");
+            sb.AppendLine("Bounds are mesh bind-pose bounds expressed in ROOT-local space (Y=0 is the ground the");
+            sb.AppendLine("spawn pipeline drops the prefab onto). Reference human radius: " + HumanRadiusReference + " m.");
+
+            foreach (string guid in AssetDatabase.FindAssets("t:Prefab", new[] { CharacterFolder }))
+            {
+                string path = AssetDatabase.GUIDToAssetPath(guid);
+                try
+                {
+                    DumpColliderAudit(sb, path);
+                }
+                catch (System.Exception ex)
+                {
+                    sb.AppendLine("EXCEPTION auditing " + path + ": " + ex);
+                }
+            }
+
+            File.WriteAllText(ColliderAuditFile, sb.ToString());
+            Debug.Log("[DogWalkerDiagnostics] Wrote " + Path.GetFullPath(ColliderAuditFile));
+        }
+
+        static void DumpColliderAudit(StringBuilder sb, string path)
+        {
+            sb.AppendLine();
+            sb.AppendLine("--- " + Path.GetFileNameWithoutExtension(path) + " ---");
+
+            var root = AssetDatabase.LoadAssetAtPath<GameObject>(path);
+            if (root == null)
+            {
+                sb.AppendLine("  LoadAssetAtPath<GameObject> returned NULL");
+                return;
+            }
+
+            bool hasBounds = TryComputeLocalBounds(root.transform, root.transform, out Bounds bounds);
+            if (hasBounds)
+                sb.AppendLine("  mesh bounds: center=" + V(bounds.center) + " size=" + V(bounds.size)
+                    + "  y=[" + F(bounds.min.y) + ", " + F(bounds.max.y) + "]"
+                    + "  x=[" + F(bounds.min.x) + ", " + F(bounds.max.x) + "]"
+                    + "  z=[" + F(bounds.min.z) + ", " + F(bounds.max.z) + "]");
+            else
+                sb.AppendLine("  mesh bounds: NONE (no renderers with a shared mesh)");
+
+            // Per-subtree so a companion object (Dog_Walker's dog, Cyclist's bike, Walker_User's
+            // frame) is visible as its own blob rather than being averaged into the human.
+            for (int i = 0; i < root.transform.childCount; i++)
+            {
+                Transform child = root.transform.GetChild(i);
+                if (TryComputeLocalBounds(root.transform, child, out Bounds childBounds))
+                    sb.AppendLine("    subtree '" + child.name + "' center=" + V(childBounds.center)
+                        + " size=" + V(childBounds.size) + " y=[" + F(childBounds.min.y) + ", " + F(childBounds.max.y) + "]");
+            }
+
+            var rb = root.GetComponent<Rigidbody>();
+            if (rb != null)
+                sb.AppendLine("  Rigidbody: kinematic=" + rb.isKinematic + " gravity=" + rb.useGravity
+                    + " mass=" + rb.mass + " constraints=" + rb.constraints);
+
+            Collider[] colliders = root.GetComponentsInChildren<Collider>(true);
+            sb.AppendLine("  colliders: " + colliders.Length);
+            foreach (Collider c in colliders)
+            {
+                bool onRoot = c.transform == root.transform;
+                sb.Append("    " + c.GetType().Name + " on '" + c.transform.name + "'"
+                    + (onRoot ? " [ROOT]" : " [child - disabled by the static spawn pipeline]")
+                    + " enabled=" + c.enabled + " trigger=" + c.isTrigger);
+
+                if (c is CapsuleCollider capsule)
+                {
+                    Vector3 scale = c.transform.lossyScale;
+                    float radius = capsule.radius * Mathf.Max(Mathf.Abs(scale.x), Mathf.Abs(scale.z));
+                    float height = Mathf.Max(capsule.height * Mathf.Abs(scale.y), radius * 2f);
+                    float bottom = capsule.center.y * scale.y - height * 0.5f;
+                    float top = capsule.center.y * scale.y + height * 0.5f;
+                    sb.AppendLine();
+                    sb.AppendLine("      capsule center=" + V(capsule.center) + " radius=" + F(radius)
+                        + " (diameter " + F(radius * 2f) + ") height=" + F(height) + " dir=" + capsule.direction);
+                    sb.AppendLine("      capsule y=[" + F(bottom) + ", " + F(top) + "]");
+
+                    if (!onRoot)
+                        continue;
+
+                    if (radius > HumanRadiusReference)
+                        sb.AppendLine("      WARN too fat: " + F(radius * 2f) + " m wide (a walking human is ~0.5 m)");
+                    if (Mathf.Abs(capsule.center.x) > 0.15f || Mathf.Abs(capsule.center.z) > 0.15f)
+                        sb.AppendLine("      WARN off-centre: horizontal offset from the pivot is ("
+                            + F(capsule.center.x) + ", " + F(capsule.center.z) + ") m");
+                    if (hasBounds)
+                    {
+                        if (bottom < bounds.min.y - 0.05f)
+                            sb.AppendLine("      WARN sunk: capsule reaches " + F(bounds.min.y - bottom) + " m below the mesh bottom");
+                        if (top < bounds.max.y - 0.15f)
+                            sb.AppendLine("      WARN short: top " + F(bounds.max.y - top) + " m of the character has no collider");
+                        float suggestedHeight = Mathf.Max(0.2f, bounds.max.y - Mathf.Min(0f, bounds.min.y));
+                        sb.AppendLine("      suggested: center=(0, " + F(suggestedHeight * 0.5f) + ", 0) radius=0.25 height="
+                            + F(suggestedHeight));
+                    }
+                    continue;
+                }
+
+                if (c is BoxCollider box)
+                    sb.AppendLine("  center=" + V(box.center) + " size=" + V(box.size));
+                else if (c is SphereCollider sphere)
+                    sb.AppendLine("  center=" + V(sphere.center) + " radius=" + F(sphere.radius));
+                else
+                    sb.AppendLine();
+            }
+
+            if (colliders.Length == 0)
+                sb.AppendLine("    (none - RuntimeEditorManager.EnsureRootSelectionCollider will fit a box from the"
+                    + " renderer bounds at spawn time)");
+        }
+
+        /// <summary>
+        /// Bind-pose mesh bounds of <paramref name="subtree"/> expressed in <paramref name="root"/>'s
+        /// local space. Reads shared meshes instead of Renderer.bounds because a prefab asset is not
+        /// in a scene, so its renderers report nothing useful. Skinned meshes are bounded in their
+        /// root-bone frame, which is how Unity itself derives SkinnedMeshRenderer.localBounds.
+        /// </summary>
+        static bool TryComputeLocalBounds(Transform root, Transform subtree, out Bounds bounds)
+        {
+            bounds = default;
+            bool hasBounds = false;
+
+            foreach (Renderer r in subtree.GetComponentsInChildren<Renderer>(true))
+            {
+                Bounds local;
+                Transform frame;
+                if (r is SkinnedMeshRenderer smr)
+                {
+                    if (smr.sharedMesh == null)
+                        continue;
+                    // localBounds is expressed in the ROOT BONE's space, which is also the frame
+                    // Unity uses to derive SkinnedMeshRenderer.bounds. sharedMesh.bounds is in a
+                    // different space entirely and produces 3 m tall humans if used here.
+                    local = smr.localBounds;
+                    frame = smr.rootBone != null ? smr.rootBone : smr.transform;
+                }
+                else
+                {
+                    var mf = r.GetComponent<MeshFilter>();
+                    if (mf == null || mf.sharedMesh == null)
+                        continue;
+                    local = mf.sharedMesh.bounds;
+                    frame = r.transform;
+                }
+
+                Matrix4x4 toRoot = root.worldToLocalMatrix * frame.localToWorldMatrix;
+                Vector3 c = local.center;
+                Vector3 e = local.extents;
+                for (int sx = -1; sx <= 1; sx += 2)
+                    for (int sy = -1; sy <= 1; sy += 2)
+                        for (int sz = -1; sz <= 1; sz += 2)
+                        {
+                            Vector3 corner = toRoot.MultiplyPoint3x4(c + new Vector3(e.x * sx, e.y * sy, e.z * sz));
+                            if (!hasBounds)
+                            {
+                                bounds = new Bounds(corner, Vector3.zero);
+                                hasBounds = true;
+                            }
+                            else
+                            {
+                                bounds.Encapsulate(corner);
+                            }
+                        }
+            }
+
+            return hasBounds;
+        }
+
+        static string F(float v)
+        {
+            return v.ToString("0.###");
+        }
+
+        static string V(Vector3 v)
+        {
+            return "(" + F(v.x) + ", " + F(v.y) + ", " + F(v.z) + ")";
         }
 
         static void DumpAsset(StringBuilder sb, string path)

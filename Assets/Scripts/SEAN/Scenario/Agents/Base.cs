@@ -72,7 +72,7 @@ namespace SEAN.Scenario.Agents
                 // model instance, so the Animator sits one level down instead of on the
                 // agent root. Drive that one rather than throwing, and force root motion
                 // off so the rig can't walk itself away from the root we move by physics.
-                animator = GetComponentInChildren<Animator>(true);
+                animator = SessionReview.AgentControlTuning.FindAnimator(gameObject);
                 if (animator != null)
                     applyRootMotion = false;
             }
@@ -185,9 +185,13 @@ namespace SEAN.Scenario.Agents
         public void StopAnimator()
         {
             if (animator == null) { return; }
-            //animator.SetBool("Idling", true);
-            animator.SetFloat("Forward", 0);
-            animator.SetFloat("Strafe", 0);
+            SessionReview.AgentControlTuning.UpdateLocomotionAnimator(
+                animator,
+                transform,
+                Vector3.zero,
+                0f,
+                false,
+                transform.eulerAngles.y);
         }
 
         public void ComputePath(Vector3 destination)
@@ -289,14 +293,13 @@ namespace SEAN.Scenario.Agents
 
             if (animator != null)
             {
-                animator.SetBool("Idling", idle);
-                if (!GetType().Equals(typeof(PlayerAgent)))
-                {
-                    animator.speed = velocity.magnitude;
-
-                }
-                animator.SetFloat("Forward", animParams.z/ANIMATION_SMOOTHING);
-                animator.SetFloat("Strafe", animParams.x/ANIMATION_SMOOTHING);
+                SessionReview.AgentControlTuning.UpdateLocomotionAnimator(
+                    animator,
+                    transform,
+                    velocity,
+                    velocity.magnitude,
+                    !GetType().Equals(typeof(PlayerAgent)),
+                    transform.eulerAngles.y);
             }
 
             if (ShowDebug)

@@ -14,7 +14,10 @@ namespace SessionReview
         PWDFirstPerson,
         PedestrianOverShoulder,
         TopDown,
-        FreeCam
+        FreeCam,
+        // Appended last on purpose: inspector-serialized perspective values are ints, so
+        // inserting in the middle would silently repoint them at a different view.
+        RobotThirdPerson
     }
 
     public class RewindController : MonoBehaviour
@@ -26,6 +29,12 @@ namespace SessionReview
 
         [Header("Pedestrian Over-Shoulder")]
         [SerializeField] private Vector3 overShoulderOffset = new Vector3(-0.5f, 2.0f, -2.0f);
+
+        [Header("Robot Third Person")]
+        [Tooltip("Chase offset (robot-relative) used when the robot's own third-person camera "
+                 + "is not mounted on the chassis and therefore cannot follow the replay.")]
+        [SerializeField] private Vector3 robotThirdPersonOffset = new Vector3(0f, 2.2f, -3.8f);
+        [SerializeField] private float robotThirdPersonLookHeight = 0.9f;
 
         [Header("PWD Camera")]
         [SerializeField] private float pwdEyeHeight = 1.2f;
@@ -57,12 +66,16 @@ namespace SessionReview
         private float timeOffset;
 
         private PerspectiveMode perspectiveMode = PerspectiveMode.TopDown;
+        // View the reviewer came FROM, so stepping into an agent's eyes (robot POV to
+        // send a signal, say) always has a one-press way back to where they were.
+        private PerspectiveMode previousPerspective = PerspectiveMode.TopDown;
         private string selectedPedestrianId;
 
         private Camera rewindCamera;
         private AudioListener rewindAudioListener;
         private ComfortMotionBlur rewindComfortBlur;
         private Camera robotFirstPersonCam;
+        private Camera robotThirdPersonCam;
         private Camera pwdFirstPersonCam;
         private IVI.ManualWheelchairController pwdController;
         private Transform pwdViewTarget;
@@ -102,6 +115,11 @@ namespace SessionReview
         [SerializeField] private bool showSignalReplayStatus = true;
         private RobotSignalLightController reviewSignalLightController;
         private TTSManager reviewTtsManager;
+        // Signals the REVIEWER sent during this replay (see ReplaySignalOverlay). Held
+        // apart from the recorded annotations so nothing post-hoc can leak into the
+        // trial's own signal data, but replayed alongside them: scrub back over one and
+        // it fires again, exactly like a signal that was sent live.
+        private readonly List<SignalAnnotation> reviewSignals = new List<SignalAnnotation>();
         private string activeVlmReplayLabel = string.Empty;
         private float activeVlmReplayAge = -1f;
         private float lastEvaluatedSignalTime = -1f;
@@ -118,6 +136,9 @@ namespace SessionReview
         public float PlaybackSpeed => playbackSpeed;
         public bool IsPlaying => isPlaying;
         public PerspectiveMode CurrentPerspective => perspectiveMode;
+        /// <summary>The view active before the current one — the "back" target for a POV switch.</summary>
+        public PerspectiveMode PreviousPerspective => previousPerspective;
+        public IReadOnlyList<SignalAnnotation> ReviewSignals => reviewSignals;
 
         private float RecStartTime => currentTrial.startTime - timeOffset;
         private float RecEndTime => currentTrial.endTime - timeOffset;
@@ -206,6 +227,7 @@ namespace SessionReview
             lastTriggeredLightingAnnotationIndex = -1;
             activeLightingReplayCandidates.Clear();
             manualLightingReplayTestActive = false;
+            reviewSignals.Clear();
 
             savedMainCamera = Camera.main;
             if (savedMainCamera != null)
@@ -238,6 +260,10 @@ namespace SessionReview
             ConfigureGhostComparison();
 
             ApplyStateAtCurrentTime();
+            // Reset the view pair first: perspectiveMode survives from the previous review,
+            // and it must not become this review's "back" target.
+            perspectiveMode = PerspectiveMode.TopDown;
+            previousPerspective = PerspectiveMode.TopDown;
             SetPerspective(PerspectiveMode.TopDown);
         }
 
@@ -247,19 +273,18 @@ namespace SessionReview
         /// The driven path needs no ghost — the real robot replays it. The recording +
         /// trial window let the ghosts pace themselves by the robot's odometer.
         /// </summary>
-        private void ConfigureGhostComparison()
+        /// <summary>
+        /// Timeline id of the robot in the trial under review. Prefers the live scene robot;
+        /// replays loaded from disk fall back to the id the trial recorded for its Robot role,
+        /// because ids embed per-run instance ids that never match the current scene.
+        /// </summary>
+        public string ResolveRobotObjectId()
         {
-            if (ghostComparison == null)
-                return;
-
             var sean = SEAN.SEAN.instance;
             string robotId = (sean != null && sean.robot != null && sean.robot.base_link != null)
                 ? SessionTracker.GetObjectId(sean.robot.base_link)
                 : null;
 
-            // Replays loaded from disk: the current scene robot's id won't be a key in the
-            // recorded timelines (ids embed per-run instance ids), so fall back to the id
-            // the trial recorded for its Robot role.
             if (currentTrial != null &&
                 (robotId == null ||
                  currentRecording == null || currentRecording.timelineDict == null ||
@@ -269,6 +294,30 @@ namespace SessionReview
                 if (robotEntry != null)
                     robotId = robotEntry.objectId;
             }
+
+            return robotId;
+        }
+
+        /// <summary>
+        /// The robot transform as posed by the replay at the current review time (the live
+        /// scene robot, which playback drives). Null when no robot is resolvable.
+        /// </summary>
+        public Transform ResolveRobotTransform()
+        {
+            var sean = SEAN.SEAN.instance;
+            if (sean != null && sean.robot != null && sean.robot.base_link != null)
+                return sean.robot.base_link.transform;
+
+            string robotId = ResolveRobotObjectId();
+            return string.IsNullOrEmpty(robotId) ? null : FindTransformForId(robotId);
+        }
+
+        private void ConfigureGhostComparison()
+        {
+            if (ghostComparison == null)
+                return;
+
+            string robotId = ResolveRobotObjectId();
 
             // Reference planned route: the longest recorded plan snapshot in this trial's
             // window (the most complete route to the goal).
@@ -328,6 +377,7 @@ namespace SessionReview
             currentTrial = null;
             currentRecording = null;
             signalAnnotations = null;
+            reviewSignals.Clear();
             lastEvaluatedSignalTime = -1f;
             lastTriggeredVlmAnnotationIndex = -1;
             lastTriggeredLightingAnnotationIndex = -1;
@@ -369,6 +419,8 @@ namespace SessionReview
                 UpdateOverShoulderCamera();
             else if (perspectiveMode == PerspectiveMode.RobotFirstPerson)
                 UpdateRobotFPCamera();
+            else if (perspectiveMode == PerspectiveMode.RobotThirdPerson)
+                UpdateRobotThirdPersonCamera();
             else if (perspectiveMode == PerspectiveMode.PWDFirstPerson)
                 UpdatePwdFPCamera();
             else if (perspectiveMode == PerspectiveMode.FreeCam)
@@ -429,6 +481,22 @@ namespace SessionReview
             Debug.Log($"[Rewind] TogglePlayPause #{togglePlayPauseCount} frame={frame} (Δ={sincePrev}) -> isPlaying={isPlaying} speed={playbackSpeed:F2} t={currentTime:F2}\n{System.Environment.StackTrace}");
         }
 
+        /// <summary>
+        /// Force the play state instead of flipping it. Overlays that must freeze the replay
+        /// (e.g. sending a signal at an exact moment) can't use TogglePlayPause, which would
+        /// START playback when it was already paused.
+        /// </summary>
+        public void SetPlaying(bool play)
+        {
+            if (isPlaying == play)
+                return;
+
+            isPlaying = play;
+            // Same guard as TogglePlayPause: a leftover 0 speed would freeze on resume.
+            if (isPlaying && Mathf.Abs(playbackSpeed) < 1e-4f)
+                playbackSpeed = 1f;
+        }
+
         public void SetPlaybackSpeed(float speed)
         {
             playbackSpeed = Mathf.Clamp(speed, -4f, 4f);
@@ -450,6 +518,8 @@ namespace SessionReview
 
         public void SetPerspective(PerspectiveMode mode)
         {
+            if (mode != perspectiveMode)
+                previousPerspective = perspectiveMode;
             perspectiveMode = mode;
             DisableAllRewindCameras();
 
@@ -457,6 +527,9 @@ namespace SessionReview
             {
                 case PerspectiveMode.RobotFirstPerson:
                     ActivateRobotFP();
+                    break;
+                case PerspectiveMode.RobotThirdPerson:
+                    ActivateRobotThirdPerson();
                     break;
                 case PerspectiveMode.PWDFirstPerson:
                     ActivatePWDFP();
@@ -481,7 +554,8 @@ namespace SessionReview
 
         public void CyclePerspective()
         {
-            int next = ((int)perspectiveMode + 1) % 5;
+            int count = Enum.GetValues(typeof(PerspectiveMode)).Length;
+            int next = ((int)perspectiveMode + 1) % count;
             SetPerspective((PerspectiveMode)next);
         }
 
@@ -615,9 +689,60 @@ namespace SessionReview
             ApplyVlmReplayState();
         }
 
+        /// <summary>
+        /// Recorded annotations plus the ones sent during this review, addressed as one list.
+        /// Review signals sit AFTER the recorded ones, so appending never shifts an index the
+        /// "already triggered" bookkeeping below is holding.
+        /// </summary>
+        private int AnnotationCount =>
+            (signalAnnotations != null ? signalAnnotations.Count : 0) + reviewSignals.Count;
+
+        private SignalAnnotation GetAnnotation(int index)
+        {
+            int recorded = signalAnnotations != null ? signalAnnotations.Count : 0;
+            if (index < 0)
+                return null;
+            if (index < recorded)
+                return signalAnnotations[index];
+
+            int reviewIndex = index - recorded;
+            return reviewIndex < reviewSignals.Count ? reviewSignals[reviewIndex] : null;
+        }
+
+        /// <summary>
+        /// Add a signal the reviewer sent from the replay (ReplaySignalOverlay). It joins the
+        /// replay timeline — scrub past it again and it fires like any recorded signal — but
+        /// stays out of the trial's recorded annotation list.
+        /// </summary>
+        public void AddReviewSignal(SignalAnnotation annotation)
+        {
+            if (annotation == null)
+                return;
+
+            reviewSignals.Add(annotation);
+
+            // The overlay already played this signal as it was sent. Mark it consumed at its
+            // own timestamp so the triggers below don't immediately fire it a second time;
+            // scrubbing away and back clears the marks and replays it normally.
+            int index = AnnotationCount - 1;
+            if (annotation.type == SignalAnnotationType.VlmCapture)
+            {
+                lastTriggeredVlmAnnotationIndex = index;
+            }
+            else
+            {
+                lastTriggeredLightingAnnotationIndex = index;
+                activeLightingReplayCandidates.Add(index);
+            }
+
+            SessionReview.SessionReviewLog.Log(
+                $"[SessionReview] Review signal added at replay t={annotation.timestamp:F2} " +
+                $"({annotation.label}, type={annotation.type}).");
+        }
+
         private void TriggerCrossedSignalBehaviors()
         {
-            if (signalAnnotations == null || signalAnnotations.Count == 0)
+            if (AnnotationCount == 0)
             {
                 lastEvaluatedSignalTime = currentTime;
                 return;
@@ -645,9 +770,11 @@ namespace SessionReview
                 return;
             }
 
-            for (int i = 0; i < signalAnnotations.Count; i++)
+            for (int i = 0; i < AnnotationCount; i++)
             {
-                SignalAnnotation annotation = signalAnnotations[i];
+                SignalAnnotation annotation = GetAnnotation(i);
+                if (annotation == null)
+                    continue;
                 if (annotation.timestamp <= previousTime || annotation.timestamp > currentTime)
                     continue;
 
@@ -666,13 +793,13 @@ namespace SessionReview
 
         private void TriggerLightingReplayWindowFallback()
         {
-            if (signalAnnotations == null || signalAnnotations.Count == 0)
+            if (AnnotationCount == 0)
                 return;
 
-            for (int i = 0; i < signalAnnotations.Count; i++)
+            for (int i = 0; i < AnnotationCount; i++)
             {
-                SignalAnnotation annotation = signalAnnotations[i];
-                if (!IsLightingAnnotation(annotation.type))
+                SignalAnnotation annotation = GetAnnotation(i);
+                if (annotation == null || !IsLightingAnnotation(annotation.type))
                     continue;
 
                 float age = currentTime - annotation.timestamp;
@@ -746,15 +873,12 @@ namespace SessionReview
             activeVlmReplayLabel = string.Empty;
             activeVlmReplayAge = -1f;
 
-            if (signalAnnotations == null)
-                return;
-
             SignalAnnotation best = null;
             float bestAge = float.MaxValue;
-            for (int i = 0; i < signalAnnotations.Count; i++)
+            for (int i = 0; i < AnnotationCount; i++)
             {
-                SignalAnnotation annotation = signalAnnotations[i];
-                if (annotation.type != SignalAnnotationType.VlmCapture)
+                SignalAnnotation annotation = GetAnnotation(i);
+                if (annotation == null || annotation.type != SignalAnnotationType.VlmCapture)
                     continue;
 
                 float age = currentTime - annotation.timestamp;
@@ -839,12 +963,9 @@ namespace SessionReview
 
         private string GetLatestReplaySpeechText()
         {
-            if (signalAnnotations == null)
-                return string.Empty;
-
-            for (int i = signalAnnotations.Count - 1; i >= 0; i--)
+            for (int i = AnnotationCount - 1; i >= 0; i--)
             {
-                SignalAnnotation annotation = signalAnnotations[i];
+                SignalAnnotation annotation = GetAnnotation(i);
                 if (annotation != null &&
                     annotation.type == SignalAnnotationType.VlmCapture &&
                     !string.IsNullOrWhiteSpace(annotation.metadata))
@@ -1044,13 +1165,17 @@ namespace SessionReview
         private void FindAgentCameras()
         {
             robotFirstPersonCam = null;
+            robotThirdPersonCam = null;
             pwdFirstPersonCam = null;
             pwdController = null;
             pwdViewTarget = null;
 
             var sean = SEAN.SEAN.instance;
             if (sean != null && sean.robot != null)
+            {
                 robotFirstPersonCam = sean.robot.camera_first;
+                robotThirdPersonCam = sean.robot.camera_third;
+            }
 
             var mwc = FindObjectOfType<IVI.ManualWheelchairController>();
             if (mwc != null)
@@ -1160,6 +1285,72 @@ namespace SessionReview
                 rewindCamera.transform.rotation = robotT.rotation;
                 rewindCamera.enabled = true;
             }
+        }
+
+        private void ActivateRobotThirdPerson()
+        {
+            if (!UpdateRobotThirdPersonCamera())
+                ActivateTopDown();
+        }
+
+        /// <summary>
+        /// Chase view of the robot — the one to signal from, since the robot's own indicators
+        /// are out of frame in its first-person view.
+        ///
+        /// Prefers the robot's third-person camera when it is mounted on the chassis: that is
+        /// literally the view the robot player drove with, and being parented it follows the
+        /// replayed base_link for free. A third-person camera driven by a follow script instead
+        /// would be frozen here (review disables those drivers), so that case falls back to a
+        /// chase offset computed from the replayed robot pose.
+        /// </summary>
+        private bool UpdateRobotThirdPersonCamera()
+        {
+            if (rewindCamera == null)
+                return false;
+
+            var sean = SEAN.SEAN.instance;
+            if (robotThirdPersonCam == null && sean != null && sean.robot != null)
+                robotThirdPersonCam = sean.robot.camera_third;
+
+            GameObject baseLink = sean != null && sean.robot != null ? sean.robot.base_link : null;
+            if (robotThirdPersonCam != null && IsMountedOn(robotThirdPersonCam.transform, baseLink))
+            {
+                ConfigureRewindFromSourceCamera(robotThirdPersonCam);
+                rewindCamera.enabled = true;
+                return true;
+            }
+
+            Transform robotT = ResolveRobotTransform();
+            if (robotT == null)
+                return false;
+
+            Quaternion yaw = Quaternion.Euler(0f, robotT.eulerAngles.y, 0f);
+            Vector3 desiredPosition = robotT.position + yaw * robotThirdPersonOffset;
+            Vector3 lookTarget = robotT.position + Vector3.up * robotThirdPersonLookHeight;
+            Vector3 lookDirection = lookTarget - desiredPosition;
+
+            if (!IsFinite(desiredPosition) || !IsFinite(lookDirection) || lookDirection.sqrMagnitude < 0.0001f)
+                return false;
+
+            rewindCamera.transform.position = desiredPosition;
+            rewindCamera.transform.rotation = Quaternion.LookRotation(lookDirection, Vector3.up);
+            rewindCamera.orthographic = false;
+            rewindCamera.fieldOfView = robotThirdPersonCam != null ? robotThirdPersonCam.fieldOfView : 60f;
+            rewindCamera.enabled = true;
+            return true;
+        }
+
+        private static bool IsMountedOn(Transform candidate, GameObject root)
+        {
+            if (candidate == null || root == null)
+                return false;
+
+            for (Transform t = candidate; t != null; t = t.parent)
+            {
+                if (t == root.transform)
+                    return true;
+            }
+            return false;
         }
 
         private void ActivatePWDFP()
@@ -1379,6 +1570,11 @@ namespace SessionReview
         private void UpdateFreeCam()
         {
             if (rewindCamera == null || !rewindCamera.enabled)
+                return;
+
+            // A review panel owns the keyboard (typing a signal message): WASD/Q/E must
+            // land in the text field instead of flying the camera.
+            if (ReplaySignalOverlay.IsTypingMessage)
                 return;
 
             if (IsRightMouseButtonPressed() && !freeCamLooking)
@@ -1846,7 +2042,7 @@ namespace SessionReview
                 // Controls hint, centered below.
                 string controlsStr = perspectiveMode == PerspectiveMode.FreeCam
                     ? "RMB Look     MMB Pan     WASD Move     Q/E Up-Down     Wheel Zoom     Shift Fast     I Info     Esc Exit"
-                    : "Space Play     Left/Right Step     [ / ] Speed & Trials     F1-F5 View     G Trails     F6 Ghosts     I Info     Esc Exit";
+                    : "Space Play     Left/Right Step     [ / ] Speed & Trials     F1 Robot 1st     Shift+F1 Robot 3rd + Signal     F2-F5 View     G Trails     F6 Ghosts     I Info     Esc Back";
                 GUI.Label(new Rect(innerX, panelY + 76f, innerW, 20f), controlsStr, progressHintStyle);
             }
 
@@ -1886,12 +2082,11 @@ namespace SessionReview
 
         private bool HasActiveLightingAnnotation()
         {
-            if (signalAnnotations == null)
-                return false;
-
-            for (int i = 0; i < signalAnnotations.Count; i++)
+            for (int i = 0; i < AnnotationCount; i++)
             {
-                SignalAnnotation annotation = signalAnnotations[i];
+                SignalAnnotation annotation = GetAnnotation(i);
+                if (annotation == null)
+                    continue;
                 if (annotation.type != SignalAnnotationType.LightingLeft &&
                     annotation.type != SignalAnnotationType.LightingRight &&
                     annotation.type != SignalAnnotationType.LightingBoth)

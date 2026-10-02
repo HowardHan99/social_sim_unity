@@ -32,6 +32,11 @@ namespace SessionReview
         private Renderer[] renderers;
         private float distance = 6f;
         private float fallbackYaw;
+        // Props take their heading from the mesh long axis; characters (including bike
+        // and scooter rigs) take it from AgentControlTuning, which knows to use the
+        // transform yaw for a walker and the mesh axis only for a riding rig. Using the
+        // mesh axis on a human frames it from the side (shoulder width is its long axis).
+        private bool useAxisYaw;
         private float orbitYaw;
         private float orbitPitch;
         private Vector3 posVelocity;
@@ -46,11 +51,13 @@ namespace SessionReview
                 ? followTarget.GetComponentsInChildren<Renderer>(true)
                 : new Renderer[0];
 
+            useAxisYaw = followTarget != null &&
+                         followTarget.GetComponent<IVI.ManualWheelchairController>() == null &&
+                         followTarget.GetComponent<SEAN.Scenario.Agents.Base>() == null;
+
             float footprint = Mathf.Max(bounds.size.x, bounds.size.z, 1f);
             distance = Mathf.Clamp(footprint * 1.6f + 1.5f, 3.5f, 10f);
-            fallbackYaw = followTarget != null
-                ? PossessedAgentController.EstimateDriveYaw(followTarget)
-                : 0f;
+            fallbackYaw = followTarget != null ? TargetYaw(followTarget) : 0f;
             lastBounds = bounds;
             lastCenterOffset = followTarget != null ? bounds.center - followTarget.position : Vector3.zero;
             hasBounds = true;
@@ -100,7 +107,16 @@ namespace SessionReview
         private float ResolveYaw()
         {
             var controller = target != null ? target.GetComponent<PossessedAgentController>() : null;
-            return controller != null ? controller.DriveYaw : fallbackYaw;
+            if (controller != null)
+                return controller.DriveYaw;
+            return target != null ? TargetYaw(target) : fallbackYaw;
+        }
+
+        private float TargetYaw(Transform t)
+        {
+            return useAxisYaw
+                ? PossessedAgentController.EstimateDriveYaw(t)
+                : AgentControlTuning.EstimateDriveYaw(t);
         }
 
         private Vector3 DesiredPosition(Vector3 center, float yaw)

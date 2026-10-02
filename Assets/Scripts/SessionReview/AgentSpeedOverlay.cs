@@ -15,6 +15,10 @@ namespace SessionReview
     /// speed in absolute m/s (converted internally to each controller's speed multiplier)
     /// live so different scenarios can be set up from the start.
     ///
+    /// Rows start at their ROLE's remembered speed (<see cref="AgentSpeedSettings"/>), and
+    /// every change the operator makes is written back there, so a speed set while
+    /// practising in the TestScene is still the speed in the study scene.
+    ///
     /// F8 toggles it (shared with the status badge via <see cref="HudVisible"/>); Ctrl+F8
     /// moves it between Display 1 and Display 2. Available from the trial-start prompt
     /// onward so speeds can be staged before the participant starts; hidden during review,
@@ -89,6 +93,7 @@ namespace SessionReview
         private float nextRescanTime;
         private bool visible = false;
         private int selected;   // row the speed keys act on
+        private int seenSpeedChangeCount = -1;  // AgentSpeedSettings edits already in the rows
 
         private static readonly Color SelectedColor = new Color(0.55f, 1f, 0.7f);
 
@@ -105,6 +110,11 @@ namespace SessionReview
             public VelocityController robot;              // set for the robot
             public SFPWDAgent pwdAgent;                   // set for a PWD (auto speed)
             public ManualWheelchairController pwdManual;  // set for a PWD (manual speed)
+            // Which role's remembered speed this row reads and writes. Robot for the SEAN
+            // robot AND for the TestScene practice robot, which is driven by a
+            // ManualWheelchairController like the player and would otherwise be mistaken
+            // for a pedestrian.
+            public AgentSpeedRole role;
             public Vector3 lastPos;
             public float speed;   // smoothed planar speed (m/s)
             public float target;  // slider value (target speed, m/s)
@@ -160,6 +170,8 @@ namespace SessionReview
                 nextRescanTime = Time.unscaledTime + RescanInterval;
             }
 
+            AdoptExternalSpeedChanges();
+
             float dt = Time.deltaTime;
             if (dt > 1e-5f)
             {
@@ -213,9 +225,7 @@ namespace SessionReview
 
             if (shift && (Input.GetKeyDown(KeyCode.Alpha0) || Input.GetKeyDown(KeyCode.Keypad0)))
             {
-                t.target = DefaultSpeed(t);
-                ApplyTarget(t);
-                if (t.slider != null) t.slider.SetValueWithoutNotify(t.target);
+                SetTarget(t, DefaultSpeed(t));
                 return;
             }
 
@@ -225,11 +235,7 @@ namespace SessionReview
             if (shift && (Input.GetKeyDown(KeyCode.Equals) || Input.GetKeyDown(KeyCode.KeypadPlus))) dir += 1f;
             if (shift && (Input.GetKeyDown(KeyCode.Minus) || Input.GetKeyDown(KeyCode.KeypadMinus))) dir -= 1f;
             if (dir != 0f)
-            {
-                t.target = Mathf.Clamp(t.target + dir * speedStep, minSpeed, maxSpeed);
-                ApplyTarget(t);
-                if (t.slider != null) t.slider.SetValueWithoutNotify(t.target);
-            }
+                SetTarget(t, t.target + dir * speedStep);
         }
 
         // ---- Data --------------------------------------------------------------
@@ -257,34 +263,47 @@ namespace SessionReview
                     label = "Robot",
                     tform = robotTform,
                     robot = robot,
+                    role = AgentSpeedRole.Robot,
                     lastPos = robotTform.position,
                     target = priorTarget.TryGetValue(robotTform, out var s)
                         ? s
-                        : robot.speedScale * RobotBaseSpeed(robot)
+                        : AgentSpeedSettings.RobotSpeed
                 };
                 ApplyTarget(tr);
                 list.Add(tr);
             }
 
+            // The practice robot is a ManualWheelchairController too, so ask the practice
+            // flow which one it is instead of guessing from the component.
+            var practiceFlow = FindObjectOfType<TestSceneFlowManager>();
+            var practiceRobot = practiceFlow != null ? practiceFlow.PracticeRobotController : null;
+
             var pwds = FindObjectsOfType<ManualWheelchairController>();
             // Stable order so the rows (and any in-progress slider drag) don't shuffle
             // between rescans.
             System.Array.Sort(pwds, (a, b) => a.GetInstanceID().CompareTo(b.GetInstanceID()));
+            int humanCount = 0;
+            foreach (var pwd in pwds)
+                if (pwd != null && pwd != practiceRobot) humanCount++;
             foreach (var pwd in pwds)
             {
                 if (pwd == null) continue;
+                bool rowIsRobot = pwd == practiceRobot;
                 var agent = pwd.GetComponent<SFPWDAgent>();
+                // A new agent starts at its role's remembered speed rather than at whatever
+                // its controller happens to hold: the autonomous walking base is the shared
+                // social-force DESIRED_SPEED (0.6 m/s), which is the crowd's speed, not the
+                // speed this participant practiced at.
                 float init = priorTarget.TryGetValue(pwd.transform, out var s)
                     ? s
-                    : (agent != null
-                        ? agent.autoSpeedScale * Parameters.DESIRED_SPEED
-                        : pwd.speedScale * ManualBaseSpeed(pwd));
+                    : AgentSpeedSettings.SpeedFor(rowIsRobot ? AgentSpeedRole.Robot : AgentSpeedRole.Pedestrian);
                 var tr = new Tracked
                 {
-                    label = pwds.Length > 1 ? pwd.gameObject.name : "Human",
+                    label = rowIsRobot ? "Robot" : (humanCount > 1 ? pwd.gameObject.name : "Human"),
                     tform = pwd.transform,
                     pwdAgent = agent,
                     pwdManual = pwd,
+                    role = rowIsRobot ? AgentSpeedRole.Robot : AgentSpeedRole.Pedestrian,
                     lastPos = pwd.transform.position,
                     target = init
                 };
@@ -325,13 +344,11 @@ namespace SessionReview
         private static float ManualBaseSpeed(ManualWheelchairController pwd)
             => Mathf.Max(0.05f, pwd.moveSpeed);
 
-        // Speed an agent returns to on Shift+0: its controller's unscaled default.
+        // Speed an agent returns to on Shift+0: the study's authored start speed for that
+        // role, not whatever multiplier its controller is carrying.
         private static float DefaultSpeed(Tracked t)
         {
-            if (t.robot != null) return RobotBaseSpeed(t.robot);
-            if (t.pwdAgent != null) return Parameters.DESIRED_SPEED;
-            if (t.pwdManual != null) return ManualBaseSpeed(t.pwdManual);
-            return 1f;
+            return AgentSpeedSettings.DefaultSpeedFor(t.role);
         }
 
         private void ApplyTarget(Tracked t)
@@ -340,6 +357,36 @@ namespace SessionReview
             if (t.robot != null) t.robot.speedScale = t.target / RobotBaseSpeed(t.robot);
             if (t.pwdAgent != null) t.pwdAgent.autoSpeedScale = t.target / Parameters.DESIRED_SPEED;
             if (t.pwdManual != null) t.pwdManual.speedScale = t.target / ManualBaseSpeed(t.pwdManual);
+        }
+
+        // An operator-driven change (slider or hotkey), as opposed to the per-second
+        // re-apply: it also becomes the role's remembered speed, which is what carries the
+        // speeds staged in the practice scene into the study scene.
+        private void SetTarget(Tracked t, float value)
+        {
+            t.target = Mathf.Clamp(value, minSpeed, maxSpeed);
+            ApplyTarget(t);
+            AgentSpeedSettings.SetSpeed(t.role, t.target);
+            // Our own write must not read back as an outside change, or every row would be
+            // flattened to it and per-agent speeds would be impossible.
+            seenSpeedChangeCount = AgentSpeedSettings.ChangeCount;
+            if (t.slider != null) t.slider.SetValueWithoutNotify(t.target);
+        }
+
+        // The practice Controls panel ([U]) edits the same remembered speeds, and the study
+        // scene's rows must follow it. Rows are re-seeded only on a change this panel did
+        // not make, so per-agent targets set here survive.
+        private void AdoptExternalSpeedChanges()
+        {
+            if (seenSpeedChangeCount == AgentSpeedSettings.ChangeCount) return;
+            seenSpeedChangeCount = AgentSpeedSettings.ChangeCount;
+
+            foreach (var t in tracked)
+            {
+                t.target = Mathf.Clamp(AgentSpeedSettings.SpeedFor(t.role), minSpeed, maxSpeed);
+                ApplyTarget(t);
+                if (t.slider != null) t.slider.SetValueWithoutNotify(t.target);
+            }
         }
 
         private bool ShouldHide()
@@ -430,11 +477,7 @@ namespace SessionReview
                 slider.maxValue = maxSpeed;
                 slider.SetValueWithoutNotify(t.target);
                 var captured = t;
-                slider.onValueChanged.AddListener(v =>
-                {
-                    captured.target = v;
-                    ApplyTarget(captured);
-                });
+                slider.onValueChanged.AddListener(v => SetTarget(captured, v));
                 rowObjects.Add(slider.gameObject);
                 t.slider = slider;
 

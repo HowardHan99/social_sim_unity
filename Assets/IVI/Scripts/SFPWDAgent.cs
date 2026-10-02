@@ -48,6 +48,8 @@ namespace IVI
         public Vector3 waypointStart;
         public Vector3 waypointGoal;
         private bool headingToGoal = true;
+        [Tooltip("Stop distance (m) for the FINAL goal waypoint. Trial timing keeps latching arrival at the shared CloseEnough radius (1 m), but stopping the walk there leaves the avatar visibly short of its goal marker, live and in review. <= 0 stops at the CloseEnough radius as before.")]
+        public float waypointGoalStopDistance = 0.45f;
 
         [Header("Robot Blocking Stop")]
         public bool stopForRobotWhenBlocked = true;
@@ -141,20 +143,26 @@ namespace IVI
 
             while (true)
             {
-                if (CloseEnough())
+                // CloseEnough (1 m) is where trial timing latches arrival, but a metre is
+                // visibly short of the goal marker: keep walking the final stretch and only
+                // stop within waypointGoalStopDistance of the goal itself.
+                bool atFinalStop = headingToGoal &&
+                    (waypointGoalStopDistance <= 0f
+                        ? CloseEnough()
+                        : SEAN.Util.Geometry.GroundPlaneDist(destPos, transform.position) <= waypointGoalStopDistance);
+                if (atFinalStop)
                 {
-                    if (headingToGoal)
-                    {
-                        // Arrived at the goal: STOP. Ping-ponging back to the start made the
-                        // auto chair wander away from the goal the moment it arrived (and all
-                        // through the post-trial menu). The next trial teleports the chair to
-                        // its new start and SetAutomaticMode restarts navigation.
-                        Debug.Log("[PWD] Reached goal waypoint; stopping navigation.");
-                        velocity = Vector3.zero;
-                        enabled = false;
-                        yield break;
-                    }
-
+                    // Arrived at the goal: STOP. Ping-ponging back to the start made the
+                    // auto chair wander away from the goal the moment it arrived (and all
+                    // through the post-trial menu). The next trial teleports the chair to
+                    // its new start and SetAutomaticMode restarts navigation.
+                    Debug.Log("[PWD] Reached goal waypoint; stopping navigation.");
+                    velocity = Vector3.zero;
+                    enabled = false;
+                    yield break;
+                }
+                else if (!headingToGoal && CloseEnough())
+                {
                     headingToGoal = true;
                     InitDest(waypointGoal);
                     Debug.Log($"[PWD] Reached start waypoint, heading to goal at ({waypointGoal.x:F1},{waypointGoal.z:F1})");

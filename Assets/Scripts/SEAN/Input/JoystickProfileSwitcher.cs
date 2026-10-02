@@ -4,9 +4,10 @@ namespace SEAN.Input
 {
     /// <summary>
     /// Runtime picker for JoystickProfiles. Self-bootstraps into every scene (no prefab wiring):
-    ///   F10 — cycle profile: Auto -> Logitech stick -> Gamepad -> Auto
-    ///   F11 — flip gamepad forward/back polarity (gamepad profile only)
-    ///   F9  — flip gamepad steering polarity (gamepad profile only)
+    ///   F10      — cycle profile: Auto -> Logitech stick -> Gamepad -> Auto
+    ///   F11      — flip gamepad forward/back polarity (gamepad profile only)
+    ///   F9       — swap which stick drives and which one looks (gamepad profile only)
+    ///   Shift+F9 — flip gamepad steering polarity (gamepad profile only)
     /// Shows a transient top-center toast after a change (and once on startup when a joystick
     /// is connected) so users can see which controller mapping is live.
     /// </summary>
@@ -14,7 +15,10 @@ namespace SEAN.Input
     {
         public KeyCode cycleProfileKey = KeyCode.F10;
         public KeyCode flipLinearKey = KeyCode.F11;
-        public KeyCode flipSteerKey = KeyCode.F9;
+        /// <summary>Plain press swaps the sticks; the steering-polarity flip moved onto
+        /// Shift + this key. Swapping is the one a participant may need mid-session, so it
+        /// keeps the single press.</summary>
+        public KeyCode swapSticksKey = KeyCode.F9;
         public float toastDurationSec = 4f;
 
         private float toastUntil = -1f;
@@ -52,16 +56,26 @@ namespace SEAN.Input
                 ShowToast($"Gamepad forward/back sign: {JoystickProfiles.GamepadLinearSign:+0;-0}");
             }
 
-            if (UnityEngine.Input.GetKeyDown(flipSteerKey))
+            if (UnityEngine.Input.GetKeyDown(swapSticksKey))
             {
-                JoystickProfiles.GamepadSteerSign = -JoystickProfiles.GamepadSteerSign;
-                ShowToast($"Gamepad steering sign: {JoystickProfiles.GamepadSteerSign:+0;-0}");
+                bool shiftHeld = UnityEngine.Input.GetKey(KeyCode.LeftShift) ||
+                                 UnityEngine.Input.GetKey(KeyCode.RightShift);
+                if (shiftHeld)
+                {
+                    JoystickProfiles.GamepadSteerSign = -JoystickProfiles.GamepadSteerSign;
+                    ShowToast($"Gamepad steering sign: {JoystickProfiles.GamepadSteerSign:+0;-0}");
+                }
+                else
+                {
+                    JoystickProfiles.SwapDriveAndLookSticks = !JoystickProfiles.SwapDriveAndLookSticks;
+                    ShowToast($"Sticks: {JoystickProfiles.DriveStickLabel} drives, {JoystickProfiles.LookStickLabel} looks");
+                }
             }
         }
 
         private void ShowToast(string text)
         {
-            toastText = $"{text}\nF10 switch profile | F11 flip fwd/back | F9 flip steering";
+            toastText = $"{text}\nF10 profile | F11 flip fwd/back | F9 swap sticks | Shift+F9 flip steering";
             toastUntil = Time.unscaledTime + toastDurationSec;
         }
 
@@ -70,7 +84,7 @@ namespace SEAN.Input
             if (Time.unscaledTime >= toastUntil)
                 return;
 
-            const float width = 440f;
+            const float width = 600f;
             const float height = 44f;
             // Top-center so it never overlaps the session-review scrubber or the
             // driving HUD boxes that dock top-left / bottom.

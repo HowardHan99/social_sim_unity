@@ -7039,6 +7039,7 @@ MonoBehaviour:
   - {fileID: 0}
   - {fileID: 4340796762774641598}
   - {fileID: 0}
+  lockRobotAndPedestrians: 1
   selectableLayers:
     serializedVersion: 2
     m_Bits: 8
@@ -7109,6 +7110,7 @@ MonoBehaviour:
   keyboardMoveSpeed: 3
   keyboardBoostMultiplier: 3
   cameraOverrideKey: 308
+  lockVerticalMovement: 1
 --- !u!1 &322185044
 GameObject:
   m_ObjectHideFlags: 0
@@ -35816,6 +35818,10 @@ MonoBehaviour:
   smoothingPasses: 1
   strokeConnectDistance: 2
   eraserRadiusPixels: 28
+  stopPointColor: {r: 0.9, g: 0.15, b: 0.15, a: 0.95}
+  stopPointRadius: 0.4
+  stopPointPauseSeconds: 3
+  stopPointSnapDistance: 1.5
   followRobotSpeed: 0.6
   followSpeedMultiplier: 1
   followSpeedMultiplierMin: 0.1
@@ -143643,8 +143649,8 @@ BoxCollider:
   m_IsTrigger: 0
   m_Enabled: 1
   serializedVersion: 2
-  m_Size: {x: 1.0484896, y: 0.11880132, z: 0.8033227}
-  m_Center: {x: -0.007834911, y: 0.013787661, z: 0.028525278}
+  m_Size: {x: 1.0484896, y: 0.3543442, z: 0.8033227}
+  m_Center: {x: -0.0078349095, y: 0.1315591, z: 0.028525291}
 --- !u!65 &5713719236371081993
 BoxCollider:
   m_ObjectHideFlags: 0
@@ -157543,8 +157549,8 @@ BoxCollider:
   m_IsTrigger: 0
   m_Enabled: 1
   serializedVersion: 2
-  m_Size: {x: 0.9931692, y: 0.028721198, z: 0.99316967}
-  m_Center: {x: -0.00092357397, y: 0.011525277, z: -0.0007740408}
+  m_Size: {x: 0.9931692, y: 0.2604688, z: 0.99316967}
+  m_Center: {x: -0.00092357397, y: 0.1273991, z: -0.0007740259}
 --- !u!1 &6861595672860247198
 GameObject:
   m_ObjectHideFlags: 0
@@ -169431,8 +169437,8 @@ BoxCollider:
   m_IsTrigger: 0
   m_Enabled: 1
   serializedVersion: 2
-  m_Size: {x: 0.6902203, y: 0.03525778, z: 0.6902203}
-  m_Center: {x: -0.000002861023, y: 0.015196662, z: 0}
+  m_Size: {x: 0.6902203, y: 0.3094978, z: 0.6902203}
+  m_Center: {x: -0.000002861023, y: 0.15231667, z: 0}
 --- !u!1 &7799512316745981591
 GameObject:
   m_ObjectHideFlags: 0

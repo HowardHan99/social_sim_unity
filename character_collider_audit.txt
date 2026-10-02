@@ -1,0 +1,139 @@
+=== Character collider audit, 2026-10-02 15:58:46 ===
+Bounds are mesh bind-pose bounds expressed in ROOT-local space (Y=0 is the ground the
+spawn pipeline drops the prefab onto). Reference human radius: 0.35 m.
+
+--- Cane_User ---
+  mesh bounds: center=(0, 0.75, 0) size=(0.667, 2, 0.789)  y=[-0.25, 1.75]  x=[-0.334, 0.334]  z=[-0.394, 0.394]
+    subtree 'oldlady' center=(0, 0.75, 0) size=(0.667, 2, 0.789) y=[-0.25, 1.75]
+  Rigidbody: kinematic=False gravity=True mass=1 constraints=None
+  colliders: 1
+    CapsuleCollider on 'Cane_User' [ROOT] enabled=True trigger=False
+      capsule center=(0, -0.144, 0) radius=0.5 (diameter 1) height=2.402 dir=1
+      capsule y=[-1.345, 1.057]
+      WARN too fat: 1 m wide (a walking human is ~0.5 m)
+      WARN sunk: capsule reaches 1.095 m below the mesh bottom
+      WARN short: top 0.693 m of the character has no collider
+      suggested: center=(0, 1, 0) radius=0.25 height=2
+
+--- Cyclist ---
+  mesh bounds: center=(0, 0.832, 0.011) size=(1.225, 1.932, 1.926)  y=[-0.134, 1.798]  x=[-0.613, 0.612]  z=[-0.952, 0.974]
+    subtree 'Bicycle' center=(0.024, 0.455, 0.011) size=(0.729, 1.176, 1.926) y=[-0.134, 1.043]
+    subtree 'Sports_Female_02' center=(0, 0.918, 0.015) size=(1.225, 1.761, 0.37) y=[0.038, 1.798]
+  Rigidbody: kinematic=True gravity=True mass=1 constraints=None
+  colliders: 1
+    CapsuleCollider on 'Cyclist' [ROOT] enabled=True trigger=False
+      capsule center=(0.027, 0.79, 0) radius=0.85 (diameter 1.701) height=2.011 dir=1
+      capsule y=[-0.216, 1.795]
+      WARN too fat: 1.701 m wide (a walking human is ~0.5 m)
+      WARN sunk: capsule reaches 0.082 m below the mesh bottom
+      suggested: center=(0, 0.966, 0) radius=0.25 height=1.932
+
+--- Dog_Walker ---
+  mesh bounds: center=(0.008, 0.746, 0.336) size=(1.008, 2.077, 1.372)  y=[-0.293, 1.785]  x=[-0.496, 0.512]  z=[-0.35, 1.022]
+    subtree 'Ch22_nonPBR@Holding Walk' center=(0.008, 0.818, 0.031) size=(1.008, 1.932, 0.762) y=[-0.148, 1.785]
+    subtree 'cur' center=(0.292, 0.206, 0.53) size=(0.368, 0.997, 0.983) y=[-0.293, 0.705]
+  Rigidbody: kinematic=True gravity=True mass=1 constraints=None
+  colliders: 1
+    CapsuleCollider on 'Dog_Walker' [ROOT] enabled=True trigger=False
+      capsule center=(0, 0.783, 0.428) radius=0.718 (diameter 1.436) height=2.017 dir=1
+      capsule y=[-0.226, 1.791]
+      WARN too fat: 1.436 m wide (a walking human is ~0.5 m)
+      WARN off-centre: horizontal offset from the pivot is (0, 0.428) m
+      suggested: center=(0, 1.039, 0) radius=0.25 height=2.077
+
+--- Female_Child ---
+  mesh bounds: center=(-0.001, 0.483, -0.098) size=(0.572, 0.973, 0.69)  y=[-0.004, 0.969]  x=[-0.287, 0.285]  z=[-0.444, 0.247]
+    subtree 'kid2' center=(-0.001, 0.483, -0.098) size=(0.572, 0.973, 0.69) y=[-0.004, 0.969]
+  Rigidbody: kinematic=True gravity=True mass=1 constraints=None
+  colliders: 1
+    CapsuleCollider on 'Female_Child' [ROOT] enabled=True trigger=False
+      capsule center=(0, 0.287, -0.048) radius=0.198 (diameter 0.395) height=0.633 dir=1
+      capsule y=[-0.029, 0.604]
+      WARN short: top 0.365 m of the character has no collider
+      suggested: center=(0, 0.486, 0) radius=0.25 height=0.973
+
+--- Female_walking ---
+  mesh bounds: center=(0, 0.878, -0.053) size=(1.224, 1.764, 0.36)  y=[-0.004, 1.76]  x=[-0.612, 0.612]  z=[-0.233, 0.127]
+    subtree 'f006_hipoly_81_bones_opacity' center=(0, 0.878, -0.053) size=(1.224, 1.764, 0.36) y=[-0.004, 1.76]
+  Rigidbody: kinematic=False gravity=True mass=1 constraints=None
+  colliders: 1
+    CapsuleCollider on 'Female_walking' [ROOT] enabled=True trigger=False
+      capsule center=(0, 0.82, 0) radius=0.2 (diameter 0.4) height=1.6 dir=1
+      capsule y=[0.02, 1.62]
+      suggested: center=(0, 0.882, 0) radius=0.25 height=1.764
+
+--- Male_Child ---
+  mesh bounds: center=(-0.007, 0.176, 0.061) size=(0.959, 1.383, 0.982)  y=[-0.515, 0.867]  x=[-0.487, 0.473]  z=[-0.43, 0.552]
+    subtree 'KIDS-01' center=(-0.007, 0.176, 0.061) size=(0.959, 1.383, 0.982) y=[-0.515, 0.867]
+  Rigidbody: kinematic=True gravity=True mass=1 constraints=None
+  colliders: 1
+    CapsuleCollider on 'Male_Child' [ROOT] enabled=True trigger=False
+      capsule center=(-0.028, 0.225, 0.092) radius=0.488 (diameter 0.977) height=1.621 dir=1
+      capsule y=[-0.585, 1.036]
+      WARN too fat: 0.977 m wide (a walking human is ~0.5 m)
+      WARN sunk: capsule reaches 0.07 m below the mesh bottom
+      suggested: center=(0, 0.691, 0) radius=0.25 height=1.383
+
+--- Male_walking ---
+  mesh bounds: center=(-0.002, 0.91, 0.023) size=(1.37, 1.827, 0.377)  y=[-0.004, 1.823]  x=[-0.687, 0.683]  z=[-0.166, 0.211]
+    subtree 'm019_hipoly_81_bones' center=(-0.002, 0.91, 0.023) size=(1.37, 1.827, 0.377) y=[-0.004, 1.823]
+  Rigidbody: kinematic=False gravity=True mass=1 constraints=None
+  colliders: 1
+    CapsuleCollider on 'Male_walking' [ROOT] enabled=True trigger=False
+      capsule center=(0, 0.87, 0) radius=0.2 (diameter 0.4) height=1.75 dir=1
+      capsule y=[-0.005, 1.745]
+      suggested: center=(0, 0.914, 0) radius=0.25 height=1.827
+
+--- Phone_User ---
+  mesh bounds: center=(-0.001, 0.752, 0.176) size=(1.236, 1.759, 0.774)  y=[-0.127, 1.632]  x=[-0.619, 0.617]  z=[-0.21, 0.563]
+    subtree 'Female_Adult_05 1' center=(-0.001, 0.752, -0.037) size=(1.236, 1.759, 0.347) y=[-0.127, 1.632]
+    subtree 'Apple iphone 12 pro max' center=(0.326, 1.019, 0.555) size=(0.084, 0.17, 0.017) y=[0.934, 1.104]
+  Rigidbody: kinematic=True gravity=True mass=1 constraints=None
+  colliders: 1
+    CapsuleCollider on 'Phone_User' [ROOT] enabled=True trigger=False
+      capsule center=(0.003, 0.76, -0.029) radius=0.267 (diameter 0.533) height=2.062 dir=1
+      capsule y=[-0.271, 1.791]
+      WARN sunk: capsule reaches 0.144 m below the mesh bottom
+      suggested: center=(0, 0.879, 0) radius=0.25 height=1.759
+
+--- Scooter_User ---
+  mesh bounds: center=(-0.03, 0.928, -0.018) size=(1.23, 2.056, 1.598)  y=[-0.099, 1.956]  x=[-0.645, 0.585]  z=[-0.817, 0.781]
+    subtree 'default' center=(0.03, 0.629, -0.146) size=(1.044, 1.457, 1.343) y=[-0.099, 1.357]
+    subtree 'casual_male' center=(-0.03, 0.945, 0.218) size=(1.23, 2.023, 1.124) y=[-0.067, 1.956]
+  Rigidbody: kinematic=True gravity=False mass=1 constraints=None
+  colliders: 1
+    CapsuleCollider on 'Scooter_User' [ROOT] enabled=True trigger=False
+      capsule center=(-0.04, 0.435, 0) radius=0.76 (diameter 1.52) height=1.871 dir=1
+      capsule y=[-0.5, 1.371]
+      WARN too fat: 1.52 m wide (a walking human is ~0.5 m)
+      WARN sunk: capsule reaches 0.401 m below the mesh bottom
+      WARN short: top 0.586 m of the character has no collider
+      suggested: center=(0, 1.028, 0) radius=0.25 height=2.056
+
+--- Walker_User ---
+  mesh bounds: center=(-0.045, 0.876, -0.067) size=(2.443, 2.492, 2.187)  y=[-0.37, 2.122]  x=[-1.267, 1.177]  z=[-1.16, 1.027]
+    subtree 'man' center=(-0.045, 0.876, -0.067) size=(2.443, 2.492, 2.187) y=[-0.37, 2.122]
+    subtree 'SM_FoldingWalker' center=(-0.003, 0.425, 0.314) size=(0.68, 0.823, 0.492) y=[0.013, 0.836]
+  Rigidbody: kinematic=True gravity=True mass=1 constraints=None
+  colliders: 1
+    CapsuleCollider on 'Walker_User' [ROOT] enabled=True trigger=False
+      capsule center=(0, 0.761, 0.238) radius=0.633 (diameter 1.267) height=1.81 dir=1
+      capsule y=[-0.144, 1.666]
+      WARN too fat: 1.267 m wide (a walking human is ~0.5 m)
+      WARN off-centre: horizontal offset from the pivot is (0, 0.238) m
+      WARN short: top 0.456 m of the character has no collider
+      suggested: center=(0, 1.246, 0) radius=0.25 height=2.492
+
+--- White_Cane_User ---
+  mesh bounds: center=(-0.001, 0.91, 0.586) size=(1.38, 1.826, 1.514)  y=[-0.003, 1.823]  x=[-0.691, 0.689]  z=[-0.171, 1.343]
+    subtree 'fbxGlasses' center=(0.001, 1.683, 0.026) size=(0.195, 0.068, 0.212) y=[1.649, 1.717]
+    subtree 'cane1' center=(0.403, 0.551, 0.657) size=(0.398, 0.785, 1.372) y=[0.159, 0.944]
+    subtree 'Male_Adult_12' center=(-0.001, 0.91, 0.021) size=(1.38, 1.826, 0.383) y=[-0.003, 1.823]
+  Rigidbody: kinematic=True gravity=True mass=1 constraints=None
+  colliders: 1
+    CapsuleCollider on 'White_Cane_User' [ROOT] enabled=True trigger=False
+      capsule center=(-0.007, 0.839, 0) radius=0.72 (diameter 1.44) height=2.019 dir=1
+      capsule y=[-0.171, 1.848]
+      WARN too fat: 1.44 m wide (a walking human is ~0.5 m)
+      WARN sunk: capsule reaches 0.168 m below the mesh bottom
+      suggested: center=(0, 0.913, 0) radius=0.25 height=1.826

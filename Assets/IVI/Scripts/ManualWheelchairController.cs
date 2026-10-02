@@ -34,6 +34,14 @@ namespace IVI
         public bool invertJoystickHorizontal = false;
         public bool invertJoystickVertical = true;
 
+        [Header("Drive Frame (riding rigs: Scooter/Cyclist player)")]
+        [Tooltip("Forces the visual drive frame ON. Set by the spawner from the PREFAB name: at runtime the rig is renamed to PWDPlayer (and e.g. the Scooter's Animator sits on a nested FBX node called 'default'), so the name-based riding-rig detection can no longer see it.")]
+        public bool forceVisualDriveFrame = false;
+        [Tooltip("Flips the drive/camera forward 180° when a riding rig drives backwards. Persisted per character.")]
+        public KeyCode flipForwardKey = KeyCode.Semicolon;
+        [Tooltip("Rotates the drive/camera forward 90° when a riding rig drives sideways. Persisted per character.")]
+        public KeyCode cycleForwardKey = KeyCode.Quote;
+
         [Header("Manual Brake/Reverse Behavior")]
         public float brakeStopThreshold = 0.02f;
         public int sPressesToEnableReverse = 2;
@@ -110,6 +118,25 @@ namespace IVI
         private float lastSBrakePressRealtime = -1f;
         private float currentManualLinearSpeed;
         private float currentManualAngularSpeed;
+        private bool useVisualDriveFrame;
+        private Vector3 driveLocalAxis = Vector3.forward;
+
+        public bool UsesVisualDriveFrame => useVisualDriveFrame;
+
+        public float DriveYaw
+        {
+            get
+            {
+                if (!useVisualDriveFrame)
+                    return transform.eulerAngles.y;
+
+                Vector3 world = transform.TransformDirection(driveLocalAxis);
+                world.y = 0f;
+                if (world.sqrMagnitude < 1e-8f)
+                    return transform.eulerAngles.y;
+                return Mathf.Atan2(world.x, world.z) * Mathf.Rad2Deg;
+            }
+        }
 
         void Start()
         {
@@ -118,8 +145,22 @@ namespace IVI
             ApplyJoystickResponseDefaults();
             sfpwdAgent = GetComponent<SFPWDAgent>();
             rb = GetComponent<Rigidbody>();
-            animator = GetComponent<Animator>();
+            animator = AgentControlTuning.FindAnimator(gameObject);
+            useVisualDriveFrame = forceVisualDriveFrame ||
+                                  AgentControlTuning.ShouldUseVisualDriveFrame(gameObject, animator);
+            if (useVisualDriveFrame)
+                driveLocalAxis = AgentControlTuning.ResolveDriveLocalAxis(transform);
             StartCoroutine(InitAfterBase());
+        }
+
+        void OnEnable()
+        {
+            // Re-resolve after a possession release re-enables this controller: an F/R
+            // drive-direction calibration made while possessed lands in the shared
+            // AgentControlTuning cache and must apply here too. No-op before Start()
+            // has classified the rig (useVisualDriveFrame still false then).
+            if (useVisualDriveFrame)
+                driveLocalAxis = AgentControlTuning.ResolveDriveLocalAxis(transform);
         }
 
         IEnumerator InitAfterBase()
@@ -215,7 +256,9 @@ namespace IVI
 
             float probeUp = maxStepHeight + 0.3f;
             float probeLength = probeUp + maxStepHeight + 0.6f;
-            Vector3 fwd = transform.forward;
+            Vector3 fwd = useVisualDriveFrame
+                ? Quaternion.Euler(0f, DriveYaw, 0f) * Vector3.forward
+                : transform.forward;
             fwd.y = 0f;
             if (fwd.sqrMagnitude > 0.001f) fwd.Normalize();
 
@@ -445,11 +488,38 @@ namespace IVI
                     manualAngularAcceleration * Time.deltaTime);
             }
 
+            // Live drive-frame calibration for ridden rigs: the estimated visual-forward
+            // axis can come out 90/180° off on rigs whose mesh bounds are unreliable
+            // (the Scooter). The correction lands in the shared per-character cache and
+            // is persisted, so it is a one-time fix. F/R stay with the possession
+            // controller; here R would collide with the practice-scene restart key.
+            if (useVisualDriveFrame &&
+                !SessionReview.AgentPossessOverlay.KeyboardCaptured &&
+                !SessionReviewInputFocus.IsTextEntryActive())
+            {
+                if (Input.GetKeyDown(flipForwardKey))
+                {
+                    driveLocalAxis = -driveLocalAxis;
+                    AgentControlTuning.CacheDriveLocalAxis(gameObject, driveLocalAxis, true);
+                    Debug.Log($"[PWD] '{name}' drive forward flipped 180° (yaw {DriveYaw:F0}).");
+                }
+                if (Input.GetKeyDown(cycleForwardKey))
+                {
+                    Vector3 upLocal = transform.InverseTransformDirection(Vector3.up);
+                    if (upLocal.sqrMagnitude > 1e-8f)
+                        driveLocalAxis = Quaternion.AngleAxis(90f, upLocal.normalized) * driveLocalAxis;
+                    AgentControlTuning.CacheDriveLocalAxis(gameObject, driveLocalAxis, true);
+                    Debug.Log($"[PWD] '{name}' drive forward rotated 90° (yaw {DriveYaw:F0}).");
+                }
+            }
+
             float rot = currentManualAngularSpeed * Time.deltaTime;
             if (Mathf.Abs(rot) > 0.001f)
                 transform.Rotate(0f, rot, 0f);
 
-            Vector3 fwd = transform.forward;
+            Vector3 fwd = useVisualDriveFrame
+                ? Quaternion.Euler(0f, DriveYaw, 0f) * Vector3.forward
+                : transform.forward;
             fwd.y = 0f;
             if (fwd.sqrMagnitude > 0.001f) fwd.Normalize();
             manualVelocity = fwd * currentManualLinearSpeed;
@@ -458,12 +528,13 @@ namespace IVI
         void UpdateAnimator()
         {
             if (animator == null) return;
-            float speed = manualVelocity.magnitude;
-            Vector3 local = Quaternion.Euler(0, -transform.eulerAngles.y, 0) * manualVelocity;
-            animator.SetBool("Idling", speed < 0.1f);
-            animator.SetFloat("Forward", local.z / 0.6f);
-            animator.SetFloat("Strafe", local.x / 0.6f);
-            animator.speed = speed > 0.1f ? speed : 1f;
+            AgentControlTuning.UpdateLocomotionAnimator(
+                animator,
+                transform,
+                manualVelocity,
+                currentManualLinearSpeed,
+                true,
+                useVisualDriveFrame ? DriveYaw : transform.eulerAngles.y);
         }
 
 
@@ -578,12 +649,29 @@ namespace IVI
                 : (sfpwdAgent != null ? $"{sfpwdAgent.velocity.magnitude:F1}" : "--");
             string controlHint = ManualUsesJoystick
                 ? $"Joystick ({SEAN.Input.JoystickProfiles.DescribeShort()}) + keyboard | F10 switch" +
-                  (SEAN.Input.JoystickProfiles.GamepadActive ? " | RS: look" : "")
+                  (SEAN.Input.JoystickProfiles.GamepadActive
+                      ? $" | {SEAN.Input.JoystickProfiles.DriveStickLabel}: drive, {SEAN.Input.JoystickProfiles.LookStickLabel}: look (F9 swap)"
+                      : "")
                 : (manualUseArrowKeys
                     ? "RShift: toggle | Up/Down brake+reverse | Left/Right turn | H stop"
                     : "RShift: toggle | W/S brake+reverse | A/D turn | H stop");
-            GUI.Box(new Rect(10, 10, 300, 60),
-                $"[{mode}] Pos:{pos} Vel:{vel}\n{controlHint}");
+            string calibHint = useVisualDriveFrame
+                ? $"\nFacing wrong? [{KeyHintLabel(flipForwardKey)}] flip 180 | [{KeyHintLabel(cycleForwardKey)}] rotate 90"
+                : string.Empty;
+            GUI.Box(new Rect(10, 10, 300, useVisualDriveFrame ? 76 : 60),
+                $"[{mode}] Pos:{pos} Vel:{vel}\n{controlHint}{calibHint}");
+        }
+
+        private static string KeyHintLabel(KeyCode key)
+        {
+            switch (key)
+            {
+                case KeyCode.Semicolon: return ";";
+                case KeyCode.Quote: return "'";
+                case KeyCode.Comma: return ",";
+                case KeyCode.Period: return ".";
+                default: return key.ToString();
+            }
         }
 
         private float ReadJoystickAxis(string axisName, bool invert, float center)

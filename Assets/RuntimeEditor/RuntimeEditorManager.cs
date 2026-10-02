@@ -108,6 +108,14 @@ public class RuntimeEditorManager : MonoBehaviour
     const float PanelMinimizeToggleWidth = 28f;
     const float PanelMinimizeToggleHeight = 22f;
 
+    // ----- Spawned character physics footprint (see NormalizeCharacterCollider). -----
+    // Slightly wider than SEAN.Scenario.Agents.Base.RADIUS (0.2) so a placed character is a touch
+    // more solid than a background pedestrian without becoming an obstacle you cannot walk around.
+    const float CharacterColliderRadius = 0.25f;
+    const float MinCharacterColliderHeight = 0.4f;
+    const float MaxCharacterColliderHeight = 2.6f;
+    const float DefaultCharacterColliderHeight = 1.8f;
+
     // Last-click diagnostics rendered by the debug HUD.
     private string _clickDebug = "(no click yet)";
 
@@ -1731,8 +1739,99 @@ public class RuntimeEditorManager : MonoBehaviour
 
     void PrepareCharacterSpawnForWorldBuilding(GameObject obj, Vector3 spawnPoint)
     {
-        AlignSpawnedObjectToSpawnPoint(obj, spawnPoint);
+        AlignSpawnedObjectToSpawnPoint(obj, spawnPoint, FindCharacterBodySubtree(obj));
         PrepareCharacterPropComponents(obj);
+    }
+
+    /// <summary>
+    /// The subtree holding the character itself, as opposed to companion objects parented beside it
+    /// (the Dog Walker's dog, the Cyclist's bike, the Walker User's frame). Prefers a humanoid rig
+    /// because a companion can carry its own Animator. Null when the prefab is a single subtree.
+    /// </summary>
+    static Transform FindCharacterBodySubtree(GameObject root)
+    {
+        if (root == null)
+            return null;
+
+        Animator chosen = null;
+        foreach (Animator animator in root.GetComponentsInChildren<Animator>(true))
+        {
+            if (animator == null)
+                continue;
+            if (chosen == null)
+                chosen = animator;
+            if (animator.avatar != null && animator.avatar.isHuman)
+            {
+                chosen = animator;
+                break;
+            }
+        }
+
+        return chosen != null ? TopLevelChildOf(root.transform, chosen.transform) : null;
+    }
+
+    /// <summary>The ancestor of <paramref name="descendant"/> that is a direct child of
+    /// <paramref name="root"/>, or null when it is the root itself / not under it.</summary>
+    static Transform TopLevelChildOf(Transform root, Transform descendant)
+    {
+        if (root == null || descendant == null || descendant == root)
+            return null;
+
+        Transform current = descendant;
+        while (current != null && current.parent != root)
+            current = current.parent;
+        return current;
+    }
+
+    /// <summary>
+    /// Refits a spawned character's root capsule to the person it represents. The authored capsules
+    /// were fitted to the bind-pose bounding box —a T-posed arm span, plus any companion object —so
+    /// they are up to 1.7 m wide, shifted off the pivot (Dog_Walker sits 0.43 m ahead of its owner)
+    /// and sunk below the ground (Cane_User by 1.3 m). That capsule is what the wheelchair and the
+    /// robot actually hit, what TrackedObstacle publishes to ROS, and what CountCollisions derives
+    /// its personal-space triggers from, so it must be person-sized: the same footprint SEAN's own
+    /// background agents use (<see cref="SEAN.Scenario.Agents.Base.RADIUS"/>).
+    /// </summary>
+    void NormalizeCharacterCollider(GameObject root, Transform body)
+    {
+        if (root == null)
+            return;
+
+        // Leave authored non-capsule colliders alone: they were placed deliberately, unlike the
+        // fitted capsules every community-informed character carries.
+        Collider existing = root.GetComponent<Collider>();
+        if (existing != null && !(existing is CapsuleCollider))
+            return;
+
+        GameObject measured = body != null ? body.gameObject : root;
+        float bottom = 0f;
+        float height = DefaultCharacterColliderHeight;
+        if (TryGetLocalRendererBounds(root, measured, out Bounds bounds))
+        {
+            // Never start above the ground the spawn was rested on, or a rider's capsule would
+            // float over their vehicle, leaving a gap the robot could drive straight through.
+            bottom = Mathf.Min(bounds.min.y, 0f);
+            height = bounds.max.y - bottom;
+
+            // A rig whose bind-pose bounds are unusable (mis-scaled import, stray bone) must not
+            // turn into a kilometre-tall capsule; fall back to a person-sized default.
+            if (height < MinCharacterColliderHeight || height > MaxCharacterColliderHeight)
+            {
+                Debug.LogWarning($"[RuntimeEditor] '{root.name}' measures {height:0.##} m tall; " +
+                    $"using a {DefaultCharacterColliderHeight} m collider instead.");
+                bottom = 0f;
+                height = DefaultCharacterColliderHeight;
+            }
+        }
+
+        CapsuleCollider capsule = existing as CapsuleCollider;
+        if (capsule == null)
+            capsule = root.AddComponent<CapsuleCollider>();
+
+        capsule.direction = 1;
+        capsule.radius = CharacterColliderRadius;
+        capsule.height = height;
+        capsule.center = new Vector3(0f, bottom + height * 0.5f, 0f);
     }
 
     /// <summary>
@@ -1786,9 +1885,22 @@ public class RuntimeEditorManager : MonoBehaviour
             pos = hit.position;
         obj.transform.position = pos;
 
-        // Same passive cleanup as the prop pipeline, minus collider/physics freezing: the
-        // stripped controllers (manual wheelchair, CharacterController, any pre-built agents)
-        // would fight the SFAgent for the same rig.
+        // Several character prefabs keep their model offset from the root pivot (Phone_User by
+        // 12 cm, Walker_User by 57 cm), so dropping the pivot on the NavMesh point leaves them
+        // sunk or floating. Rest them on it the same way the static pipeline does.
+        AlignSpawnedObjectToSpawnPoint(obj, pos, TopLevelChildOf(obj.transform, animator.transform));
+
+        // The authored capsules must be refitted here too, even though a moving agent keeps
+        // its physics: Cane_User's sits 1.35 m BELOW the pivot, so the character spawns
+        // deeply intersecting the road and PhysX resolves that penetration by shoving the
+        // (mass 1, non-kinematic) body out across the roadway, where it then stands for the
+        // rest of the trial. Only the static prop path normalized it, which is why just the
+        // moving version ended up parked in the middle of the road.
+        NormalizeCharacterCollider(obj, FindCharacterBodySubtree(obj));
+
+        // Same passive cleanup as the prop pipeline, minus physics freezing: the stripped
+        // controllers (manual wheelchair, CharacterController, any pre-built agents) would
+        // fight the SFAgent for the same rig.
         DisableEmbeddedViewCameras(obj);
         DisableSpawnedWorldUi(obj);
         StripSpawnedAgentControllers(obj);
@@ -1801,7 +1913,41 @@ public class RuntimeEditorManager : MonoBehaviour
         if (pedestrianTemplate != null)
             walkController = wheelchair ? pedestrianTemplate.pwdAnimationController : pedestrianTemplate.animationController;
 
-        if (walkController != null)
+        // Composite/authored rigs (Cyclist, Scooter User, Phone User ...) keep their own
+        // controller: the Animator found above belongs to the VEHICLE (e.g. "Bicycle"),
+        // and replacing its authored controller with the human walk blend tree leaves the
+        // rig animating on parameters it does not have — the source of the broken bike
+        // animation and mangled poses.
+        bool authoredRig = SessionReview.AgentControlTuning.ShouldPreserveAuthoredAnimatorController(obj, null, animator);
+        // The shared walk controller only animates a humanoid rig that binds to this
+        // hierarchy. Assigning it to a Generic or unrigged model (the Cane User scan, the
+        // Scooter rider, the Dog Walker's dog) plays nothing — and since root motion is
+        // what normally translates a background pedestrian, the agent then computes a
+        // walking velocity and never moves: the character just stands where it spawned,
+        // blocking whatever it landed on.
+        bool sharedWalkUsable = SessionReview.AgentControlTuning.CanRetargetSharedWalkController(animator);
+        // The rig root is what carries the collision capsule, TrackedObstacle and any
+        // companion objects (dog, walker frame, cane, scooter, phone). Driving the
+        // Animator's own GameObject instead — which is what root motion requires — walks
+        // the animated part away and leaves all of that behind, including an invisible
+        // capsule parked in the road.
+        bool animatorOnRoot = animator.gameObject == obj;
+        if (!sharedWalkUsable)
+        {
+            Debug.LogWarning($"[RuntimeEditor] '{prefabName}' cannot play the shared walk controller " +
+                             "(not a humanoid rig, or its Avatar does not bind to this hierarchy). " +
+                             "Driving it from the agent's velocity instead — it moves but has no walk cycle. " +
+                             "Fix the asset (a rigged humanoid model) to get real locomotion.", obj);
+        }
+
+        if (authoredRig || !sharedWalkUsable)
+        {
+            // Skinned bounds on these re-exported rigs are unreliable, so renderer-bounds
+            // culling can otherwise freeze the pose depending on the camera. Replacing the
+            // controller is also pointless on a rig that cannot play it.
+            animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+        }
+        else if (walkController != null)
         {
             animator.runtimeAnimatorController = walkController;
         }
@@ -1810,12 +1956,46 @@ public class RuntimeEditorManager : MonoBehaviour
             Debug.LogWarning($"[RuntimeEditor] No shared walking animation controller found for '{prefabName}'; the agent will move but may not animate correctly.");
         }
 
-        // The agent must sit on the Animator's GameObject: Base only enables root motion (the
-        // thing that actually translates the agent) when the Animator is on the same object.
+        // A plain pedestrian's agent must sit on the Animator's GameObject: Base only
+        // enables root motion (the thing that actually translates the agent) when the
+        // Animator is on the same object. A composite rig is the opposite case — its
+        // Animator is the vehicle and the rider is a SIBLING, so putting the agent there
+        // drove the bike away and left the rider standing. Those get the agent on the
+        // ROOT (the whole rig) plus WorldBuildingCompositeAgentDriver, which applies the
+        // agent velocity the way ManualWheelchairController does for the PWD player.
+        // Root motion is only an option when the Animator sits on the rig root AND can
+        // actually play the walk clips; everything else is velocity-driven from the root,
+        // the same way ManualWheelchairController moves the PWD player.
+        bool driveByVelocity = !animatorOnRoot || !sharedWalkUsable;
+        GameObject agentHost = driveByVelocity ? obj : animator.gameObject;
         if (wheelchair)
-            animator.gameObject.AddComponent<IVI.SFPWDAgent>();
+            agentHost.AddComponent<IVI.SFPWDAgent>();
         else
-            animator.gameObject.AddComponent<IVI.SFAgent>();
+            agentHost.AddComponent<IVI.SFAgent>();
+
+        if (driveByVelocity && agentHost.GetComponent<WorldBuildingCompositeAgentDriver>() == null)
+        {
+            var driver = agentHost.AddComponent<WorldBuildingCompositeAgentDriver>();
+            // Classify now: the rename below drops the prefab name AgentControlTuning
+            // would otherwise use to recognise a riding rig (Scooter/Phone keep their
+            // Animator inside a nested FBX, so only the root name identifies them).
+            driver.ridingRig = SessionReview.AgentControlTuning.ShouldUseVisualDriveFrame(obj, animator);
+            driver.sourcePrefabName = prefabName;
+            Debug.Log($"[RuntimeEditor] '{prefabName}' spawned as a composite rig: agent on the root, " +
+                      $"authored animator controller kept (riding rig: {driver.ridingRig}).");
+        }
+
+        // Root motion moves the ANIMATOR's transform, so the prefab root stays at the placement
+        // point forever. Everything physical must therefore travel with the animated child:
+        // otherwise the authored root capsule is abandoned there as an invisible pillar and the
+        // Dog Walker's dog is left standing on the spot its owner walked away from.
+        // Unless the rig IS the root, in which case the agent's own capsule and rigidbody are the
+        // ones on it and must survive.
+        if (animator.gameObject != obj)
+        {
+            ReparentCompanionsToMovingBody(obj, animator.transform);
+            StripRootPhysicsForMovingCharacter(obj);
+        }
 
         if (obj.GetComponent<WorldBuildingWanderPedestrian>() == null)
             obj.AddComponent<WorldBuildingWanderPedestrian>();
@@ -1824,6 +2004,53 @@ public class RuntimeEditorManager : MonoBehaviour
         // agent under its own trajectory id (shared "(Clone)" names would merge timelines).
         obj.name = $"WB_Pedestrian_{obj.GetInstanceID():x8}";
         return true;
+    }
+
+    /// <summary>
+    /// Moves companion objects (dog, bike, walking frame) under the animated subtree that actually
+    /// travels, keeping their authored world pose so they stay in place relative to the character.
+    /// </summary>
+    void ReparentCompanionsToMovingBody(GameObject root, Transform body)
+    {
+        Transform bodyChild = TopLevelChildOf(root.transform, body);
+        if (bodyChild == null)
+            return;
+
+        var companions = new List<Transform>();
+        for (int i = 0; i < root.transform.childCount; i++)
+        {
+            Transform child = root.transform.GetChild(i);
+            if (child != bodyChild)
+                companions.Add(child);
+        }
+
+        foreach (Transform companion in companions)
+            companion.SetParent(bodyChild, true);
+    }
+
+    /// <summary>
+    /// Clears the physics left on the root of a moving character. The agent builds its own
+    /// person-sized capsule and rigidbody on the animated child (<see cref="SEAN.Scenario.Agents.Base"/>),
+    /// so the root's authored capsule is a phantom obstacle, and its rigidbody would both nest
+    /// inside the agent's and —where the prefab left it non-kinematic with a capsule sunk a metre
+    /// into the ground (Cane_User) —get launched by depenetration.
+    /// </summary>
+    void StripRootPhysicsForMovingCharacter(GameObject root)
+    {
+        if (root == null)
+            return;
+
+        foreach (Collider collider in root.GetComponents<Collider>())
+        {
+            if (collider != null)
+                collider.enabled = false;
+        }
+
+        foreach (Rigidbody rb in root.GetComponents<Rigidbody>())
+        {
+            if (rb != null)
+                Destroy(rb);
+        }
     }
 
     /// <summary>
@@ -1841,6 +2068,7 @@ public class RuntimeEditorManager : MonoBehaviour
     /// scenario restores one at its exact recorded pose, where re-alignment is unwanted).</summary>
     void PrepareCharacterPropComponents(GameObject obj)
     {
+        NormalizeCharacterCollider(obj, FindCharacterBodySubtree(obj));
         EnsureRootSelectionCollider(obj);
         DisableEmbeddedViewCameras(obj);
         DisableSpawnedWorldUi(obj);
@@ -2029,16 +2257,31 @@ public class RuntimeEditorManager : MonoBehaviour
 
     void AlignSpawnedObjectToSpawnPoint(GameObject obj, Vector3 spawnPoint)
     {
+        AlignSpawnedObjectToSpawnPoint(obj, spawnPoint, null);
+    }
+
+    /// <summary>
+    /// Rests a spawn on the point the user clicked. <paramref name="boundsSubtree"/> names the part
+    /// that should end up UNDER the cursor: the Dog Walker's dog reaches ~0.9 m ahead of its owner,
+    /// so centring the pair drops the person nearly half a metre behind the click. Height still
+    /// comes from the whole prefab, so a companion or a vehicle can never be buried.
+    /// </summary>
+    void AlignSpawnedObjectToSpawnPoint(GameObject obj, Vector3 spawnPoint, Transform boundsSubtree)
+    {
         if (obj == null || !TryGetRendererBounds(obj, out Bounds bounds))
             return;
+
+        Bounds horizontal = bounds;
+        if (boundsSubtree != null && TryGetRendererBounds(boundsSubtree.gameObject, out Bounds bodyBounds))
+            horizontal = bodyBounds;
 
         // Near-flat visuals (e.g. road decals) would z-fight sitting exactly in the ground plane.
         float lift = bounds.size.y < 0.05f ? 0.01f : 0f;
 
         Vector3 adjustment = new Vector3(
-            spawnPoint.x - bounds.center.x,
+            spawnPoint.x - horizontal.center.x,
             spawnPoint.y - bounds.min.y + lift,
-            spawnPoint.z - bounds.center.z);
+            spawnPoint.z - horizontal.center.z);
         obj.transform.position += adjustment;
     }
 
@@ -2206,16 +2449,26 @@ public class RuntimeEditorManager : MonoBehaviour
 
     static bool TryGetLocalRendererBounds(GameObject root, out Bounds bounds)
     {
+        return TryGetLocalRendererBounds(root, root, out bounds);
+    }
+
+    /// <summary>
+    /// Bounds of <paramref name="subtree"/> expressed in <paramref name="frame"/>'s local space, so a
+    /// character can be measured without its companion objects (dog, bike, walking frame).
+    /// </summary>
+    static bool TryGetLocalRendererBounds(GameObject frame, GameObject subtree, out Bounds bounds)
+    {
         bounds = default;
         bool hasBounds = false;
+        Transform root = frame.transform;
 
-        foreach (Renderer renderer in root.GetComponentsInChildren<Renderer>(true))
+        foreach (Renderer renderer in subtree.GetComponentsInChildren<Renderer>(true))
         {
             if (renderer == null)
                 continue;
 
             Bounds localBounds = new Bounds(
-                root.transform.InverseTransformPoint(renderer.bounds.center),
+                root.InverseTransformPoint(renderer.bounds.center),
                 Vector3.zero);
 
             Vector3 extents = renderer.bounds.extents;
@@ -2232,7 +2485,7 @@ public class RuntimeEditorManager : MonoBehaviour
             };
 
             for (int i = 0; i < corners.Length; i++)
-                localBounds.Encapsulate(root.transform.InverseTransformPoint(corners[i]));
+                localBounds.Encapsulate(root.InverseTransformPoint(corners[i]));
 
             if (!hasBounds)
             {

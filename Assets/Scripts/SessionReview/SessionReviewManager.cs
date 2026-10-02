@@ -84,6 +84,7 @@ namespace SessionReview
         private TrialDataArchive trialArchive;
         private MultiAgentTrajectoryRenderer trajectoryRenderer;
         private MetricsOverlayUI metricsOverlay;
+        private ReplaySignalOverlay replaySignalOverlay;
         private RewindController rewindController;
         private LiveTrajectoryRecorder trajectoryRecorder;
 
@@ -419,6 +420,10 @@ namespace SessionReview
             if (metricsOverlay == null)
                 metricsOverlay = gameObject.AddComponent<MetricsOverlayUI>();
 
+            replaySignalOverlay = GetComponent<ReplaySignalOverlay>();
+            if (replaySignalOverlay == null)
+                replaySignalOverlay = gameObject.AddComponent<ReplaySignalOverlay>();
+
             rewindController = GetComponent<RewindController>();
             if (rewindController == null)
                 rewindController = gameObject.AddComponent<RewindController>();
@@ -715,6 +720,17 @@ namespace SessionReview
 
         private void HandleRewindInput()
         {
+            // Typing a custom message in the Robot Signal panel: every review hotkey below
+            // is a printable character or a view switch, so they must stand down until the
+            // field lets go of the keyboard. Escape is the one that still gets through —
+            // it is how the reviewer drops focus (see the ladder below).
+            if (ReplaySignalOverlay.IsTypingMessage)
+            {
+                if (Input.GetKeyDown(KeyCode.Escape) && replaySignalOverlay != null)
+                    replaySignalOverlay.TryHandleEscape();
+                return;
+            }
+
             // While draw-trajectory mode owns the pointer, TrajectoryManager pans/zooms
             // its own draw camera; zooming the hidden rewind camera here would fight it.
             if (!IsDrawTrajectoryModeActive)
@@ -749,11 +765,17 @@ namespace SessionReview
                 // Back out one layer at a time instead of ending the review (and
                 // tearing down the gameplay camera) on the very first press:
                 //   1) close the export panel,
-                //   2) return to the default top-down view,
-                //   3) only then surface the next-step menu.
+                //   2) close the Robot Signal panel, returning to the view the reviewer
+                //      stepped into the robot from,
+                //   3) return to the default top-down view,
+                //   4) only then surface the next-step menu.
                 if (showReviewExportPanel)
                 {
                     showReviewExportPanel = false;
+                }
+                else if (replaySignalOverlay != null && replaySignalOverlay.TryHandleEscape())
+                {
+                    // Handled by the signal panel.
                 }
                 else if (rewindController != null &&
                          rewindController.CurrentPerspective != PerspectiveMode.TopDown)
@@ -806,7 +828,14 @@ namespace SessionReview
             }
 
             if (Input.GetKeyDown(robotFPKey))
-                rewindController.SetPerspective(PerspectiveMode.RobotFirstPerson);
+            {
+                // Shift picks the chase view instead: the robot's indicators are out of frame
+                // in its own first-person view, so signalling is done from third person.
+                bool shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+                rewindController.SetPerspective(shift
+                    ? PerspectiveMode.RobotThirdPerson
+                    : PerspectiveMode.RobotFirstPerson);
+            }
             if (Input.GetKeyDown(pwdFPKey))
                 rewindController.SetPerspective(PerspectiveMode.PWDFirstPerson);
             if (Input.GetKeyDown(pedViewKey))
@@ -1112,9 +1141,16 @@ namespace SessionReview
             RosOverlayVisibility.SetRobotGoalVisible(true);
             RosOverlayVisibility.SetPlanVisible(!WasRobotManuallyDriven(trial));
 
+            // The "Pedestrian Goal" label must mark the route THIS recording drove, not
+            // whatever route the live scene happens to be on (see the method's doc).
+            AlignPedestrianGoalLabelToTrial(trial, recording, timeOffset);
+
             trajectoryRenderer.ShowTrajectories(trial, recording, controlModeLog, planSnapshots, vlmCaptures, signalAnnotations, timeOffset);
             metricsOverlay.ShowTrial(trial);
             rewindController.EnterRewind(trial, recording, controlModeLog, trajectoryRenderer, timeOffset, signalAnnotations);
+            // Must follow EnterRewind: the panel reads the perspective the review just reset.
+            if (replaySignalOverlay != null)
+                replaySignalOverlay.BeginReview(rewindController, trial);
 
             currentReviewTrial = trial;
             currentReviewRecording = recording;
@@ -1123,6 +1159,108 @@ namespace SessionReview
             lastReviewExportPath = null;
             if (!ReviewRoiExporter.TryComputeTrajectoryEnvelope(trial, recording, timeOffset, out reviewExportEnvelope))
                 reviewExportEnvelope = new Bounds(Vector3.zero, new Vector3(10f, 1f, 10f));
+        }
+
+        /// <summary>
+        /// Points the "Pedestrian Goal" label at the goal of the route the REVIEWED trial's
+        /// pedestrian actually drove. The live route (RandomAvatar.LastPlayerGoalObject) can
+        /// disagree with the reviewed recording: a loaded replay runs in a scene whose route
+        /// followed TODAY'S onboarding, and an in-session review may come after the role (and
+        /// with it the route) swapped. The route is identified by the pedestrian's position at
+        /// the trial-window start — it spawns centimetres from its route's start marker, and
+        /// the two start markers sit metres apart, so this is unambiguous. (The GOAL markers
+        /// are NOT a usable discriminator: in sidewalkOutofStore the pedestrian halts ~1 m
+        /// before "end", which is closer to "end2" than to "end". trial.playerGoalPosition is
+        /// not used either: trials saved before 2026-08-14 carry the _StartAndGoal rig's
+        /// ~origin position there.)
+        /// </summary>
+        private void AlignPedestrianGoalLabelToTrial(TrialRecord trial, Rerun.StateRecording recording, float timeOffset)
+        {
+            if (trial == null || recording == null || recording.timelines == null)
+                return;
+
+            string pwdId = null;
+            if (trial.agentRoles != null)
+            {
+                var roleEntry = trial.agentRoles.Find(r => r != null && r.role == AgentRole.PWDPlayer);
+                if (roleEntry != null)
+                    pwdId = roleEntry.objectId;
+            }
+            if (string.IsNullOrEmpty(pwdId))
+                return;
+
+            // The pedestrian's position at the trial-window start. A LIVE review's recording
+            // spans the whole session, so the timeline's first sample can predate this trial —
+            // take the first sample inside the window instead (saved replays are pre-windowed,
+            // where this is simply the first sample).
+            float recStart = trial.startTime - timeOffset;
+            Vector3 startPos = Vector3.zero;
+            bool foundStart = false;
+            foreach (var timeline in recording.timelines)
+            {
+                if (timeline == null || timeline.objectId != pwdId ||
+                    timeline.states == null || timeline.states.Count == 0)
+                    continue;
+                foreach (var state in timeline.states)
+                {
+                    if (state == null || state.timestamp < recStart - 0.5f)
+                        continue;
+                    startPos = state.position;
+                    foundStart = true;
+                    break;
+                }
+                break;
+            }
+            if (!foundStart)
+                return;
+
+            SEAN.Scenario.Agents.RandomAvatar spawner = null;
+            foreach (var ra in FindObjectsOfType<SEAN.Scenario.Agents.RandomAvatar>(true))
+            {
+                if (ra != null && ra.isPwdPlayer)
+                {
+                    spawner = ra;
+                    break;
+                }
+            }
+            if (spawner == null)
+                return;
+
+            // Match the spawn position to a route's START marker, then label that route's goal.
+            GameObject bestGoal = null;
+            float bestDist = float.MaxValue;
+            var routes = new[]
+            {
+                new { start = spawner.startObjectName, goal = spawner.goalObjectName },
+                new { start = spawner.robotTrialStartObjectName, goal = spawner.robotTrialGoalObjectName },
+            };
+            foreach (var route in routes)
+            {
+                if (string.IsNullOrEmpty(route.start) || string.IsNullOrEmpty(route.goal))
+                    continue;
+                GameObject startMarker = SEAN.Scenario.Agents.RandomAvatar.FindSceneObjectByName(route.start);
+                GameObject goalMarker = SEAN.Scenario.Agents.RandomAvatar.FindSceneObjectByName(route.goal);
+                if (startMarker == null || goalMarker == null)
+                    continue;
+                float dist = SEAN.Util.Geometry.GroundPlaneDist(startPos, startMarker.transform.position);
+                if (dist < bestDist)
+                {
+                    bestDist = dist;
+                    bestGoal = goalMarker;
+                }
+            }
+
+            // The pedestrian spawns essentially ON its start marker (NavMesh-sampled, sub-cm in
+            // the recorded data), so the nearest-start comparison is exact; the absolute cap
+            // only rejects recordings from other layouts. It must stay below the tightest
+            // start-marker pair across the scenario scenes (sidewalkNarrowroad's are 0.78 m
+            // apart) so a borderline spawn can never pass as the OTHER route.
+            if (bestGoal == null || bestDist > 0.35f)
+                return;
+
+            SEAN.Scenario.Agents.RandomAvatar.OverridePlayerGoalObject(bestGoal);
+            SessionReviewLog.Log($"[SessionReview] Pedestrian goal label aligned to '{bestGoal.name}' " +
+                                 $"(reviewed pedestrian spawned {bestDist:F2} m from its route's start marker).");
         }
 
         /// <summary>
@@ -1177,6 +1315,10 @@ namespace SessionReview
             showReviewCompletionPrompt = false;
             trajectoryRenderer.ClearAll();
             metricsOverlay.Hide();
+            // Before CurrentReviewTrialFolder is cleared below: that folder is where the
+            // reviewer's replay-time signals are written.
+            if (replaySignalOverlay != null)
+                replaySignalOverlay.EndReview();
             rewindController.ExitRewind();
 
             // Restore simulation
@@ -1492,8 +1634,8 @@ namespace SessionReview
 
                 DrawReviewExportPanel();
 
-                // Row of toggles to re-open any review panel (Metrics/Legend/Trajectory)
-                // closed via its title-bar [x].
+                // Row of toggles to re-open any review panel (Metrics/Legend/Trajectory/
+                // Robot Signal) closed via its title-bar [x].
                 ReviewPanels.DrawToggleBar();
             }
 

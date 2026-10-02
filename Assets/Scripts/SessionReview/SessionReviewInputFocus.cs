@@ -51,6 +51,10 @@ namespace SessionReview
 
         private static bool IsImguiTextEntrySurfaceOpen()
         {
+            // Custom message field in the review's Robot Signal panel.
+            if (ReplaySignalOverlay.IsTypingMessage)
+                return true;
+
             SessionReviewManager manager = SessionReviewManager.Instance;
             if (manager != null && (manager.IsOnboardingActive || manager.IsWorldBuildingModeActive))
                 return true;

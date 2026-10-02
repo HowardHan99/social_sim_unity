@@ -50,7 +50,7 @@ namespace SessionReview
         [Tooltip("Display the panel renders on. 0 = main display, 1 = Display 2 (default).")]
         public int targetDisplay = 1;
 
-        [Tooltip("Display used for the selected/possessed agent third-person view. 1 = Display 2 (same as the panel).")]
+        [Tooltip("Display used for the selected/possessed agent third-person view. 1 = Display 2 (same as the panel; the pick camera and this view share it, the view yields while picking).")]
         public int selectedAgentDisplay = 1;
 
         [Header("Pick-mode fly camera")]
@@ -254,6 +254,27 @@ namespace SessionReview
             return false;
         }
 
+        // Climbs to the outermost transform that still belongs to the same character rig.
+        // A composite rig (Cyclist = Bicycle + rider siblings) can carry its agent or a
+        // rigidbody on a CHILD; possessing that child drives the bike away and leaves the
+        // rider standing, so every resolve funnels through here.
+        private static GameObject ResolveRigRoot(GameObject candidate)
+        {
+            if (candidate == null) return null;
+            Transform best = candidate.transform;
+            for (Transform cur = candidate.transform.parent; cur != null; cur = cur.parent)
+            {
+                if (cur.GetComponent<IVI.ManualWheelchairController>() != null ||
+                    cur.GetComponent<Base>() != null ||
+                    cur.GetComponent<WorldBuildingCompositeAgentDriver>() != null ||
+                    cur.GetComponent<WorldBuildingWanderPedestrian>() != null ||
+                    cur.GetComponent<SEAN.Scenario.Obstacles.TrackedObstacle>() != null ||
+                    cur.GetComponent<WorldBuildingPlacedObject>() != null)
+                    best = cur;
+            }
+            return best.gameObject;
+        }
+
         private static bool IsSelectable(Base agent)
         {
             if (agent == null) return false;
@@ -354,7 +375,7 @@ namespace SessionReview
             if (collider == null) return null;
 
             Base agent = collider.GetComponentInParent<Base>();
-            if (IsSelectable(agent)) return agent.gameObject;
+            if (IsSelectable(agent)) return ResolveRigRoot(agent.gameObject);
 
             var robot = collider.GetComponentInParent<SEAN.Scenario.Robot>();
             if (robot != null)
@@ -373,8 +394,8 @@ namespace SessionReview
                 rb = collider.GetComponentInParent<Rigidbody>();
             if (rb != null)
             {
-                rb = OutermostRigidbody(rb);
-                return IsSelectableObjectTarget(rb.gameObject) ? rb.gameObject : null;
+                GameObject root = ResolveRigRoot(OutermostRigidbody(rb).gameObject);
+                return IsSelectableTarget(root) ? root : null;
             }
             return null;
         }
@@ -410,7 +431,13 @@ namespace SessionReview
         {
             var targets = new List<GameObject>();
             foreach (Base a in FindObjectsOfType<Base>())
-                if (IsSelectable(a) && !targets.Contains(a.gameObject)) targets.Add(a.gameObject);
+            {
+                if (!IsSelectable(a)) continue;
+                // Composite rigs keep the agent on a child (the bike); list the rig root
+                // so possession moves the vehicle and its rider together.
+                GameObject root = ResolveRigRoot(a.gameObject);
+                if (!targets.Contains(root)) targets.Add(root);
+            }
 
             foreach (var velocity in FindObjectsOfType<SEAN.Control.VelocityController>())
             {
@@ -423,6 +450,19 @@ namespace SessionReview
             {
                 if (obstacle != null && IsSelectableTarget(obstacle.gameObject) && !targets.Contains(obstacle.gameObject))
                     targets.Add(obstacle.gameObject);
+            }
+
+            // Placed characters (Cyclist / Scooter / Phone User ... from the Add Characters
+            // panel) carry a ManualWheelchairController but often no Base agent and no
+            // rigidbody, so none of the scans above find them — list them directly instead
+            // of requiring a scene-pick first. The participant's own avatar is excluded.
+            foreach (var mwc in FindObjectsOfType<IVI.ManualWheelchairController>())
+            {
+                if (mwc == null) continue;
+                GameObject go = mwc.gameObject;
+                if (go.GetComponent<Base>() != null) continue;   // already listed as an agent
+                if (IsSelectableTarget(go) && !targets.Contains(go))
+                    targets.Add(go);
             }
 
             foreach (var rb in FindObjectsOfType<Rigidbody>())
@@ -482,6 +522,8 @@ namespace SessionReview
             if (target.GetComponentInParent<SEAN.Scenario.Robot>() != null ||
                 target.GetComponent<SEAN.Control.VelocityController>() != null)
                 return "[Robot] " + target.name;
+            if (IsCharacterRig(target))
+                return "[Char] " + target.name;
             return "[Obj] " + target.name;
         }
 
@@ -828,7 +870,9 @@ namespace SessionReview
             selectedViewObject = target;
             Base agent = target.GetComponent<Base>();
 
-            bool agentFollow = UsesAgentFollowCamera(target);
+            bool visualDriveFrame = AgentControlTuning.ShouldUseVisualDriveFrame(
+                target, AgentControlTuning.FindAnimator(target));
+            bool agentFollow = UsesAgentFollowCamera(target) && !visualDriveFrame;
             bool seated = agent is IVI.SFPWDAgent;
             Vector3 thirdPersonOffset = seated ? new Vector3(0f, 1.9f, -1.5f) : new Vector3(0f, 2.2f, -2.2f);
             float lookAtHeight = seated ? 1.0f : 1.5f;
@@ -848,7 +892,7 @@ namespace SessionReview
             selectedViewCam.fieldOfView = 60f;
             selectedViewCam.nearClipPlane = 0.1f;
             selectedViewCam.farClipPlane = 200f;
-            selectedViewCam.clearFlags = agentFollow ? CameraClearFlags.Skybox : CameraClearFlags.SolidColor;
+            selectedViewCam.clearFlags = (agentFollow || visualDriveFrame) ? CameraClearFlags.Skybox : CameraClearFlags.SolidColor;
             selectedViewCam.backgroundColor = new Color(0.08f, 0.09f, 0.10f, 1f);
             selectedViewCam.cullingMask = ~0;
 
@@ -924,10 +968,14 @@ namespace SessionReview
             }
         }
 
+        // Humanoid targets get the same over-the-shoulder rig the PWD player uses.
+        // Placed characters (ManualWheelchairController, no Base) belong here too —
+        // otherwise they fall through to the prop chase camera, which frames the mesh
+        // bounds along the mesh long axis and ends up beside the character.
         private static bool UsesAgentFollowCamera(GameObject target)
         {
             return target != null &&
-                   (target.GetComponent<Base>() != null ||
+                   (IsCharacterRig(target) ||
                     target.GetComponentInParent<SEAN.Scenario.Robot>() != null ||
                     target.GetComponent<SEAN.Control.VelocityController>() != null);
         }
@@ -954,15 +1002,22 @@ namespace SessionReview
             Release();
             if (pickModeActive) ExitPickMode();
 
+            // Composite rigs (and anything spawned before the agent moved to the rig root)
+            // keep the agent on a child; it must be silenced too or it keeps driving that
+            // child while we move the root.
             Base agent = target.GetComponent<Base>();
+            if (agent == null) agent = target.GetComponentInChildren<Base>(true);
             bool genericObject = IsGenericObjectTarget(target);
             if (genericObject)
             {
                 PrepareGenericObjectForControl(target);
                 RememberRecentObject(target);
+            }
+            if (NeedsControlledObjectTracking(target))
+            {
                 // Register with the session tracker so the driven motion is recorded
-                // into the trial trajectory log and the object moves in review replay
-                // like any agent (agents/robot are already tracked by SessionTracker).
+                // into the trial trajectory log and the target moves in review replay
+                // like any agent (robot/Base pedestrians are already tracked).
                 var tracker = FindObjectOfType<SessionTracker>();
                 if (tracker != null) tracker.RegisterControlledObject(target);
             }
@@ -1014,10 +1069,44 @@ namespace SessionReview
             Debug.Log($"[AgentPossess] Took control of '{target.name}'. Arrow keys drive (Up/Down + Left/Right), Shift fast, Esc release.");
         }
 
+        // A character rig — agent, player-style controller, or simply anything built on a
+        // humanoid avatar. The humanoid test is what catches statically placed Add-Characters
+        // props, whose driving components are stripped at spawn: without it they look like
+        // plain props to the panel.
+        private static bool IsCharacterRig(GameObject target)
+        {
+            if (target == null) return false;
+            if (target.GetComponent<Base>() != null) return true;
+            if (target.GetComponent<IVI.ManualWheelchairController>() != null) return true;
+            foreach (Animator animator in target.GetComponentsInChildren<Animator>(true))
+            {
+                if (animator != null && animator.avatar != null && animator.avatar.isHuman)
+                    return true;
+            }
+            return false;
+        }
+
+        // "Generic" means a prop (car, crate): driven kinematically in a mesh-axis drive
+        // frame and auto-leveled. A character must NOT take that path: a human's mesh long
+        // axis is its shoulder width, so the drive frame would walk it sideways and put the
+        // follow camera on its flank, and LevelBody would rotate the body outright.
         private static bool IsGenericObjectTarget(GameObject target)
         {
             if (target == null) return false;
-            return target.GetComponent<Base>() == null &&
+            return !IsCharacterRig(target) &&
+                   target.GetComponentInParent<SEAN.Scenario.Robot>() == null &&
+                   target.GetComponent<SEAN.Control.VelocityController>() == null;
+        }
+
+        // Targets the session tracker doesn't already record (it covers the robot, the
+        // PWD player and Base pedestrians). Placed characters and props both need
+        // explicit registration so possession shows up in review playback.
+        private static bool NeedsControlledObjectTracking(GameObject target)
+        {
+            // A rig whose agent sits on a child is tracked by SessionTracker under that
+            // child's transform, so the root we actually move still needs registering.
+            return target != null &&
+                   target.GetComponent<Base>() == null &&
                    target.GetComponentInParent<SEAN.Scenario.Robot>() == null &&
                    target.GetComponent<SEAN.Control.VelocityController>() == null;
         }
@@ -1076,9 +1165,16 @@ namespace SessionReview
             if (target.GetComponentInParent<SEAN.Scenario.Robot>() != null ||
                 FindVelocityControllerForTarget(target) != null)
                 return 1.0f;
+            // Riding rigs (bike/scooter) cruise faster than a walking pace.
+            if (AgentControlTuning.ShouldUseVisualDriveFrame(target, AgentControlTuning.FindAnimator(target)))
+                return 3.0f;
             if (target.GetComponent<Base>() is IVI.SFPWDAgent)
                 return 1.1f;
             if (target.GetComponent<Base>() != null)
+                return 1.4f;
+            // Placed walking character (Phone User, Dog Walker, ...): walking pace, not
+            // the prop default.
+            if (IsCharacterRig(target))
                 return 1.4f;
             return 2.0f;
         }
@@ -1092,7 +1188,6 @@ namespace SessionReview
                 if (possessedAnimator != null)
                 {
                     possessedAnimator.applyRootMotion = prevRootMotion;
-                    possessedAnimator.speed = 1f;
                 }
 
                 Rigidbody rb = possessedObject.GetComponent<Rigidbody>();
@@ -1321,14 +1416,17 @@ namespace SessionReview
 
             titleText.text = $"Agent Control   [{KeyLabel(toggleKey)}] hide | [Ctrl+{KeyLabel(toggleKey)}] display";
 
+            // The Logitech flight stick doubles the arrows when it is free (participant
+            // on the gamepad); only advertise it when that is actually the case.
+            string stick = SEAN.Input.JoystickProfiles.ResearcherStickAvailable ? " or stick" : "";
             if (PossessionActive)
                 hintText.text = possessedController != null && possessedController.UsesDriveFrame
-                    ? "DRIVING: [Up/Down] drive | [Left/Right] steer | [Shift] fast | [F] flip / [R] rotate 90\nview on this display | [RMB] orbit | [wheel] zoom | [Esc] release"
-                    : "DRIVING: [Up/Down] walk | [Left/Right] turn | [Shift] run\nview on this display | [Esc] or Release to let go";
+                    ? $"DRIVING: [Up/Down]+[Left/Right]{stick} | [Shift] fast | [F] flip / [R] rotate 90\nview on this display | [RMB] orbit | [wheel] zoom | [Esc] release"
+                    : $"DRIVING: [Up/Down] walk | [Left/Right] turn{stick} | [Shift] run\nview on this display | [Esc] or Release to let go";
             else if (pickModeActive)
                 hintText.text = "PICKING: [WASD] pan | [Q/E] up/down | [RMB] look | [wheel] zoom\nclick an agent to select - click it again to take control | [Esc] exit";
             else
-                hintText.text = "Click a row to select; the view opens on this display.\nClick again or Take Control to drive it (arrow keys).";
+                hintText.text = $"Click a row to select; the view opens on this display.\nClick again or Take Control to drive it (arrow keys{stick}).";
 
             if (PossessionActive && possessedObject != null)
             {

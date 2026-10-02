@@ -375,6 +375,12 @@ namespace SessionReview
             return result;
         }
 
+        // Longest sample spacing that still counts as continuous recording. Samples are
+        // nominally 1/sampleRate apart; anything wider is an untracked hole (SessionTracker
+        // untracks an agent the moment it arrives and re-tracks it at the next trial's
+        // start, teleported to its new spawn).
+        private const float MaxInterpolationGap = 1f;
+
         private ObjectState Interpolate(ObjectStateTimeline timeline, float time)
         {
             var states = timeline.states;
@@ -392,6 +398,14 @@ namespace SessionReview
 
             var a = states[lo];
             var b = states[hi];
+
+            // A hole is not motion: lerping across it makes a replayed agent glide from
+            // its arrival point to the next trial's spawn for the rest of the review
+            // window (clearest in sidewalkOutofStore, where the pedestrian finishes tens
+            // of seconds before the robot). Hold the last real sample instead.
+            if (b.timestamp - a.timestamp > MaxInterpolationGap)
+                return a;
+
             float t = (time - a.timestamp) / Mathf.Max(0.001f, b.timestamp - a.timestamp);
 
             return new ObjectState

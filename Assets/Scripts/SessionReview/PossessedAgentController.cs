@@ -67,28 +67,19 @@ namespace SessionReview
         private bool hasOriginalBodyMode;
         private bool keepKinematicOnDestroy;
         private bool useDriveFrame;
+        private bool rotateDriveFrameAroundBounds;
+        private float originalAnimatorSpeed;
+        private bool hasOriginalAnimatorSpeed;
         // The drive direction expressed in the ROOT'S LOCAL SPACE. World-rotation
         // independent: however the object gets turned (or however crooked it already
         // was when possessed), the visual heading and the drive heading stay locked
         // together, so diagonal "crab" driving is impossible by construction.
         private Vector3 driveLocalAxis = Vector3.forward;
         private float lastDerivedYaw;
-        // F/R corrections are per-object calibration, keyed by OBJECT NAME. Never key
-        // this by GetInstanceID(): statics survive scene reloads (and Play sessions with
-        // domain reload off) while instance ids get reallocated, so a stale id-keyed
-        // entry lands on a random object after every restart — the car then starts
-        // randomly straight or crooked depending on id reuse. Name keys are stable
-        // across restarts and shared between identical cars, which is what calibration
-        // should mean.
-        private static readonly Dictionary<string, Vector3> DriveAxisCache = new Dictionary<string, Vector3>();
-
-        private static string DriveAxisCacheKey(GameObject go)
-        {
-            string n = go.name;
-            int clone = n.IndexOf("(Clone)", System.StringComparison.Ordinal);
-            if (clone >= 0) n = n.Substring(0, clone);
-            return n.Trim();
-        }
+        // Drive-axis estimation and the F/R calibration cache live in AgentControlTuning
+        // so possession, ManualWheelchairController (player-ridden bikes), the replay
+        // animator and the follow cameras all share ONE calibration — a correction made
+        // while possessing must not vanish when the same rig is ridden or replayed.
         private float groundOffset;
         private bool hasGroundOffset;
         private float nextDebugLogTime;
@@ -127,105 +118,19 @@ namespace SessionReview
 
         /// <summary>
         /// Yaw the object would be driven along right now (used by the follow camera for
-        /// selected-but-not-possessed objects). Derived from the local drive axis so it
-        /// is correct at any world orientation.
+        /// selected-but-not-possessed objects). Always axis-based — unlike
+        /// AgentControlTuning.EstimateDriveYaw this must work for GLB cars too, whose
+        /// transform yaw is meaningless.
         /// </summary>
         public static float EstimateDriveYaw(Transform t)
         {
             if (t == null) return 0f;
-            Vector3 world = t.TransformDirection(ResolveDriveLocalAxis(t));
+            Vector3 world = t.TransformDirection(AgentControlTuning.ResolveDriveLocalAxis(t));
             world.y = 0f;
             if (world.sqrMagnitude < 1e-8f) return 0f;
             return Mathf.Atan2(world.x, world.z) * Mathf.Rad2Deg;
         }
 
-        private static Vector3 ResolveDriveLocalAxis(Transform t)
-        {
-            Vector3 fresh = EstimateDriveLocalAxis(t);
-            string key = DriveAxisCacheKey(t.gameObject);
-            if (DriveAxisCache.TryGetValue(key, out Vector3 cached) && cached.sqrMagnitude > 0.5f)
-            {
-                // A legitimate calibration is the fresh estimate flipped (F) and/or
-                // rotated 90° in plane (R) — i.e. parallel or perpendicular to it.
-                // Anything diagonal is corrupted/stale data: use the fresh estimate.
-                float align = Mathf.Abs(Vector3.Dot(cached.normalized, fresh));
-                if (align > 0.85f || align < 0.15f)
-                    return cached;
-            }
-            DriveAxisCache[key] = fresh;
-            return fresh;
-        }
-
-        /// <summary>
-        /// The object's long horizontal axis, measured in the ROOT'S LOCAL SPACE from the
-        /// meshes' local bounds. Unlike a world-AABB estimate this is independent of how
-        /// the object currently sits in the world (a diagonally parked or already-crooked
-        /// car still yields its true length axis). The world-vertical local axis (roof
-        /// direction) is excluded; the sign is a 50/50 guess corrected with F.
-        /// </summary>
-        private static Vector3 EstimateDriveLocalAxis(Transform root)
-        {
-            Bounds local = default;
-            bool has = false;
-
-            foreach (MeshFilter mf in root.GetComponentsInChildren<MeshFilter>(true))
-            {
-                if (mf == null || mf.sharedMesh == null) continue;
-                EncapsulateLocalBounds(ref local, ref has,
-                    root.worldToLocalMatrix * mf.transform.localToWorldMatrix, mf.sharedMesh.bounds);
-            }
-            foreach (SkinnedMeshRenderer smr in root.GetComponentsInChildren<SkinnedMeshRenderer>(true))
-            {
-                if (smr == null || smr.sharedMesh == null) continue;
-                EncapsulateLocalBounds(ref local, ref has,
-                    root.worldToLocalMatrix * smr.transform.localToWorldMatrix, smr.sharedMesh.bounds);
-            }
-
-            // Which local axis currently points along world up (roof-to-wheels)? That one
-            // is never the drive axis.
-            Vector3 upLocal = root.InverseTransformDirection(Vector3.up);
-            int upIndex = 0;
-            for (int i = 1; i < 3; i++)
-                if (Mathf.Abs(upLocal[i]) > Mathf.Abs(upLocal[upIndex])) upIndex = i;
-
-            if (!has)
-                return upIndex == 2 ? Vector3.right : Vector3.forward;
-
-            int bestIndex = upIndex == 0 ? 1 : 0;
-            float bestExtent = -1f;
-            for (int i = 0; i < 3; i++)
-            {
-                if (i == upIndex) continue;
-                if (local.extents[i] > bestExtent)
-                {
-                    bestExtent = local.extents[i];
-                    bestIndex = i;
-                }
-            }
-
-            Vector3 axis = Vector3.zero;
-            axis[bestIndex] = 1f;
-            return axis;
-        }
-
-        private static void EncapsulateLocalBounds(ref Bounds bounds, ref bool has, Matrix4x4 toRoot, Bounds meshBounds)
-        {
-            for (int i = 0; i < 8; i++)
-            {
-                Vector3 corner = meshBounds.center + Vector3.Scale(meshBounds.extents,
-                    new Vector3((i & 1) == 0 ? -1f : 1f, (i & 2) == 0 ? -1f : 1f, (i & 4) == 0 ? -1f : 1f));
-                Vector3 p = toRoot.MultiplyPoint3x4(corner);
-                if (!has)
-                {
-                    bounds = new Bounds(p, Vector3.zero);
-                    has = true;
-                }
-                else
-                {
-                    bounds.Encapsulate(p);
-                }
-            }
-        }
         public float MaxSpeed
         {
             get { return maxSpeed; }
@@ -238,6 +143,11 @@ namespace SessionReview
         public void Configure(Animator agentAnimator, int display, bool createFirstPersonCamera = true, bool forceKinematic = false)
         {
             animator = agentAnimator;
+            if (animator != null)
+            {
+                originalAnimatorSpeed = animator.speed;
+                hasOriginalAnimatorSpeed = true;
+            }
             rb = GetComponent<Rigidbody>();
             defaultMaxSpeed = maxSpeed;
             keepKinematicOnDestroy = forceKinematic;
@@ -267,21 +177,24 @@ namespace SessionReview
             // root) are driven in an independent world-yaw frame: rotation is applied
             // around world up so the object can never tilt, and translation follows the
             // frame's forward instead of the root's (possibly vertical) transform.forward.
-            useDriveFrame = forceKinematic;
+            useDriveFrame = forceKinematic || AgentControlTuning.ShouldUseVisualDriveFrame(gameObject, animator);
+            rotateDriveFrameAroundBounds = forceKinematic;
             if (useDriveFrame)
             {
                 boundsRenderers = GetComponentsInChildren<Renderer>(true);
-                driveLocalAxis = ResolveDriveLocalAxis(transform);
+                driveLocalAxis = AgentControlTuning.ResolveDriveLocalAxis(transform);
 
                 // Repair a cached axis that drifted out of the mesh's horizontal plane
                 // (e.g. R was pressed in an earlier possession while the body was tilted):
                 // project it back onto the plane perpendicular to the mesh's vertical.
                 Vector3 upMost = ComputeUpMostLocalAxis();
                 Vector3 planar = driveLocalAxis - Vector3.Dot(driveLocalAxis, upMost) * upMost;
-                driveLocalAxis = planar.sqrMagnitude > 0.25f ? planar.normalized : EstimateDriveLocalAxis(transform);
-                DriveAxisCache[DriveAxisCacheKey(gameObject)] = driveLocalAxis;
+                if (planar.sqrMagnitude > 0.25f)
+                    driveLocalAxis = planar.normalized;
+                AgentControlTuning.CacheDriveLocalAxis(gameObject, driveLocalAxis);
 
-                LevelBody(upMost);
+                if (forceKinematic)
+                    LevelBody(upMost);
 
                 Debug.Log($"[AgentPossess] '{name}' drive frame: localAxis={driveLocalAxis} yaw={DriveYaw:F0} " +
                           $"(scale={transform.lossyScale}). " +
@@ -332,9 +245,19 @@ namespace SessionReview
             bool back = DriveBackHeld;
             bool run = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
 
+            // The Logitech flight stick doubles the arrow keys for the operator. Under
+            // Auto it always belongs to the researcher (participant = gamepad or
+            // keyboard-only); it reads 0 only when the Logitech profile was explicitly
+            // selected for the participant. The participant's controllers never read
+            // this stick's axes, so it cannot move the robot/PWD either.
+            float stickThrottle = SEAN.Input.JoystickProfiles.ResearcherStickThrottle();
+            float stickSteer = SEAN.Input.JoystickProfiles.ResearcherStickSteer();
+
             float target = 0f;
             if (forward) target = maxSpeed * (run ? runMultiplier : 1f);
             else if (back) target = -maxSpeed * reverseFactor;
+            else if (stickThrottle > 0.001f) target = maxSpeed * stickThrottle * (run ? runMultiplier : 1f);
+            else if (stickThrottle < -0.001f) target = maxSpeed * reverseFactor * stickThrottle;
 
             float rate = Mathf.Abs(target) > Mathf.Abs(currentSpeed) ? acceleration : deceleration;
             currentSpeed = Mathf.MoveTowards(currentSpeed, target, rate * dt);
@@ -344,7 +267,7 @@ namespace SessionReview
                 if (Input.GetKeyDown(flipForwardKey))
                 {
                     driveLocalAxis = -driveLocalAxis;
-                    DriveAxisCache[DriveAxisCacheKey(gameObject)] = driveLocalAxis;
+                    AgentControlTuning.CacheDriveLocalAxis(gameObject, driveLocalAxis, true);
                     Debug.Log($"[AgentPossess] '{name}' drive forward flipped 180 (yaw {DriveYaw:F0}).");
                 }
                 if (Input.GetKeyDown(cycleForwardKey))
@@ -354,12 +277,12 @@ namespace SessionReview
                     Vector3 upLocal = transform.InverseTransformDirection(Vector3.up);
                     if (upLocal.sqrMagnitude > 1e-8f)
                         driveLocalAxis = Quaternion.AngleAxis(90f, upLocal.normalized) * driveLocalAxis;
-                    DriveAxisCache[DriveAxisCacheKey(gameObject)] = driveLocalAxis;
+                    AgentControlTuning.CacheDriveLocalAxis(gameObject, driveLocalAxis, true);
                     Debug.Log($"[AgentPossess] '{name}' drive forward rotated 90 (yaw {DriveYaw:F0}).");
                 }
             }
 
-            float steer = DriveSteer;
+            float steer = Mathf.Clamp(DriveSteer + stickSteer, -1f, 1f);
             float turnFactor = 1f;
             if (useDriveFrame)
             {
@@ -385,7 +308,15 @@ namespace SessionReview
                     // at a bumper, and rotating around such a pivot swings the whole
                     // car sideways instead of turning it in place. DriveYaw follows
                     // automatically because it is derived from the rotated transform.
-                    transform.RotateAround(DriveBoundsCenter(), Vector3.up, delta);
+                    // Always about WORLD up: identical to a local-Y rotation for the
+                    // upright character rigs, but the only correct choice for a root
+                    // carrying an axis-fix tilt (where local Y is a world-space roll).
+                    // Props pivot about their bounds center (GLB pivots sit at a bumper,
+                    // so a pivot rotation swings the body); characters stand on their
+                    // pivot and must turn in place.
+                    transform.RotateAround(
+                        rotateDriveFrameAroundBounds ? DriveBoundsCenter() : transform.position,
+                        Vector3.up, delta);
                 }
                 else
                 {
@@ -406,7 +337,7 @@ namespace SessionReview
             }
             transform.position += fwd * currentSpeed * dt;
 
-            if ((forward || back || steer != 0f) && Time.unscaledTime >= nextDebugLogTime)
+            if ((forward || back || steer != 0f || stickThrottle != 0f) && Time.unscaledTime >= nextDebugLogTime)
             {
                 nextDebugLogTime = Time.unscaledTime + 2f;
                 Debug.Log($"[AgentPossess] '{name}' Up={forward} Down={back} steer={steer} " +
@@ -535,13 +466,18 @@ namespace SessionReview
         private void UpdateAnimator()
         {
             if (animator == null) return;
-            Vector3 vel = transform.forward * currentSpeed;
-            float speed = Mathf.Abs(currentSpeed);
-            Vector3 local = Quaternion.Euler(0f, -transform.eulerAngles.y, 0f) * vel;
-            animator.SetBool("Idling", speed < 0.1f);
-            animator.SetFloat("Forward", local.z / 0.6f);
-            animator.SetFloat("Strafe", local.x / 0.6f);
-            animator.speed = speed > 0.1f ? speed : 1f;
+            Vector3 fwd = useDriveFrame
+                ? Quaternion.Euler(0f, DriveYaw, 0f) * Vector3.forward
+                : transform.forward;
+            fwd.y = 0f;
+            if (fwd.sqrMagnitude > 0.001f) fwd.Normalize();
+            AgentControlTuning.UpdateLocomotionAnimator(
+                animator,
+                transform,
+                fwd * currentSpeed,
+                currentSpeed,
+                true,
+                useDriveFrame ? DriveYaw : transform.eulerAngles.y);
         }
 
         void LateUpdate()
@@ -559,7 +495,9 @@ namespace SessionReview
                 lookYaw += Input.GetAxis("Mouse X") * lookSensitivity;
                 lookPitch = Mathf.Clamp(lookPitch - Input.GetAxis("Mouse Y") * lookSensitivity, -75f, 75f);
             }
-            else if (AnyDriveKeyHeld)
+            else if (AnyDriveKeyHeld ||
+                     SEAN.Input.JoystickProfiles.ResearcherStickThrottle() != 0f ||
+                     SEAN.Input.JoystickProfiles.ResearcherStickSteer() != 0f)
             {
                 float step = lookRecenterSpeed * Time.deltaTime;
                 lookYaw = Mathf.MoveTowards(lookYaw, 0f, step);
@@ -572,7 +510,7 @@ namespace SessionReview
         private void SyncCamera()
         {
             if (camGo == null) return;
-            Quaternion rot = Quaternion.Euler(lookPitch, transform.eulerAngles.y + lookYaw, 0f);
+            Quaternion rot = Quaternion.Euler(lookPitch, (useDriveFrame ? DriveYaw : transform.eulerAngles.y) + lookYaw, 0f);
             camGo.transform.position = transform.position + Vector3.up * eyeHeight
                                        + rot * Vector3.forward * cameraForwardOffset;
             camGo.transform.rotation = rot;
@@ -587,6 +525,8 @@ namespace SessionReview
                 rb.isKinematic = originalIsKinematic;
                 rb.useGravity = originalUseGravity;
             }
+            if (animator != null && hasOriginalAnimatorSpeed)
+                animator.speed = originalAnimatorSpeed;
             if (camGo != null)
                 Destroy(camGo);
         }

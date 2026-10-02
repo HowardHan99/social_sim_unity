@@ -261,6 +261,11 @@ namespace SEAN.Control
             ApplyUprightConstraints();
             ApplyZeroFrictionMaterial();
             ApplyJoystickResponseDefaults();
+            // Speed cap and turn rate for the study robot, from the session's remembered
+            // values so a speed set during practice is the speed here. Written as the base
+            // command cap with speedScale left at 1: scaling the speed in would scale the
+            // angular command with it and quietly slow the turn rate down too.
+            SessionReview.AgentSpeedSettings.ApplyRobot(this);
             SetManualControlActive(startInManualMode, false);
             RegisterRosMonitorSubscriptions(true);
         }

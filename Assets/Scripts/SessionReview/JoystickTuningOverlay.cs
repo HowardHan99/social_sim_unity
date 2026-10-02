@@ -31,28 +31,38 @@ namespace SessionReview
     /// without a config file inherits the current live values ("defaults to the previous
     /// session") and gets its own file on the first change; switching the session id
     /// (onboarding page) hot-loads that session's saved tuning.
+    ///
+    /// The exception is max speed. It is not stored here: speeds are per agent role and have
+    /// to survive the load into the study scene, so the "Fastest it can drive" row reads and
+    /// writes <see cref="AgentSpeedSettings"/> for whichever agent is being driven. Which
+    /// also means dragging that row alone does not flip the enabled flag.
     /// </summary>
     public static class JoystickTuning
     {
         public const float DefaultDriveSensitivity = 0.5f;
         public const float DefaultTurnSensitivity = 0.5f;
-        public const float DefaultMaxSpeed = 0.8f;
-        public const float DefaultTurnRate = 240f; // ManualWheelchairController.rotationSpeed default
+        public const float DefaultTurnRate = AgentSpeedSettings.DefaultPedestrianTurnRate;
         public const float DefaultDeadzone = 0.03f;
         public const float DefaultLookSpeed = 45f;
 
         private const string ConfigFileName = "joystick_config.json";
+        // Bumped when a stored field changes meaning. v1: turnRate became the real deg/s
+        // rate (both controllers' baseline is 120 deg/s) instead of a 240-based ratio.
+        private const int CurrentVersion = 1;
+        private const float LegacyDefaultTurnRate = 240f;
 
         [Serializable]
         private class TuningData
         {
+            // Left at 0 so a file written before versioning existed reads as pre-v1; Save()
+            // stamps the current version.
+            public int version;
             public bool enabled;
             // 0 = must push the stick all the way for full output, 1 = a tenth of the travel
             // is already full output. Drive and turn are separate: they are different
             // motions and rarely feel right at the same setting.
             public float driveSensitivity = DefaultDriveSensitivity;
             public float turnSensitivity = DefaultTurnSensitivity;
-            public float maxSpeed = DefaultMaxSpeed;
             // Turn rate cap (deg/s). The sensitivity knobs above only reshape the stick
             // curve, so at full deflection they change nothing -- this is the knob that
             // actually makes turning faster or slower.
@@ -99,6 +109,7 @@ namespace SessionReview
                     {
                         data = loaded;
                         loadedFromFile = true;
+                        MigrateLoadedData();
                         Debug.Log($"[JoystickTuning] Loaded session config: {path}");
                     }
                 }
@@ -117,12 +128,26 @@ namespace SessionReview
             JoystickProfiles.SelectedProfile = (JoystickProfileType)data.profile;
         }
 
+        // A pre-v1 file stored the turn rate against a 240 baseline that no controller
+        // actually had (both are 120 deg/s), so its numbers read ~2x the rate they produced.
+        // Rescaling by the baseline ratio keeps an old session driving exactly as it did
+        // while the panel now reads true deg/s.
+        private static void MigrateLoadedData()
+        {
+            if (data.version >= CurrentVersion)
+                return;
+
+            data.turnRate *= DefaultTurnRate / LegacyDefaultTurnRate;
+            data.version = CurrentVersion;
+        }
+
         private static void Save()
         {
             try
             {
                 string path = ConfigPath(loadedForSession ?? ParticipantSession.Id);
                 Directory.CreateDirectory(Path.GetDirectoryName(path));
+                data.version = CurrentVersion;
                 File.WriteAllText(path, JsonUtility.ToJson(data, true));
             }
             catch (Exception e)
@@ -152,12 +177,10 @@ namespace SessionReview
             set { EnsureLoaded(); data.turnSensitivity = value; data.enabled = true; Save(); }
         }
 
-        /// <summary>Max manual speed (m/s) for the player character and the robot.</summary>
-        public static float MaxSpeed
-        {
-            get { EnsureLoaded(); return data.maxSpeed; }
-            set { EnsureLoaded(); data.maxSpeed = value; data.enabled = true; Save(); }
-        }
+        // Max speed deliberately does NOT live here. It is per role (pedestrian 1.0 m/s,
+        // robot 0.8 m/s) and has to survive the load into the study scene, neither of which
+        // one shared number in this file could do -- see AgentSpeedSettings, which the
+        // "Fastest it can drive" row reads and writes for whichever agent is being driven.
 
         /// <summary>Max turn rate (deg/s) at full stick, for the wheelchair. Other
         /// controllers scale from their own baseline by the same ratio.</summary>
@@ -241,7 +264,6 @@ namespace SessionReview
             // so both must be written or the slider is a no-op below the startup value.
             controller.joystickDeadzone = Deadzone;
             controller.joystickStartupDeadzone = Deadzone;
-            controller.moveSpeed = MaxSpeed;
             controller.rotationSpeed =
                 TurnBaseline(controller.GetInstanceID(), controller.rotationSpeed)
                 * (TurnRate / DefaultTurnRate);
@@ -259,8 +281,6 @@ namespace SessionReview
             controller.manualInertiaDrive = false; // stick position commands speed (see above)
             controller.joystickLinearDeadzone = Deadzone;
             controller.joystickAngularDeadzone = Deadzone;
-            controller.manualLinearSpeed = MaxSpeed;
-            controller.manualMaxPlanarSpeed = MaxSpeed;
             controller.manualAngularSpeed =
                 TurnBaseline(controller.GetInstanceID(), controller.manualAngularSpeed)
                 * (TurnRate / DefaultTurnRate);
@@ -277,12 +297,14 @@ namespace SessionReview
 
         /// <summary>Resets THIS session's tuning to defaults and hands the joystick fields
         /// back to the controllers' own Inspector/Start defaults (until a slider is touched
-        /// again). The input profile returns to Auto (follow the connected device).</summary>
+        /// again). Agent speeds go back to the study defaults too, since the panel's top row
+        /// edits those. The input profile returns to Auto (follow the connected device).</summary>
         public static void ResetToDefaults()
         {
             EnsureLoaded();
             data = new TuningData(); // enabled = false, all defaults, profile = Auto
             JoystickProfiles.SelectedProfile = JoystickProfileType.Auto;
+            AgentSpeedSettings.ResetToDefaults();
             Save();
         }
     }
@@ -415,12 +437,34 @@ namespace SessionReview
                 JoystickTuning.ApplyTo(pwd);
         }
 
+        // Pushes a just-changed role speed onto whatever is driving right now, so the slider
+        // is felt on this frame rather than at the next respawn. The Agent Speed panel picks
+        // the same change up from AgentSpeedSettings within a frame.
+        private void ApplySpeedToLive(AgentSpeedRole role)
+        {
+            var practiceRobot = practiceFlow != null ? practiceFlow.PracticeRobotController : null;
+
+            if (role == AgentSpeedRole.Robot)
+            {
+                AgentSpeedSettings.ApplyRobotSpeed(robotController);
+                AgentSpeedSettings.ApplyPracticeRobotSpeed(practiceRobot);
+                return;
+            }
+
+            foreach (var pwd in playerControllers)
+            {
+                if (pwd == null || pwd == practiceRobot) continue;
+                AgentSpeedSettings.ApplyPedestrianSpeed(pwd, pwd.GetComponent<SFPWDAgent>());
+            }
+        }
+
         // After Reset Defaults the live controllers must get the default feel back
         // immediately (they would otherwise keep the last tuned values until respawn).
         private void ApplyDefaultsToAll()
         {
             float driveThrow = JoystickTuning.FullThrowFor(JoystickTuning.DefaultDriveSensitivity);
             float turnThrow = JoystickTuning.FullThrowFor(JoystickTuning.DefaultTurnSensitivity);
+            var practiceRobot = practiceFlow != null ? practiceFlow.PracticeRobotController : null;
 
             if (robotController != null)
             {
@@ -430,8 +474,9 @@ namespace SessionReview
                 robotController.joystickAngularSensitivity = 1f;
                 robotController.joystickLinearDeadzone = JoystickTuning.DefaultDeadzone;
                 robotController.joystickAngularDeadzone = JoystickTuning.DefaultDeadzone;
-                robotController.manualLinearSpeed = JoystickTuning.DefaultMaxSpeed;
-                robotController.manualMaxPlanarSpeed = JoystickTuning.DefaultMaxSpeed;
+                // Speeds were reset with the tuning, so re-read them rather than restoring a
+                // baseline this panel captured.
+                AgentSpeedSettings.ApplyRobotSpeed(robotController);
                 robotController.manualAngularSpeed = JoystickTuning.TurnBaselineFor(
                     robotController.GetInstanceID(), robotController.manualAngularSpeed);
             }
@@ -445,7 +490,10 @@ namespace SessionReview
                 pwd.joystickAngularSensitivity = 1f;
                 pwd.joystickDeadzone = JoystickTuning.DefaultDeadzone;
                 pwd.joystickStartupDeadzone = JoystickTuning.DefaultDeadzone;
-                pwd.moveSpeed = JoystickTuning.DefaultMaxSpeed;
+                if (pwd == practiceRobot)
+                    AgentSpeedSettings.ApplyPracticeRobotSpeed(pwd);
+                else
+                    AgentSpeedSettings.ApplyPedestrianSpeed(pwd, pwd.GetComponent<SFPWDAgent>());
                 pwd.rotationSpeed = JoystickTuning.TurnBaselineFor(
                     pwd.GetInstanceID(), pwd.rotationSpeed);
             }
@@ -532,9 +580,16 @@ namespace SessionReview
             // Ordered so the two rows you feel immediately come first: these set the CAPS.
             // The two "stick travel" rows below only reshape the curve on the way to those
             // caps, which is why they seem to do nothing if you always shove the stick over.
+            // Speed belongs to the agent being driven right now, not to the panel: the robot
+            // and the pedestrian run at different speeds, and the value has to survive into
+            // the study scene (AgentSpeedSettings owns both of those).
+            AgentSpeedRole role = practiceFlow.IsDrivingRobot
+                ? AgentSpeedRole.Robot
+                : AgentSpeedRole.Pedestrian;
+            float roleSpeed = AgentSpeedSettings.SpeedFor(role);
             float maxSpd = DrawSliderRow(new Rect(rx, rowY, rw, rowH), "Fastest it can drive",
-                JoystickTuning.MaxSpeed, MinSpeed, MaxSpeed, labelW, sliderW, valueW, gap,
-                $"{JoystickTuning.MaxSpeed:F2} m/s");
+                roleSpeed, MinSpeed, MaxSpeed, labelW, sliderW, valueW, gap,
+                $"{roleSpeed:F2} m/s");
             rowY += rowH;
             float turnRate = DrawSliderRow(new Rect(rx, rowY, rw, rowH), "Fastest it can turn",
                 JoystickTuning.TurnRate, MinTurnRate, MaxTurnRate, labelW, sliderW, valueW, gap,
@@ -560,7 +615,11 @@ namespace SessionReview
             bool changed =
                 ApplyIfChanged(driveSens, JoystickTuning.DriveSensitivity, v => JoystickTuning.DriveSensitivity = v) |
                 ApplyIfChanged(turnSens, JoystickTuning.TurnSensitivity, v => JoystickTuning.TurnSensitivity = v) |
-                ApplyIfChanged(maxSpd, JoystickTuning.MaxSpeed, v => JoystickTuning.MaxSpeed = v) |
+                ApplyIfChanged(maxSpd, roleSpeed, v =>
+                {
+                    AgentSpeedSettings.SetSpeed(role, v);
+                    ApplySpeedToLive(role);
+                }) |
                 ApplyIfChanged(turnRate, JoystickTuning.TurnRate, v => JoystickTuning.TurnRate = v) |
                 ApplyIfChanged(dz, JoystickTuning.Deadzone, v => JoystickTuning.Deadzone = v) |
                 ApplyIfChanged(look, JoystickTuning.LookSpeed, v => JoystickTuning.LookSpeed = v);

@@ -82,12 +82,13 @@ namespace SessionReview
                 entry.smoothedVelocity = Vector3.Lerp(entry.smoothedVelocity, target, smoothing);
 
                 float speed = entry.smoothedVelocity.magnitude;
-                Vector3 local = Quaternion.Euler(0f, -entry.transform.eulerAngles.y, 0f) * entry.smoothedVelocity;
-
-                // Missing parameters (e.g. the wheelchair controller) are silent no-ops.
-                entry.animator.SetBool("Idling", speed < IdleSpeedThreshold);
-                entry.animator.SetFloat("Forward", local.z / AnimationSmoothing);
-                entry.animator.SetFloat("Strafe", local.x / AnimationSmoothing);
+                AgentControlTuning.UpdateLocomotionAnimator(
+                    entry.animator,
+                    entry.transform,
+                    entry.smoothedVelocity,
+                    speed,
+                    false,
+                    AgentControlTuning.EstimateDriveYaw(entry.transform));
 
                 // Walk cycle at leg speed while moving, idle animation at the playback
                 // rate while stationary; a paused review freezes the pose entirely.
@@ -110,8 +111,13 @@ namespace SessionReview
                 {
                     entry.animator.applyRootMotion = entry.savedRootMotion;
                     entry.animator.speed = entry.savedSpeed;
-                    entry.animator.SetFloat("Forward", 0f);
-                    entry.animator.SetFloat("Strafe", 0f);
+                    AgentControlTuning.UpdateLocomotionAnimator(
+                        entry.animator,
+                        entry.transform,
+                        Vector3.zero,
+                        0f,
+                        false,
+                        entry.transform != null ? AgentControlTuning.EstimateDriveYaw(entry.transform) : 0f);
                 }
                 if (entry.liveAgent != null)
                     entry.liveAgent.enabled = entry.liveAgentWasEnabled;

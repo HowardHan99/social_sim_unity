@@ -70,6 +70,12 @@ namespace IVI
             }
 
             float targetYaw = targetEuler.y;
+            var manual = followTarget.GetComponent<ManualWheelchairController>();
+            if (manual != null && manual.UsesVisualDriveFrame)
+                targetYaw = manual.DriveYaw;
+            var possessed = followTarget.GetComponent<SessionReview.PossessedAgentController>();
+            if (possessed != null && possessed.UsesDriveFrame)
+                targetYaw = possessed.DriveYaw;
             if (!IsFinite(smoothedYaw) || !IsFinite(yawVelocity))
             {
                 smoothedYaw = targetYaw;
